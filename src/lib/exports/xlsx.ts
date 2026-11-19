@@ -16,6 +16,7 @@ import {
   calculateBookValue,
   formatDateWIB,
 } from "@/lib/constants";
+import { ROLE_LABELS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import type { LocationCode } from "@/types/database";
 import {
@@ -166,25 +167,42 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   const metaHeader = sheet.addRow(["Metrik Operasional", "Nilai", "Keterangan", "Catatan"]);
   styleTableHeaderRow(metaHeader);
 
+  const actorRoleLabel =
+    dataset.actorRole === "SYSTEM"
+      ? "Sistem"
+      : ROLE_LABELS[dataset.actorRole].title;
+
   const kpis: Array<[string, string | number, string, string, boolean?]> = [
     ["Periode Laporan", `${dataset.periodLabel} (${dataset.periodCode})`, "Zona Waktu WIB", dataset.generatedAtWib],
-    ["Dicetak Oleh", dataset.actorName, `Peran: ${dataset.actorRole}`, "Ekspor terotorisasi RBAC"],
+    ["Dicetak Oleh", dataset.actorName, `Peran: ${actorRoleLabel}`, "Ekspor terotorisasi RBAC"],
     ["Total Item Inventaris Aktif", dataset.items.length, "Semua kategori aktif", `${dataset.items.filter((i) => i.asset_type === "THERAPY_TOY").length} mainan terapi, ${dataset.items.filter((i) => i.asset_type === "FIXED_ASSET").length} aset tetap, ${dataset.items.filter((i) => i.asset_type === "CONSUMABLE").length} habis pakai`],
-    ["Total Nilai Perolehan Aset", totalPurchase, "IDR", "Akumulasi harga beli barang aktif", true],
-    ["Estimasi Nilai Buku Aset", totalBookValue, "IDR (Garis Lurus)", "Berdasarkan umur ekonomis & nilai residu", true],
+    ...(dataset.canViewValuation
+      ? ([
+          ["Total Nilai Perolehan Aset", totalPurchase, "IDR", "Akumulasi harga beli barang aktif", true],
+          ["Estimasi Nilai Buku Aset", totalBookValue, "IDR (Garis Lurus)", "Berdasarkan umur ekonomis & nilai residu", true],
+        ] as Array<[string, string | number, string, string, boolean?]>)
+      : []),
     ["Anomali: Part Kurang", anomalies.partKurang.length, "Item PART_KURANG", "Mainan dengan kepingan belum lengkap"],
     ["Anomali: Stok Minimum (Consumable)", anomalies.lowStock.length, "Item Low-Stock", "Stok <= batas minimum pengadaan"],
     ["Anomali: Perlu Sanitasi", anomalies.needsSanitation.length, "Mainan Terapi", "Status belum steril atau melewati jadwal H+7"],
-    ["Langganan Digital Aktif", activeSubs.length, `Total ${dataset.subscriptions.length} akun`, "Kredensial terenkripsi AES-256 (dimasking)"],
-    [
-      "Estimasi Biaya Langganan / Bulan",
-      dataset.canViewBilling ? Math.round(monthlySubCost) : "Terbatas (Khusus Owner/Admin)",
-      dataset.canViewBilling ? "IDR / bulan" : "Masking RBAC",
-      "Tagihan bulanan + tahunan dibagi 12",
-      dataset.canViewBilling,
-    ],
+    ...(dataset.canExportFinancial
+      ? ([
+          ["Langganan Digital Aktif", activeSubs.length, `Total ${dataset.subscriptions.length} akun`, "Kredensial terenkripsi AES-256 (dimasking)"],
+          [
+            "Estimasi Biaya Langganan / Bulan",
+            dataset.canViewBilling ? Math.round(monthlySubCost) : "Terbatas",
+            dataset.canViewBilling ? "IDR / bulan" : "Masking RBAC",
+            "Tagihan bulanan + tahunan dibagi 12",
+            dataset.canViewBilling,
+          ],
+        ] as Array<[string, string | number, string, string, boolean?]>)
+      : []),
     ["Total Berkas Arsip Hybrid", dataset.archives.length, "Lemari L01–L04", `${dataset.archives.filter((a) => a.physical_status === "DIPINJAM").length} berkas sedang dipinjam`],
-    ["Total Log Pengiriman", dataset.deliveries.length, "Inbound & Outbound", `${dataset.deliveries.filter((d) => ["DRAFT", "DIKEMAS", "DALAM_PERJALANAN"].includes(d.status)).length} pengiriman masih berjalan`],
+    ...(dataset.canExportFinancial
+      ? ([
+          ["Total Log Pengiriman", dataset.deliveries.length, "Inbound & Outbound", `${dataset.deliveries.filter((d) => ["DRAFT", "DIKEMAS", "DALAM_PERJALANAN"].includes(d.status)).length} pengiriman masih berjalan`],
+        ] as Array<[string, string | number, string, string, boolean?]>)
+      : []),
     [
       "Progres Stock Opname Bulanan",
       `${dataset.reconciliation?.opname_progress_pct ?? 0}%`,
@@ -208,7 +226,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
     "Distribusi Lokasi / Ruangan",
     "Jumlah Item",
     "Item Anomali",
-    "Nilai Perolehan (IDR)",
+    dataset.canViewValuation ? "Nilai Perolehan (IDR)" : "Status Kondisi",
   ]);
   styleTableHeaderRow(roomHeader);
 
@@ -218,7 +236,9 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
     const current = byRoom.get(item.room_code) ?? { count: 0, anomaly: 0, value: 0 };
     current.count += 1;
     if (anomalyIds.has(item.id)) current.anomaly += 1;
-    current.value += Number(item.purchase_price) || 0;
+    if (dataset.canViewValuation) {
+      current.value += Number(item.purchase_price) || 0;
+    }
     byRoom.set(item.room_code, current);
   }
 
@@ -228,10 +248,16 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
       `${roomCode} — ${LOCATION_LABELS[roomCode] ?? roomCode}`,
       stats.count,
       stats.anomaly,
-      stats.value,
+      dataset.canViewValuation
+        ? stats.value
+        : stats.anomaly > 0
+          ? "Perlu Tindak Lanjut"
+          : "Aman",
     ]);
     applyDataRowStyle(row, roomIdx, stats.anomaly > 0 ? "warn" : undefined);
-    row.getCell(4).numFmt = '"Rp"#,##0';
+    if (dataset.canViewValuation) {
+      row.getCell(4).numFmt = '"Rp"#,##0';
+    }
     roomIdx += 1;
   }
 
@@ -240,7 +266,8 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
 
 function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   const sheet = workbook.addWorksheet("Inventaris & Part Mainan");
-  sheet.columns = [
+  const showVal = dataset.canViewValuation;
+  const cols = [
     { width: 20 },
     { width: 28 },
     { width: 18 },
@@ -257,16 +284,16 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
     { width: 12 },
     { width: 10 },
     { width: 14 },
-    { width: 18 },
-    { width: 18 },
+    ...(showVal ? [{ width: 18 }, { width: 18 }] : []),
     { width: 28 },
   ];
+  sheet.columns = cols;
 
   styleTitleBanner(
     sheet,
     "INVENTARIS, ASET KANTOR & KELENGKAPAN PART MAINAN",
     `Periode ${dataset.periodLabel} · Total ${dataset.items.length} item aktif`,
-    19,
+    cols.length,
   );
 
   sheet.addRow([]);
@@ -287,19 +314,20 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
     "Batas Min",
     "Satuan",
     "Tgl Perolehan",
-    "Harga Beli (IDR)",
-    "Nilai Buku (IDR)",
+    ...(showVal ? ["Harga Beli (IDR)", "Nilai Buku (IDR)"] : []),
     "Catatan",
   ]);
   styleTableHeaderRow(header);
 
   dataset.items.forEach((item, idx) => {
-    const bookValue = calculateBookValue(
-      item.purchase_price,
-      item.acquisition_date,
-      item.useful_life_months,
-      item.residual_value,
-    );
+    const bookValue = showVal
+      ? calculateBookValue(
+          item.purchase_price,
+          item.acquisition_date,
+          item.useful_life_months,
+          item.residual_value,
+        )
+      : 0;
     const isPartKurang =
       item.condition === "PART_KURANG" ||
       (item.total_parts > 1 && item.current_parts < item.total_parts);
@@ -327,8 +355,7 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
       item.min_stock_threshold,
       item.unit_label,
       item.acquisition_date ?? "-",
-      item.purchase_price,
-      bookValue,
+      ...(showVal ? [item.purchase_price, bookValue] : []),
       item.description ?? "",
     ]);
 
@@ -338,8 +365,10 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
         ? "warn"
         : undefined;
     applyDataRowStyle(row, idx, highlight);
-    row.getCell(17).numFmt = '"Rp"#,##0';
-    row.getCell(18).numFmt = '"Rp"#,##0';
+    if (showVal) {
+      row.getCell(17).numFmt = '"Rp"#,##0';
+      row.getCell(18).numFmt = '"Rp"#,##0';
+    }
   });
 
   sheet.views = [{ state: "frozen", ySplit: 4 }];
@@ -586,9 +615,13 @@ export async function generateXlsxBuffer(dataset: ExportDataset): Promise<Buffer
 
   addSummarySheet(workbook, dataset);
   addInventorySheet(workbook, dataset);
-  addSubscriptionsSheet(workbook, dataset);
+  if (dataset.canExportFinancial) {
+    addSubscriptionsSheet(workbook, dataset);
+  }
   addArchivesSheet(workbook, dataset);
-  addDeliveriesSheet(workbook, dataset);
+  if (dataset.canExportFinancial) {
+    addDeliveriesSheet(workbook, dataset);
+  }
 
   const rawBuffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(rawBuffer as ArrayBuffer);

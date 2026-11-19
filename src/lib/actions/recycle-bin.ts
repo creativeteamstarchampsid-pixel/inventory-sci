@@ -152,6 +152,9 @@ export async function restoreDeletedRecordAction(input: {
   };
 }
 
+/**
+ * Permanently deletes a soft-deleted record from Recycle Bin (OWNER only via `recycle.purge`).
+ */
 export async function purgeDeletedRecordAction(input: {
   table: RecycleTable;
   id: string;
@@ -266,6 +269,9 @@ export async function purgeDeletedRecordAction(input: {
   };
 }
 
+/**
+ * Purges all soft-deleted records older than 30 days (OWNER only via `recycle.purge`).
+ */
 export async function purgeExpiredRecycleBinAction(): Promise<
   RecycleActionResult<Json>
 > {

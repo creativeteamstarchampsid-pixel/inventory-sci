@@ -26,14 +26,14 @@ export default async function ForbiddenPage({
   const { from, reason } = await searchParams;
   const user = await getCurrentUser();
   const blockedAccount = reason === "inactive" || reason === "no-profile" || !user?.isActive;
-  const target = from ? getNavItem(`/${from.split("/")[1] ?? ""}`) : undefined;
+  const target = from ? getNavItem(`/${from.split("/")[1] ?? ""}`, user?.role) : undefined;
+  const adminRoleName = ROLE_LABELS.SUPER_ADMIN.title;
 
   let description: string;
   if (reason === "inactive" || (user && !user.isActive)) {
-    description = "Akun Anda telah dinonaktifkan. Hubungi Admin Ops untuk mengaktifkannya kembali.";
+    description = `Akun Anda telah dinonaktifkan. Hubungi ${adminRoleName} atau ${ROLE_LABELS.OWNER.title} untuk mengaktifkannya kembali.`;
   } else if (reason === "no-profile" || !user) {
-    description =
-      "Profil akun Anda belum tersedia atau belum memiliki peran. Hubungi Admin Ops untuk pengaturan akses.";
+    description = `Profil akun Anda belum tersedia atau belum memiliki peran. Hubungi ${adminRoleName} untuk pengaturan akses.`;
   } else {
     description = `Peran ${ROLE_LABELS[user.role].title} (${ROLE_LABELS[user.role].subtitle}) tidak memiliki akses ke ${
       target ? `menu “${target.title}”` : "halaman ini"
@@ -56,7 +56,7 @@ export default async function ForbiddenPage({
         <CardFooter className="justify-center gap-2">
           {!blockedAccount && (
             <Button asChild>
-              <Link href="/dashboard">Kembali ke Dashboard</Link>
+              <Link href="/dashboard">Kembali ke Beranda</Link>
             </Button>
           )}
           <form action={signOut}>

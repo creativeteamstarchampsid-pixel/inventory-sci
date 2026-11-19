@@ -68,6 +68,7 @@ import {
   LOCATION_LABELS,
   formatDateWIB,
 } from "@/lib/constants";
+import { ROLE_LABELS } from "@/lib/rbac";
 import type {
   HygieneStatus,
   ItemCondition,
@@ -110,6 +111,8 @@ export function ScanClient({
 }: ScanClientProps) {
   const { can } = useRole();
   const canEditMasterStock = can("inventory.update");
+  const canValidateOpname = can("inventory.validate_opname");
+  const canApproveWriteoff = can("writeoff.approve");
 
   const scannerInputRef = useRef<HTMLInputElement | null>(null);
   const qrInstanceRef = useRef<Html5Qrcode | null>(null);
@@ -515,7 +518,9 @@ export function ScanClient({
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Scan Pinjam, Kembali & Stock Opname
+            {canValidateOpname
+              ? "Scan Pinjam, Kembali & Stock Opname"
+              : "Scan Pinjam & Kembalikan Alat"}
           </h1>
           <p className="text-muted-foreground text-sm">
             Mendukung Kamera QR/Barcode, USB Laser Scanner Gun (Enter otomatis), dan input manual kode SC-/KIT-/URL.
@@ -675,7 +680,9 @@ export function ScanClient({
               <Package className="text-muted-foreground mb-3 size-12 opacity-40" />
               <h2 className="text-lg font-medium">Siap Memindai Barang atau Kit</h2>
               <p className="text-muted-foreground mt-1 max-w-md text-sm">
-                Scan stiker barcode / QR Code pada mainan terapi, aset kantor, atau kit untuk mencatat peminjaman, pengembalian, status sanitasi, atau stock opname.
+                {canValidateOpname
+                  ? "Scan stiker barcode / QR Code pada mainan terapi, aset kantor, atau kit untuk mencatat peminjaman, pengembalian, status sanitasi, atau stock opname."
+                  : "Scan stiker barcode / QR Code pada mainan terapi atau paket kit untuk mencatat peminjaman, pengembalian, dan status kebersihan."}
               </p>
             </Card>
           ) : matched.kind === "item" ? (
@@ -757,10 +764,17 @@ export function ScanClient({
                 )}
 
                 <Tabs
-                  value={activeTab}
-                  onValueChange={(v) => setActiveTab(v as "borrow" | "return" | "opname")}
+                  value={activeTab === "opname" && !canValidateOpname ? "borrow" : activeTab}
+                  onValueChange={(v) => {
+                    if (v === "opname" && !canValidateOpname) return;
+                    setActiveTab(v as "borrow" | "return" | "opname");
+                  }}
                 >
-                  <TabsList className="grid w-full grid-cols-3">
+                  <TabsList
+                    className={
+                      canValidateOpname ? "grid w-full grid-cols-3" : "grid w-full grid-cols-2"
+                    }
+                  >
                     <TabsTrigger value="borrow">
                       <ArrowLeftRight className="size-3.5" />
                       Pinjam
@@ -769,10 +783,12 @@ export function ScanClient({
                       <CheckCircle2 className="size-3.5" />
                       Kembalikan
                     </TabsTrigger>
-                    <TabsTrigger value="opname">
-                      <ClipboardCheck className="size-3.5" />
-                      Stock Opname
-                    </TabsTrigger>
+                    {canValidateOpname && (
+                      <TabsTrigger value="opname">
+                        <ClipboardCheck className="size-3.5" />
+                        Stock Opname
+                      </TabsTrigger>
+                    )}
                   </TabsList>
 
                   <TabsContent value="borrow" className="space-y-4 pt-3">
@@ -826,7 +842,10 @@ export function ScanClient({
                       {matched.activeBorrow && !matched.canReturnActiveBorrow && (
                         <Alert variant="destructive">
                           <AlertDescription>
-                            Transaksi ini dipinjam oleh {matched.activeBorrow.borrower_name}. Hanya peminjam atau Team Leader/Admin yang dapat menyelesaikan pengembalian ini.
+                            Transaksi ini dipinjam oleh {matched.activeBorrow.borrower_name}. Hanya
+                            peminjam atau {ROLE_LABELS.TEAM_LEADER.title}/
+                            {ROLE_LABELS.SUPER_ADMIN.title} yang dapat menyelesaikan pengembalian
+                            ini.
                           </AlertDescription>
                         </Alert>
                       )}
@@ -922,16 +941,28 @@ export function ScanClient({
                           <Select
                             value={returnCondition}
                             onValueChange={(v) => setReturnCondition(v as ItemCondition)}
-                            disabled={isPending}
+                            disabled={
+                              isPending ||
+                              (matched.item.condition === "DIHAPUSBUKU" && !canApproveWriteoff)
+                            }
                           >
                             <SelectTrigger className="w-full">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                               {(Object.keys(CONDITION_LABELS) as ItemCondition[])
-                                .filter((k) => k !== "DIHAPUSBUKU" || canEditMasterStock)
+                                .filter(
+                                  (k) =>
+                                    k !== "DIHAPUSBUKU" ||
+                                    canApproveWriteoff ||
+                                    matched.item.condition === "DIHAPUSBUKU",
+                                )
                                 .map((key) => (
-                                  <SelectItem key={key} value={key}>
+                                  <SelectItem
+                                    key={key}
+                                    value={key}
+                                    disabled={key === "DIHAPUSBUKU" && !canApproveWriteoff}
+                                  >
                                     {CONDITION_LABELS[key]}
                                   </SelectItem>
                                 ))}
@@ -968,108 +999,128 @@ export function ScanClient({
                     </form>
                   </TabsContent>
 
-                  <TabsContent value="opname" className="pt-3">
-                    <form onSubmit={handleQuickOpname} className="space-y-4">
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor="opname-parts">
-                            Part Fisik ({matched.item.unit_label}, maks {matched.item.total_parts})
-                          </Label>
-                          <Input
-                            id="opname-parts"
-                            type="number"
-                            min={0}
-                            max={matched.item.total_parts}
-                            value={opnameParts}
-                            onChange={(e) =>
-                              setOpnameParts(Math.trunc(Number(e.target.value) || 0))
-                            }
-                            disabled={isPending}
-                          />
-                        </div>
+                  {canValidateOpname && (
+                    <TabsContent value="opname" className="pt-3">
+                      <form onSubmit={handleQuickOpname} className="space-y-4">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label htmlFor="opname-parts">
+                              Part Fisik ({matched.item.unit_label}, maks {matched.item.total_parts})
+                            </Label>
+                            <Input
+                              id="opname-parts"
+                              type="number"
+                              min={0}
+                              max={matched.item.total_parts}
+                              value={opnameParts}
+                              onChange={(e) =>
+                                setOpnameParts(Math.trunc(Number(e.target.value) || 0))
+                              }
+                              disabled={isPending}
+                            />
+                          </div>
 
-                        <div className="space-y-2">
-                          <Label htmlFor="opname-stock">
-                            Stok Fisik ({matched.item.unit_label})
-                          </Label>
-                          <Input
-                            id="opname-stock"
-                            type="number"
-                            min={0}
-                            value={opnameStock}
-                            onChange={(e) =>
-                              setOpnameStock(Math.trunc(Number(e.target.value) || 0))
-                            }
-                            disabled={isPending}
-                          />
-                          {!canEditMasterStock && (
-                            <p className="text-muted-foreground text-[11px]">
-                              Selisih stok akan dicatat ke log audit untuk peninjauan Admin.
-                            </p>
-                          )}
-                        </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="opname-stock">
+                              Stok Fisik ({matched.item.unit_label})
+                            </Label>
+                            <Input
+                              id="opname-stock"
+                              type="number"
+                              min={0}
+                              value={opnameStock}
+                              onChange={(e) =>
+                                setOpnameStock(Math.trunc(Number(e.target.value) || 0))
+                              }
+                              disabled={isPending}
+                            />
+                            {!canEditMasterStock && (
+                              <p className="text-muted-foreground text-[11px]">
+                                Selisih stok akan dicatat ke log audit untuk peninjauan{" "}
+                                {ROLE_LABELS.SUPER_ADMIN.title}.
+                              </p>
+                            )}
+                          </div>
 
-                        <div className="space-y-2">
-                          <Label>Status Sanitasi</Label>
-                          <Select
-                            value={opnameHygiene}
-                            onValueChange={(v) => setOpnameHygiene(v as HygieneStatus)}
-                            disabled={isPending}
-                          >
-                            <SelectTrigger className="w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {(Object.keys(HYGIENE_LABELS) as HygieneStatus[]).map((key) => (
-                                <SelectItem key={key} value={key}>
-                                  {HYGIENE_LABELS[key]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Kondisi Fisik</Label>
-                          <Select
-                            value={opnameCondition}
-                            onValueChange={(v) => setOpnameCondition(v as ItemCondition)}
-                            disabled={isPending}
-                          >
-                            <SelectTrigger className="w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {(Object.keys(CONDITION_LABELS) as ItemCondition[])
-                                .filter((k) => k !== "DIHAPUSBUKU" || canEditMasterStock)
-                                .map((key) => (
+                          <div className="space-y-2">
+                            <Label>Status Sanitasi</Label>
+                            <Select
+                              value={opnameHygiene}
+                              onValueChange={(v) => setOpnameHygiene(v as HygieneStatus)}
+                              disabled={isPending}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(Object.keys(HYGIENE_LABELS) as HygieneStatus[]).map((key) => (
                                   <SelectItem key={key} value={key}>
-                                    {CONDITION_LABELS[key]}
+                                    {HYGIENE_LABELS[key]}
                                   </SelectItem>
                                 ))}
-                            </SelectContent>
-                          </Select>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Kondisi Fisik</Label>
+                            <Select
+                              value={opnameCondition}
+                              onValueChange={(v) => setOpnameCondition(v as ItemCondition)}
+                              disabled={
+                                isPending ||
+                                (matched.item.condition === "DIHAPUSBUKU" && !canApproveWriteoff)
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(Object.keys(CONDITION_LABELS) as ItemCondition[])
+                                  .filter(
+                                    (k) =>
+                                      k !== "DIHAPUSBUKU" ||
+                                      canApproveWriteoff ||
+                                      matched.item.condition === "DIHAPUSBUKU",
+                                  )
+                                  .map((key) => (
+                                    <SelectItem
+                                      key={key}
+                                      value={key}
+                                      disabled={key === "DIHAPUSBUKU" && !canApproveWriteoff}
+                                    >
+                                      {CONDITION_LABELS[key]}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="opname-notes">Catatan Stock Opname</Label>
-                        <Textarea
-                          id="opname-notes"
-                          rows={2}
-                          value={opnameNotes}
-                          onChange={(e) => setOpnameNotes(e.target.value)}
-                          placeholder="Catatan lokasi aktual atau hasil pemeriksaan fisik…"
+                        <div className="space-y-2">
+                          <Label htmlFor="opname-notes">Catatan Stock Opname</Label>
+                          <Textarea
+                            id="opname-notes"
+                            rows={2}
+                            value={opnameNotes}
+                            onChange={(e) => setOpnameNotes(e.target.value)}
+                            placeholder="Catatan lokasi aktual atau hasil pemeriksaan fisik…"
+                            disabled={isPending}
+                          />
+                        </div>
+
+                        <Button
+                          type="submit"
+                          variant="secondary"
+                          className="w-full"
                           disabled={isPending}
-                        />
-                      </div>
-
-                      <Button type="submit" variant="secondary" className="w-full" disabled={isPending}>
-                        {isPending && <Loader2 className="size-4 animate-spin" />}
-                        Simpan Hasil Stock Opname
-                      </Button>
-                    </form>
-                  </TabsContent>
+                        >
+                          {isPending && <Loader2 className="size-4 animate-spin" />}
+                          Simpan Hasil Stock Opname
+                        </Button>
+                      </form>
+                    </TabsContent>
+                  )}
                 </Tabs>
               </CardContent>
             </Card>

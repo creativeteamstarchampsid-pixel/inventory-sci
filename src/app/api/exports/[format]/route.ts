@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  FINANCIAL_ONLY_SCOPES,
   generateCsvString,
   loadExportDataset,
   type ExportScope,
@@ -68,10 +69,22 @@ export async function GET(
     );
   }
 
+  const canExportFinancial = can(profile.role, "export.financial");
   const rawScope = (request.nextUrl.searchParams.get("scope") ?? "all").toLowerCase();
   const scope: ExportScope = ALLOWED_SCOPES.has(rawScope as ExportScope)
     ? (rawScope as ExportScope)
     : "all";
+
+  if (!canExportFinancial && FINANCIAL_ONLY_SCOPES.has(scope)) {
+    return NextResponse.json(
+      {
+        error:
+          "Akses ditolak: Ekspor cakupan ini hanya tersedia untuk Owner dan Admin Operasional.",
+      },
+      { status: 403 },
+    );
+  }
+
   const periodParam = request.nextUrl.searchParams.get("period") ?? undefined;
   const actorName =
     profile.full_name?.trim() ||
@@ -83,7 +96,7 @@ export async function GET(
     const dataset = await loadExportDataset(supabase, {
       actorName,
       actorRole: profile.role,
-      includeAudit: format === "csv" && scope === "audit",
+      includeAudit: canExportFinancial && format === "csv" && scope === "audit",
       periodCode: periodParam,
     });
 

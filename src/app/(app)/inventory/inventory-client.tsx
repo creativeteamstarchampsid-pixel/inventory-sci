@@ -97,6 +97,9 @@ export function InventoryClient({
   todayWib,
 }: InventoryClientProps) {
   const { can } = useRole();
+  const canViewValuation = can("inventory.view_valuation");
+  const canCreateItem = can("inventory.create");
+  const canManageItem = canCreateItem || can("inventory.update");
 
   const [search, setSearch] = useState("");
   const [prefixFilter, setPrefixFilter] = useState<string>(ALL_OPTION);
@@ -288,7 +291,9 @@ export function InventoryClient({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Inventaris & Alat Terapi</h1>
           <p className="text-muted-foreground text-sm">
-            Master barang, tracking kelengkapan kepingan, jadwal sterilisasi mingguan & nilai buku aset.
+            {canViewValuation
+              ? "Master barang, tracking kelengkapan kepingan, jadwal sterilisasi mingguan & nilai buku aset."
+              : "Daftar barang & alat terapi, kelengkapan kepingan, serta jadwal sterilisasi mingguan."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -523,7 +528,9 @@ export function InventoryClient({
               <Package className="text-muted-foreground size-10 opacity-50" />
               <p className="font-medium">Tidak ada item yang cocok</p>
               <p className="text-muted-foreground text-sm">
-                Ubah filter pencarian atau tambahkan item inventaris baru.
+                {canCreateItem
+                  ? "Ubah filter pencarian atau tambahkan item inventaris baru."
+                  : "Ubah filter pencarian untuk melihat barang atau alat terapi lainnya."}
               </p>
             </div>
           ) : (
@@ -536,7 +543,7 @@ export function InventoryClient({
                   <TableHead>Part / Stok</TableHead>
                   <TableHead>Kondisi</TableHead>
                   <TableHead>Sanitasi</TableHead>
-                  <TableHead>Nilai Buku</TableHead>
+                  {canViewValuation && <TableHead>Nilai Buku</TableHead>}
                   <TableHead className="text-right">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
@@ -711,20 +718,22 @@ export function InventoryClient({
                         </div>
                       </TableCell>
 
-                      <TableCell>
-                        {item.purchase_price > 0 ? (
-                          <div className="text-xs">
-                            <p className="font-medium">{formatRupiah(bookValue)}</p>
-                            {item.asset_type === "FIXED_ASSET" && (
-                              <p className="text-muted-foreground text-[11px]">
-                                Beli: {formatRupiah(item.purchase_price)}
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">-</span>
-                        )}
-                      </TableCell>
+                      {canViewValuation && (
+                        <TableCell>
+                          {item.purchase_price > 0 ? (
+                            <div className="text-xs">
+                              <p className="font-medium">{formatRupiah(bookValue)}</p>
+                              {item.asset_type === "FIXED_ASSET" && (
+                                <p className="text-muted-foreground text-[11px]">
+                                  Beli: {formatRupiah(item.purchase_price)}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">-</span>
+                          )}
+                        </TableCell>
+                      )}
 
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -766,23 +775,25 @@ export function InventoryClient({
         </CardContent>
       </Card>
 
-      <ItemFormDialog
-        key={editingItem?.id ?? (formOpen ? "create-open" : "create-closed")}
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        editingItem={editingItem}
-        initialSignedPhotoUrl={
-          editingItem?.photo_url
-            ? /^https?:\/\//i.test(editingItem.photo_url)
-              ? editingItem.photo_url
-              : signedPhotoUrls[editingItem.photo_url] ?? null
-            : null
-        }
-        parentCandidates={items}
-        onSaved={(_saved, message) => {
-          if (message) setFeedback({ type: "success", text: message });
-        }}
-      />
+      {canManageItem && (
+        <ItemFormDialog
+          key={editingItem?.id ?? (formOpen ? "create-open" : "create-closed")}
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          editingItem={editingItem}
+          initialSignedPhotoUrl={
+            editingItem?.photo_url
+              ? /^https?:\/\//i.test(editingItem.photo_url)
+                ? editingItem.photo_url
+                : signedPhotoUrls[editingItem.photo_url] ?? null
+              : null
+          }
+          parentCandidates={items}
+          onSaved={(_saved, message) => {
+            if (message) setFeedback({ type: "success", text: message });
+          }}
+        />
+      )}
 
       <Dialog
         open={Boolean(partDialogItem)}

@@ -107,12 +107,21 @@ export function RequestsClient({
 }: RequestsClientProps) {
   const { user, role, can } = useRole();
   const isManagement = can("request.view_all");
-  const isAdmin = role === "OWNER" || role === "SUPER_ADMIN";
+  const canApproveStage1 = can("request.approve");
+  const canApproveAdmin = can("request.approve_admin");
+  const canApproveFinal = can("approval.final");
+  const canComplete = can("request.complete");
+  const canDelete = can("request.delete");
+  const canRequestWriteoff = can("inventory.writeoff_request");
   const canLinkVault = can("vault.view_limited");
+
+  const availableTypeFilters = (
+    Object.keys(REQUEST_TYPE_LABELS) as RequestType[]
+  ).filter((rt) => rt !== "PENGHAPUSAN_ASET" || canRequestWriteoff);
 
   const [requests, setRequests] = useState<InternalRequest[]>(initialRequests);
   const [activeTab, setActiveTab] = useState<RequestTab>(
-    isManagement ? "ACTIONABLE" : "ALL",
+    isManagement ? "ACTIONABLE" : "MINE",
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"ALL" | RequestType>("ALL");
@@ -357,11 +366,14 @@ export function RequestsClient({
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Permintaan Internal &amp; E-Approval
+            {isManagement ? "Pengajuan & Persetujuan" : "Pengajuan Saya"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            Pusat pengajuan pengadaan barang, laporan kerusakan/part hilang,
-            akses akun, dan penghapusan aset dengan persetujuan berjenjang.
+            {isManagement
+              ? canRequestWriteoff
+                ? "Pusat pengajuan pengadaan barang, laporan kerusakan/part hilang, akses akun, dan penghapusan aset dengan persetujuan berjenjang."
+                : "Pusat pengajuan pengadaan barang, laporan kerusakan/part hilang, dan akses akun dengan persetujuan berjenjang."
+              : "Ajukan kebutuhan barang, lapor kerusakan atau kepingan hilang, dan pantau status pengajuan Anda."}
           </p>
         </div>
 
@@ -405,11 +417,15 @@ export function RequestsClient({
       )}
 
       {/* KPI Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div
+        className={`grid gap-4 ${
+          isManagement ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3"
+        }`}
+      >
         <Card>
           <CardHeader className="pb-2">
             <CardDescription className="flex items-center justify-between">
-              <span>Total Tiket Terlihat</span>
+              <span>{isManagement ? "Total Tiket Terlihat" : "Total Pengajuan Saya"}</span>
               <ClipboardCheck className="text-muted-foreground size-4" />
             </CardDescription>
             <CardTitle className="text-2xl">{stats.totalCount}</CardTitle>
@@ -435,25 +451,27 @@ export function RequestsClient({
           </CardHeader>
           <CardContent className="text-muted-foreground text-xs">
             {isManagement
-              ? `Antrean approval untuk ${ROLE_LABELS[role].title}`
-              : "Menunggu Team Leader / Admin / Owner"}
+              ? `Antrean persetujuan untuk ${ROLE_LABELS[role].title}`
+              : "Menunggu peninjauan dan tindak lanjut"}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Menunggu Owner Final</span>
-              <ShieldCheck className="size-4 text-primary" />
-            </CardDescription>
-            <CardTitle className="text-2xl">
-              {stats.waitingOwnerCount}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-xs">
-            Penghapusan aset &amp; pengadaan beranggaran
-          </CardContent>
-        </Card>
+        {isManagement && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardDescription className="flex items-center justify-between">
+                <span>Menunggu Pengesahan Owner</span>
+                <ShieldCheck className="size-4 text-primary" />
+              </CardDescription>
+              <CardTitle className="text-2xl">
+                {stats.waitingOwnerCount}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-muted-foreground text-xs">
+              Pengadaan beranggaran &amp; penghapusan aset
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader className="pb-2">
@@ -464,7 +482,9 @@ export function RequestsClient({
             <CardTitle className="text-2xl">{stats.approvedCount}</CardTitle>
           </CardHeader>
           <CardContent className="text-muted-foreground text-xs">
-            Tiket telah lolos persetujuan
+            {isManagement
+              ? "Tiket telah lolos persetujuan"
+              : "Pengajuan Anda yang telah disetujui"}
           </CardContent>
         </Card>
       </div>
@@ -483,10 +503,14 @@ export function RequestsClient({
                     Perlu Tindakan ({stats.actionableCount})
                   </TabsTrigger>
                 )}
-                <TabsTrigger value="ALL">
-                  Semua ({requests.length})
+                {isManagement && (
+                  <TabsTrigger value="ALL">
+                    Semua ({requests.length})
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="MINE">
+                  Pengajuan Saya{!isManagement ? ` (${requests.length})` : ""}
                 </TabsTrigger>
-                <TabsTrigger value="MINE">Pengajuan Saya</TabsTrigger>
                 <TabsTrigger value="CLOSED">Selesai / Ditolak</TabsTrigger>
               </TabsList>
             </Tabs>
@@ -497,7 +521,11 @@ export function RequestsClient({
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Cari kode, judul, pemohon..."
+                  placeholder={
+                    isManagement
+                      ? "Cari kode, judul, pemohon..."
+                      : "Cari kode atau judul pengajuan..."
+                  }
                   className="pl-8"
                 />
               </div>
@@ -511,13 +539,11 @@ export function RequestsClient({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">Semua Jenis</SelectItem>
-                  {(Object.keys(REQUEST_TYPE_LABELS) as RequestType[]).map(
-                    (rt) => (
-                      <SelectItem key={rt} value={rt}>
-                        {REQUEST_TYPE_LABELS[rt]}
-                      </SelectItem>
-                    ),
-                  )}
+                  {availableTypeFilters.map((rt) => (
+                    <SelectItem key={rt} value={rt}>
+                      {REQUEST_TYPE_LABELS[rt]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
 
@@ -560,10 +586,12 @@ export function RequestsClient({
                 <TableRow>
                   <TableHead>Kode &amp; Jenis</TableHead>
                   <TableHead>Judul &amp; Tautan</TableHead>
-                  <TableHead>Pemohon</TableHead>
+                  {isManagement && <TableHead>Pemohon</TableHead>}
                   <TableHead>Estimasi Biaya</TableHead>
                   <TableHead>Status &amp; Tahap</TableHead>
-                  <TableHead className="text-right">Aksi E-Approval</TableHead>
+                  {isManagement && (
+                    <TableHead className="text-right">Aksi E-Approval</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -579,7 +607,7 @@ export function RequestsClient({
                   const ownerNeeded = requiresOwnerFinalApproval(req);
                   const canEditRow =
                     req.status === "MENUNGGU_TEAM_LEADER" &&
-                    (req.requested_by === user.id || isAdmin);
+                    (req.requested_by === user.id || canApproveAdmin);
                   const isBusy = busyActionId === req.id;
 
                   return (
@@ -594,7 +622,7 @@ export function RequestsClient({
                               {REQUEST_TYPE_LABELS[req.request_type]}
                             </Badge>
                           </div>
-                          {ownerNeeded && (
+                          {isManagement && ownerNeeded && (
                             <div>
                               <Badge
                                 variant="secondary"
@@ -633,19 +661,48 @@ export function RequestsClient({
                               </span>
                             )}
                           </div>
+                          {!isManagement && (
+                            <div className="flex flex-wrap items-center gap-1 pt-1">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => setDetailRequest(req)}
+                              >
+                                <Eye className="size-3" />
+                                Detail
+                              </Button>
+                              {canEditRow && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() => {
+                                    setEditingRequest(req);
+                                    setFormOpen(true);
+                                  }}
+                                >
+                                  <Pencil className="size-3" />
+                                  Ubah
+                                </Button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </TableCell>
 
-                      <TableCell className="align-top whitespace-normal text-xs">
-                        <p className="font-medium">
-                          {profileDisplayName(profilesMap, req.requested_by)}
-                        </p>
-                        {requester && (
-                          <p className="text-muted-foreground text-[11px]">
-                            {ROLE_LABELS[requester.role]?.title}
+                      {isManagement && (
+                        <TableCell className="align-top whitespace-normal text-xs">
+                          <p className="font-medium">
+                            {profileDisplayName(profilesMap, req.requested_by)}
                           </p>
-                        )}
-                      </TableCell>
+                          {requester && (
+                            <p className="text-muted-foreground text-[11px]">
+                              {ROLE_LABELS[requester.role]?.title}
+                            </p>
+                          )}
+                        </TableCell>
+                      )}
 
                       <TableCell className="align-top font-mono text-xs">
                         {req.estimated_cost !== null
@@ -667,39 +724,108 @@ export function RequestsClient({
                           )}
                           {req.team_leader_approved_at && (
                             <p className="text-muted-foreground text-[11px]">
-                              TL:{" "}
+                              {ROLE_LABELS.TEAM_LEADER.title}:{" "}
                               {profileDisplayName(
                                 profilesMap,
                                 req.team_leader_approved_by,
+                                "Disetujui",
                               )}
                             </p>
                           )}
                           {req.admin_verified_at && (
                             <p className="text-muted-foreground text-[11px]">
-                              Admin:{" "}
+                              {ROLE_LABELS.SUPER_ADMIN.title}:{" "}
                               {profileDisplayName(
                                 profilesMap,
                                 req.admin_verified_by,
+                                "Diverifikasi",
                               )}
                             </p>
                           )}
                           {req.owner_approved_at && (
                             <p className="text-muted-foreground text-[11px]">
-                              Owner:{" "}
+                              {ROLE_LABELS.OWNER.title}:{" "}
                               {profileDisplayName(
                                 profilesMap,
                                 req.owner_approved_by,
+                                "Disahkan",
                               )}
                             </p>
                           )}
                         </div>
                       </TableCell>
 
-                      <TableCell className="text-right align-top">
-                        <div className="flex flex-wrap justify-end gap-1.5">
-                          {req.status === "MENUNGGU_TEAM_LEADER" &&
-                            can("request.approve") && (
-                              <>
+                      {isManagement && (
+                        <TableCell className="text-right align-top">
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            {req.status === "MENUNGGU_TEAM_LEADER" &&
+                              canApproveStage1 && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApprove(req)}
+                                    disabled={isBusy}
+                                  >
+                                    {isBusy && (
+                                      <Loader2 className="size-3.5 animate-spin" />
+                                    )}
+                                    {canApproveAdmin
+                                      ? "Teruskan ke Tahap Admin"
+                                      : "Setujui"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-destructive hover:text-destructive"
+                                    onClick={() => openRejectModal(req)}
+                                    disabled={isBusy}
+                                  >
+                                    <XCircle className="size-3.5" />
+                                  </Button>
+                                </>
+                              )}
+
+                            {req.status === "MENUNGGU_ADMIN" &&
+                              canApproveAdmin && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApprove(req)}
+                                    disabled={isBusy}
+                                  >
+                                    {isBusy && (
+                                      <Loader2 className="size-3.5 animate-spin" />
+                                    )}
+                                    {canApproveFinal
+                                      ? "Sahkan Langsung"
+                                      : ownerNeeded
+                                        ? "Verifikasi → Owner"
+                                        : "Setujui"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-destructive hover:text-destructive"
+                                    onClick={() => openRejectModal(req)}
+                                    disabled={isBusy}
+                                  >
+                                    <XCircle className="size-3.5" />
+                                  </Button>
+                                </>
+                              )}
+
+                            {req.status === "MENUNGGU_OWNER" && (
+                              <Can
+                                action="approval.final"
+                                fallback={
+                                  <Badge
+                                    variant="outline"
+                                    className="self-center text-[11px]"
+                                  >
+                                    Menunggu Pengesahan Owner
+                                  </Badge>
+                                }
+                              >
                                 <Button
                                   size="sm"
                                   onClick={() => handleApprove(req)}
@@ -708,7 +834,7 @@ export function RequestsClient({
                                   {isBusy && (
                                     <Loader2 className="size-3.5 animate-spin" />
                                   )}
-                                  Setujui
+                                  Sahkan Owner
                                 </Button>
                                 <Button
                                   size="sm"
@@ -719,106 +845,57 @@ export function RequestsClient({
                                 >
                                   <XCircle className="size-3.5" />
                                 </Button>
-                              </>
+                              </Can>
                             )}
 
-                          {req.status === "MENUNGGU_ADMIN" && isAdmin && (
-                            <>
+                            {req.status === "DISETUJUI" && canComplete && (
                               <Button
                                 size="sm"
-                                onClick={() => handleApprove(req)}
+                                variant="secondary"
+                                onClick={() => handleComplete(req)}
                                 disabled={isBusy}
                               >
-                                {isBusy && (
-                                  <Loader2 className="size-3.5 animate-spin" />
-                                )}
-                                {ownerNeeded
-                                  ? "Verifikasi → Owner"
-                                  : "Setujui"}
+                                Selesai
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-destructive hover:text-destructive"
-                                onClick={() => openRejectModal(req)}
-                                disabled={isBusy}
-                              >
-                                <XCircle className="size-3.5" />
-                              </Button>
-                            </>
-                          )}
+                            )}
 
-                          {req.status === "MENUNGGU_OWNER" && (
-                            <Can action="approval.final">
-                              <Button
-                                size="sm"
-                                onClick={() => handleApprove(req)}
-                                disabled={isBusy}
-                              >
-                                {isBusy && (
-                                  <Loader2 className="size-3.5 animate-spin" />
-                                )}
-                                Sahkan Owner
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-destructive hover:text-destructive"
-                                onClick={() => openRejectModal(req)}
-                                disabled={isBusy}
-                              >
-                                <XCircle className="size-3.5" />
-                              </Button>
-                            </Can>
-                          )}
-
-                          {req.status === "DISETUJUI" && isAdmin && (
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => handleComplete(req)}
-                              disabled={isBusy}
-                            >
-                              Selesai
-                            </Button>
-                          )}
-
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setDetailRequest(req)}
-                            title="Detail & Timeline E-Approval"
-                          >
-                            <Eye className="size-3.5" />
-                          </Button>
-
-                          {canEditRow && (
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => {
-                                setEditingRequest(req);
-                                setFormOpen(true);
-                              }}
-                              title="Ubah Pengajuan"
+                              onClick={() => setDetailRequest(req)}
+                              title="Detail & Timeline E-Approval"
                             >
-                              <Pencil className="size-3.5" />
+                              <Eye className="size-3.5" />
                             </Button>
-                          )}
 
-                          {isAdmin && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-destructive hover:text-destructive"
-                              onClick={() => setDeleteTarget(req)}
-                              title="Hapus ke Recycle Bin"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
+                            {canEditRow && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setEditingRequest(req);
+                                  setFormOpen(true);
+                                }}
+                                title="Ubah Pengajuan"
+                              >
+                                <Pencil className="size-3.5" />
+                              </Button>
+                            )}
+
+                            {canDelete && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-destructive hover:text-destructive"
+                                onClick={() => setDeleteTarget(req)}
+                                title="Hapus ke Recycle Bin"
+                              >
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })}

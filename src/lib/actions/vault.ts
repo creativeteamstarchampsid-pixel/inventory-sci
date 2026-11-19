@@ -243,7 +243,7 @@ export async function revealSecretAction(
 }
 
 /**
- * Creates a new encrypted subscription entry in `subscriptions_vault` (SUPER_ADMIN only).
+ * Creates a new encrypted subscription entry in `subscriptions_vault` (OWNER & SUPER_ADMIN via `vault.manage`).
  */
 export async function createSubscriptionAction(
   input: CreateSubscriptionInput,
@@ -352,7 +352,7 @@ export async function createSubscriptionAction(
 }
 
 /**
- * Updates an existing subscription in `subscriptions_vault` (SUPER_ADMIN only).
+ * Updates an existing subscription in `subscriptions_vault` (OWNER & SUPER_ADMIN via `vault.manage`).
  * Re-encrypts password / PIN only when new plaintext values are supplied.
  */
 export async function updateSubscriptionAction(
@@ -514,7 +514,7 @@ export async function updateSubscriptionAction(
 
 /**
  * Rotates a subscription password (and optionally removes offboarded users)
- * to clear Staff Offboarding security alerts (SUPER_ADMIN only).
+ * to clear Staff Offboarding security alerts (OWNER & SUPER_ADMIN via `vault.manage`).
  */
 export async function rotateSubscriptionPasswordAction(
   input: RotatePasswordInput,
@@ -645,7 +645,7 @@ export async function rotateSubscriptionPasswordAction(
 }
 
 /**
- * Soft-deletes a subscription (moves it to Recycle Bin for 30 days, SUPER_ADMIN only).
+ * Soft-deletes a subscription (moves it to Recycle Bin for 30 days, OWNER & SUPER_ADMIN via `vault.manage`).
  */
 export async function softDeleteSubscriptionAction(
   subId: string,

@@ -16,7 +16,7 @@ import {
   formatRupiah,
 } from "@/lib/constants";
 import { getMonthlyUpdatePeriod } from "@/lib/period";
-import { can, type Role } from "@/lib/rbac";
+import { ROLE_LABELS, can, type Role } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import type {
   ArchiveHybrid,
@@ -42,6 +42,12 @@ export type ExportScope =
   | "deliveries"
   | "anomalies"
   | "audit";
+
+export const FINANCIAL_ONLY_SCOPES = new Set<ExportScope>([
+  "subscriptions",
+  "deliveries",
+  "audit",
+]);
 
 export type ExportSubscriptionRow = {
   id: string;
@@ -87,6 +93,8 @@ export type ExportDataset = {
   todayWib: string;
   actorName: string;
   actorRole: Role | "SYSTEM";
+  canExportFinancial: boolean;
+  canViewValuation: boolean;
   canViewBilling: boolean;
   items: ItemMaster[];
   subscriptions: ExportSubscriptionRow[];
@@ -315,6 +323,11 @@ export async function loadExportDataset(
   const todayWib = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Jakarta",
   }).format(now);
+  const canExportFinancial =
+    options.actorRole === "SYSTEM" || can(options.actorRole, "export.financial");
+  const canViewValuation =
+    options.actorRole === "SYSTEM" ||
+    can(options.actorRole, "inventory.view_valuation");
   const canViewBilling =
     options.actorRole === "SYSTEM" || can(options.actorRole, "vault.view_billing");
 
@@ -324,18 +337,20 @@ export async function loadExportDataset(
     .is("deleted_at", null)
     .order("item_code", { ascending: true });
 
-  const subscriptionsPromise = options.isServiceRole
-    ? supabase
-        .from("subscriptions_vault")
-        .select(
-          "id, sub_code, service_name, plan_name, login_email, billing_cycle, cost, currency, payment_method, payment_account_label, renewal_date, auto_renew, max_slots, assigned_users_json, password_rotated_at, is_active, created_at, updated_at",
-        )
-        .is("deleted_at", null)
-        .order("sub_code", { ascending: true })
-    : supabase
-        .from("subscriptions_vault_directory")
-        .select("*")
-        .order("sub_code", { ascending: true });
+  const subscriptionsPromise = !canExportFinancial
+    ? Promise.resolve({ data: [] as ExportSubscriptionRow[], error: null })
+    : options.isServiceRole
+      ? supabase
+          .from("subscriptions_vault")
+          .select(
+            "id, sub_code, service_name, plan_name, login_email, billing_cycle, cost, currency, payment_method, payment_account_label, renewal_date, auto_renew, max_slots, assigned_users_json, password_rotated_at, is_active, created_at, updated_at",
+          )
+          .is("deleted_at", null)
+          .order("sub_code", { ascending: true })
+      : supabase
+          .from("subscriptions_vault_directory")
+          .select("*")
+          .order("sub_code", { ascending: true });
 
   const archivesPromise = supabase
     .from("archives_hybrid")
@@ -343,11 +358,13 @@ export async function loadExportDataset(
     .is("deleted_at", null)
     .order("doc_code", { ascending: true });
 
-  const deliveriesPromise = supabase
-    .from("deliveries_log")
-    .select("*")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+  const deliveriesPromise = !canExportFinancial
+    ? Promise.resolve({ data: [] as DeliveryLog[], error: null })
+    : supabase
+        .from("deliveries_log")
+        .select("*")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false });
 
   const reconciliationPromise = supabase
     .from("monthly_reconciliations")
@@ -355,13 +372,14 @@ export async function loadExportDataset(
     .eq("period_ym", periodCode)
     .maybeSingle();
 
-  const auditPromise = options.includeAudit
-    ? supabase
-        .from("audit_logs")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1000)
-    : Promise.resolve({ data: [] as AuditLog[], error: null });
+  const auditPromise =
+    canExportFinancial && options.includeAudit
+      ? supabase
+          .from("audit_logs")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(1000)
+      : Promise.resolve({ data: [] as AuditLog[], error: null });
 
   const [itemsRes, subsRes, archivesRes, deliveriesRes, recRes, auditRes] =
     await Promise.all([
@@ -404,11 +422,17 @@ export async function loadExportDataset(
     }
   }
 
+  const rawItems = (itemsRes.data ?? []) as ItemMaster[];
+  const items: ItemMaster[] = canViewValuation
+    ? rawItems
+    : rawItems.map((item) => ({
+        ...item,
+        purchase_price: 0,
+        residual_value: 0,
+      }));
+
   const rawLogs = (auditRes.data ?? []) as AuditLog[];
-  const auditLogs =
-    options.actorRole === "TEAM_LEADER"
-      ? rawLogs.map(scrubVaultAuditEntry)
-      : rawLogs;
+  const auditLogs = canExportFinancial ? rawLogs : [];
 
   return {
     generatedAtIso: now.toISOString(),
@@ -418,11 +442,17 @@ export async function loadExportDataset(
     todayWib,
     actorName: options.actorName,
     actorRole: options.actorRole,
+    canExportFinancial,
+    canViewValuation,
     canViewBilling,
-    items: (itemsRes.data ?? []) as ItemMaster[],
-    subscriptions: (subsRes.data ?? []) as ExportSubscriptionRow[],
+    items,
+    subscriptions: canExportFinancial
+      ? ((subsRes.data ?? []) as ExportSubscriptionRow[])
+      : [],
     archives: (archivesRes.data ?? []) as ArchiveHybrid[],
-    deliveries: (deliveriesRes.data ?? []) as DeliveryLog[],
+    deliveries: canExportFinancial
+      ? ((deliveriesRes.data ?? []) as DeliveryLog[])
+      : [],
     reconciliation,
     approverNames: {
       adminName: reconciliation?.verified_by_admin
@@ -439,34 +469,41 @@ export async function loadExportDataset(
   };
 }
 
-function mapInventoryRows(items: ItemMaster[]) {
-  return items.map((item) => ({
-    Kode_Item: item.item_code,
-    Nama_Barang: item.name,
-    Tipe_Aset: ASSET_TYPE_LABELS[item.asset_type],
-    Prefix_Kategori: item.category_prefix,
-    Kategori: item.category,
-    Lokasi_Ruang: item.room_code,
-    Rak_Lokasi: item.rack_location ?? "",
-    PIC: item.pic_name ?? "",
-    Kondisi: CONDITION_LABELS[item.condition],
-    Status_Sanitasi: HYGIENE_LABELS[item.hygiene_status],
-    Jadwal_Sanitasi_Berikutnya: item.next_sanitization_due ?? "",
-    Kepingan_Saat_Ini: item.current_parts,
-    Total_Kepingan: item.total_parts,
-    Stok: item.stock_qty,
-    Batas_Stok_Min: item.min_stock_threshold,
-    Satuan: item.unit_label,
-    Tanggal_Perolehan: item.acquisition_date ?? "",
-    Harga_Beli_IDR: item.purchase_price,
-    Nilai_Buku_IDR: calculateBookValue(
-      item.purchase_price,
-      item.acquisition_date,
-      item.useful_life_months,
-      item.residual_value,
-    ),
-    Catatan: item.description ?? "",
-  }));
+function mapInventoryRows(items: ItemMaster[], canViewValuation: boolean) {
+  return items.map((item) => {
+    const base: Record<string, string | number> = {
+      Kode_Item: item.item_code,
+      Nama_Barang: item.name,
+      Tipe_Aset: ASSET_TYPE_LABELS[item.asset_type],
+      Prefix_Kategori: item.category_prefix,
+      Kategori: item.category,
+      Lokasi_Ruang: item.room_code,
+      Rak_Lokasi: item.rack_location ?? "",
+      PIC: item.pic_name ?? "",
+      Kondisi: CONDITION_LABELS[item.condition],
+      Status_Sanitasi: HYGIENE_LABELS[item.hygiene_status],
+      Jadwal_Sanitasi_Berikutnya: item.next_sanitization_due ?? "",
+      Kepingan_Saat_Ini: item.current_parts,
+      Total_Kepingan: item.total_parts,
+      Stok: item.stock_qty,
+      Batas_Stok_Min: item.min_stock_threshold,
+      Satuan: item.unit_label,
+      Tanggal_Perolehan: item.acquisition_date ?? "",
+    };
+
+    if (canViewValuation) {
+      base.Harga_Beli_IDR = item.purchase_price;
+      base.Nilai_Buku_IDR = calculateBookValue(
+        item.purchase_price,
+        item.acquisition_date,
+        item.useful_life_months,
+        item.residual_value,
+      );
+    }
+
+    base.Catatan = item.description ?? "";
+    return base;
+  });
 }
 
 function mapSubscriptionRows(dataset: ExportDataset) {
@@ -514,26 +551,31 @@ function mapArchiveRows(archives: ArchiveHybrid[]) {
   }));
 }
 
-function mapDeliveryRows(deliveries: DeliveryLog[]) {
-  return deliveries.map((del) => ({
-    Kode_Pengiriman: del.delivery_code,
-    Arah: del.direction === "INBOUND" ? "Masuk (Inbound)" : "Keluar (Outbound)",
-    Jenis_Paket: del.package_type,
-    Kurir: del.courier_name,
-    No_Resi: del.tracking_number ?? "",
-    Biaya_Ongkir_IDR: del.shipping_cost,
-    Pengirim: del.sender_name,
-    Penerima: del.receiver_name,
-    PIC: del.pic_name ?? "",
-    Barang_Pecah_Belah: del.is_fragile ? "Ya" : "Tidak",
-    Status: DELIVERY_STATUS_LABELS[del.status],
-    Konversi_Stok: del.converted_to_stock_at
+function mapDeliveryRows(deliveries: DeliveryLog[], canExportFinancial: boolean) {
+  return deliveries.map((del) => {
+    const base: Record<string, string | number> = {
+      Kode_Pengiriman: del.delivery_code,
+      Arah: del.direction === "INBOUND" ? "Masuk (Inbound)" : "Keluar (Outbound)",
+      Jenis_Paket: del.package_type,
+      Kurir: del.courier_name,
+      No_Resi: del.tracking_number ?? "",
+    };
+    if (canExportFinancial) {
+      base.Biaya_Ongkir_IDR = del.shipping_cost;
+    }
+    base.Pengirim = del.sender_name;
+    base.Penerima = del.receiver_name;
+    base.PIC = del.pic_name ?? "";
+    base.Barang_Pecah_Belah = del.is_fragile ? "Ya" : "Tidak";
+    base.Status = DELIVERY_STATUS_LABELS[del.status];
+    base.Konversi_Stok = del.converted_to_stock_at
       ? formatDateWIB(del.converted_to_stock_at, true)
-      : "Belum",
-    Tanggal_Kirim: formatDateWIB(del.shipped_at, true),
-    Tanggal_Terima: formatDateWIB(del.received_at, true),
-    Catatan: del.notes ?? "",
-  }));
+      : "Belum";
+    base.Tanggal_Kirim = formatDateWIB(del.shipped_at, true);
+    base.Tanggal_Terima = formatDateWIB(del.received_at, true);
+    base.Catatan = del.notes ?? "";
+    return base;
+  });
 }
 
 function mapAnomalyRows(dataset: ExportDataset) {
@@ -553,7 +595,7 @@ function mapAuditRows(logs: AuditLog[]) {
   return logs.map((log) => ({
     Waktu_WIB: formatDateWIB(log.created_at, true),
     Aktor: log.actor_name ?? "Sistem",
-    Peran: log.actor_role ?? "SYSTEM",
+    Peran: log.actor_role ? ROLE_LABELS[log.actor_role].title : "Sistem",
     Aksi: log.action,
     Entitas: log.entity_type,
     Kode_Entitas: log.entity_code ?? "",
@@ -568,40 +610,49 @@ export function generateCsvString(
   const bom = "\uFEFF";
 
   if (scope === "inventory") {
-    return bom + Papa.unparse(mapInventoryRows(dataset.items));
+    return bom + Papa.unparse(mapInventoryRows(dataset.items, dataset.canViewValuation));
   }
   if (scope === "subscriptions") {
+    if (!dataset.canExportFinancial) return bom;
     return bom + Papa.unparse(mapSubscriptionRows(dataset));
   }
   if (scope === "archives") {
     return bom + Papa.unparse(mapArchiveRows(dataset.archives));
   }
   if (scope === "deliveries") {
-    return bom + Papa.unparse(mapDeliveryRows(dataset.deliveries));
+    if (!dataset.canExportFinancial) return bom;
+    return bom + Papa.unparse(mapDeliveryRows(dataset.deliveries, dataset.canExportFinancial));
   }
   if (scope === "anomalies") {
     return bom + Papa.unparse(mapAnomalyRows(dataset));
   }
   if (scope === "audit") {
+    if (!dataset.canExportFinancial) return bom;
     return bom + Papa.unparse(mapAuditRows(dataset.auditLogs));
   }
 
+  const actorRoleLabel =
+    dataset.actorRole === "SYSTEM"
+      ? "Sistem"
+      : ROLE_LABELS[dataset.actorRole].title;
+
+  const summaryHeader: Record<string, string | number> = {
+    Organisasi: "Star Champs Indonesia",
+    Aplikasi: "StarOps",
+    Periode: `${dataset.periodLabel} (${dataset.periodCode})`,
+    Dicetak_Pada_WIB: dataset.generatedAtWib,
+    Oleh: `${dataset.actorName} (${actorRoleLabel})`,
+    Total_Inventaris: dataset.items.length,
+    Total_Arsip: dataset.archives.length,
+  };
+
+  if (dataset.canExportFinancial) {
+    summaryHeader.Total_Langganan = dataset.subscriptions.length;
+    summaryHeader.Total_Pengiriman = dataset.deliveries.length;
+  }
+
   const sections: string[] = [];
-  sections.push(
-    Papa.unparse([
-      {
-        Organisasi: "Star Champs Indonesia",
-        Aplikasi: "StarOps",
-        Periode: `${dataset.periodLabel} (${dataset.periodCode})`,
-        Dicetak_Pada_WIB: dataset.generatedAtWib,
-        Oleh: `${dataset.actorName} (${dataset.actorRole})`,
-        Total_Inventaris: dataset.items.length,
-        Total_Langganan: dataset.subscriptions.length,
-        Total_Arsip: dataset.archives.length,
-        Total_Pengiriman: dataset.deliveries.length,
-      },
-    ]),
-  );
+  sections.push(Papa.unparse([summaryHeader]));
 
   const appendSection = (title: string, rows: Record<string, unknown>[]) => {
     sections.push(`\r\n# ${title}`);
@@ -612,14 +663,24 @@ export function generateCsvString(
     sections.push(Papa.unparse(rows));
   };
 
-  appendSection("INVENTARIS & PART MAINAN", mapInventoryRows(dataset.items));
-  appendSection("ANOMALI STOK & SANITASI", mapAnomalyRows(dataset));
   appendSection(
-    "VAULT LANGGANAN (KREDENSIAL TERMASKING)",
-    mapSubscriptionRows(dataset),
+    "INVENTARIS & PART MAINAN",
+    mapInventoryRows(dataset.items, dataset.canViewValuation),
   );
+  appendSection("ANOMALI STOK & SANITASI", mapAnomalyRows(dataset));
+  if (dataset.canExportFinancial) {
+    appendSection(
+      "VAULT LANGGANAN (KREDENSIAL TERMASKING)",
+      mapSubscriptionRows(dataset),
+    );
+  }
   appendSection("ARSIP BERKAS HYBRID", mapArchiveRows(dataset.archives));
-  appendSection("LOG PENGIRIMAN", mapDeliveryRows(dataset.deliveries));
+  if (dataset.canExportFinancial) {
+    appendSection(
+      "LOG PENGIRIMAN",
+      mapDeliveryRows(dataset.deliveries, dataset.canExportFinancial),
+    );
+  }
 
   return bom + sections.join("\r\n");
 }
@@ -630,11 +691,14 @@ export async function exportCsvWithAuth(scope: ExportScope = "all"): Promise<{
   content: string;
 }> {
   const user = await requireAction("export.data");
+  if (FINANCIAL_ONLY_SCOPES.has(scope)) {
+    await requireAction("export.financial");
+  }
   const supabase = await createClient();
   const dataset = await loadExportDataset(supabase, {
     actorName: user.fullName,
     actorRole: user.role,
-    includeAudit: scope === "audit",
+    includeAudit: scope === "audit" && can(user.role, "export.financial"),
   });
   const content = generateCsvString(dataset, scope);
   return {

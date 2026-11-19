@@ -78,6 +78,7 @@ import {
   formatDateWIB,
   formatRupiah,
 } from "@/lib/constants";
+import { ROLE_LABELS } from "@/lib/rbac";
 import type { BillingCycle, PaymentMethod } from "@/types/database";
 import {
   findOffboardedUsersForSub,
@@ -622,12 +623,10 @@ export function VaultClient({
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <KeyRound className="text-primary size-6" />
-            Subscription Vault
+            Brankas Akun Digital
           </h1>
           <p className="text-muted-foreground text-sm">
-            {canViewBilling
-              ? "Brankas akun digital operasional Star Champs (enkripsi AES-256), jadwal tagihan & keamanan offboarding."
-              : "Direktori langganan aplikasi & slot pengguna (mode tampilan terbatas tanpa biaya, metode bayar, dan kata sandi)."}
+            Brankas akun digital operasional Star Champs (enkripsi AES-256), jadwal tagihan &amp; keamanan offboarding.
           </p>
         </div>
 
@@ -642,12 +641,12 @@ export function VaultClient({
       {schemaError && (
         <Alert variant="warning">
           <AlertTriangle className="size-4" />
-          <AlertTitle>Gagal Memuat Data Subscription Vault</AlertTitle>
+          <AlertTitle>Gagal Memuat Data Brankas Akun Digital</AlertTitle>
           <AlertDescription>{schemaError}</AlertDescription>
         </Alert>
       )}
 
-      {!vaultKeyConfigured && canManage && (
+      {!vaultKeyConfigured && (canManage || canReveal) && (
         <Alert variant="warning">
           <Lock className="size-4" />
           <AlertTitle>Kunci Enkripsi Server Belum Dikonfigurasi</AlertTitle>
@@ -795,23 +794,7 @@ export function VaultClient({
           </CardContent>
         </Card>
 
-        <Can
-          action="vault.view_billing"
-          fallback={
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription className="flex items-center justify-between">
-                  <span>Akses Biaya & Sandi</span>
-                  <Lock className="text-muted-foreground size-4" />
-                </CardDescription>
-                <CardTitle className="text-base">Mode Terbatas</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground text-xs">
-                Tagihan dan kredensial rahasia hanya dibuka untuk Owner & Super Admin
-              </CardContent>
-            </Card>
-          }
-        >
+        <Can action="vault.view_billing">
           <Card>
             <CardHeader className="pb-2">
               <CardDescription className="flex items-center justify-between">
@@ -823,7 +806,7 @@ export function VaultClient({
               </CardTitle>
             </CardHeader>
             <CardContent className="text-muted-foreground text-xs">
-              Akumulasi langganan bulanan & prorata tahunan aktif
+              Akumulasi langganan bulanan &amp; prorata tahunan aktif
             </CardContent>
           </Card>
         </Can>
@@ -1144,7 +1127,7 @@ export function VaultClient({
         </CardContent>
       </Card>
 
-      {/* Create / Edit Subscription Dialog (SUPER_ADMIN only) */}
+      {/* Create / Edit Subscription Dialog (OWNER & Admin Operasional) */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
@@ -1450,7 +1433,7 @@ export function VaultClient({
                         <span>
                           {p.full_name || p.email || p.id}{" "}
                           <span className="text-muted-foreground text-xs">
-                            ({p.role})
+                            ({ROLE_LABELS[p.role]?.title ?? p.role})
                           </span>
                         </span>
                       </span>
@@ -1657,7 +1640,7 @@ export function VaultClient({
         </DialogContent>
       </Dialog>
 
-      {/* Rotate Password Dialog (SUPER_ADMIN only) */}
+      {/* Rotate Password Dialog (OWNER & Admin Operasional) */}
       <Dialog
         open={Boolean(rotateTarget)}
         onOpenChange={(open) => {

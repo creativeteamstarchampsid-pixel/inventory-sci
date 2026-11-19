@@ -17,7 +17,7 @@ export default async function ArchivesPage({
 }: {
   searchParams: Promise<{ code?: string | string[] }>;
 }) {
-  await requireRouteAccess("/archives");
+  const user = await requireRouteAccess("/archives");
   const resolvedSearchParams = await searchParams;
   const rawCode = resolvedSearchParams?.code;
   const initialCode =
@@ -28,6 +28,7 @@ export default async function ArchivesPage({
         : "";
 
   const supabase = await createClient();
+  const isStaff = user.role === "STAFF";
 
   const [archivesRes, profilesRes] = await Promise.all([
     supabase
@@ -37,10 +38,12 @@ export default async function ArchivesPage({
       .order("cabinet_code", { ascending: true })
       .order("drawer_no", { ascending: true })
       .order("updated_at", { ascending: false }),
-    supabase
-      .from("profiles")
-      .select("id, full_name, role, is_active")
-      .order("full_name", { ascending: true }),
+    isStaff
+      ? Promise.resolve({ data: [] as ArchiveProfileOption[], error: null })
+      : supabase
+          .from("profiles")
+          .select("id, full_name, role, is_active")
+          .order("full_name", { ascending: true }),
   ]);
 
   const profiles: ArchiveProfileOption[] = (profilesRes.data ?? []).map((p) => ({

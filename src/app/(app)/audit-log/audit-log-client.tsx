@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 
-import { useRole } from "@/components/rbac/role-provider";
+import { Can } from "@/components/rbac/can";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,7 +48,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateWIB } from "@/lib/constants";
-import { ROLE_LABELS, type Role } from "@/lib/rbac";
+import { ROLE_LABELS } from "@/lib/rbac";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import type { AuditLog, Json } from "@/types/database";
 
@@ -112,19 +112,12 @@ function actionBadgeVariant(
   return "outline";
 }
 
-function redactAuditForRole(log: AuditLog, role: Role): AuditLog {
+function redactAuditSecrets(log: AuditLog): AuditLog {
   const redactData = (data: Json | null): Json | null => {
     if (!data || typeof data !== "object" || Array.isArray(data)) return data;
     const clone: Record<string, Json | undefined> = { ...data };
     delete clone.password_encrypted;
     delete clone.pin_recovery_encrypted;
-    if (role === "TEAM_LEADER" && log.entity_type === "subscriptions_vault") {
-      delete clone.cost;
-      delete clone.currency;
-      delete clone.payment_method;
-      delete clone.payment_account_label;
-      delete clone.notes;
-    }
     return clone;
   };
   return {
@@ -140,7 +133,6 @@ export function AuditLogClient({
   initialFilters,
 }: AuditLogClientProps) {
   const router = useRouter();
-  const { role } = useRole();
   const [isPending, startTransition] = useTransition();
 
   const [logs, setLogs] = useState<AuditLog[]>(initialLogs);
@@ -174,10 +166,7 @@ export function AuditLogClient({
         (payload) => {
           const raw = payload.new as AuditLog;
           if (!raw?.id) return;
-          if (role === "TEAM_LEADER" && raw.entity_type === "subscriptions_vault") {
-            return;
-          }
-          const safeLog = redactAuditForRole(raw, role);
+          const safeLog = redactAuditSecrets(raw);
           setLogs((prev) => {
             if (prev.some((item) => item.id === safeLog.id)) return prev;
             return [safeLog, ...prev].slice(0, 300);
@@ -194,7 +183,7 @@ export function AuditLogClient({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [liveEnabled, role]);
+  }, [liveEnabled]);
 
   const filteredLogs = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -293,12 +282,14 @@ export function AuditLogClient({
             Muat Ulang
           </Button>
 
-          <Button asChild size="sm" variant="outline">
-            <a href="/api/exports/csv?scope=audit" download>
-              <ArrowDownToLine className="mr-1.5 size-3.5" />
-              Ekspor .CSV
-            </a>
-          </Button>
+          <Can action="export.financial">
+            <Button asChild size="sm" variant="outline">
+              <a href="/api/exports/csv?scope=audit" download>
+                <ArrowDownToLine className="mr-1.5 size-3.5" />
+                Ekspor .CSV
+              </a>
+            </Button>
+          </Can>
         </div>
       </div>
 
@@ -422,7 +413,7 @@ export function AuditLogClient({
                       <div className="text-muted-foreground text-[11px]">
                         {log.actor_role
                           ? ROLE_LABELS[log.actor_role]?.title ?? log.actor_role
-                          : "SYSTEM"}
+                          : "Sistem"}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -483,7 +474,11 @@ export function AuditLogClient({
                   <span className="text-muted-foreground">Aktor: </span>
                   <span className="font-medium">
                     {selectedLog.actor_name || "Sistem"} (
-                    {selectedLog.actor_role ?? "SYSTEM"})
+                    {selectedLog.actor_role
+                      ? ROLE_LABELS[selectedLog.actor_role]?.title ??
+                        selectedLog.actor_role
+                      : "Sistem"}
+                    )
                   </span>
                 </div>
                 <div>

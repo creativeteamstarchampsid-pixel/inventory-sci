@@ -1,4 +1,4 @@
-import type { Role } from "@/lib/rbac";
+import { can, type Role } from "@/lib/rbac";
 import type {
   ItemCondition,
   LocationCode,
@@ -59,13 +59,13 @@ export function isActionableByRole(
   role: Role,
 ): boolean {
   if (status === "MENUNGGU_TEAM_LEADER") {
-    return role === "TEAM_LEADER" || role === "SUPER_ADMIN" || role === "OWNER";
+    return can(role, "request.approve");
   }
   if (status === "MENUNGGU_ADMIN") {
-    return role === "SUPER_ADMIN" || role === "OWNER";
+    return can(role, "request.approve_admin");
   }
   if (status === "MENUNGGU_OWNER") {
-    return role === "OWNER";
+    return can(role, "approval.final");
   }
   return false;
 }
@@ -73,8 +73,9 @@ export function isActionableByRole(
 export function profileDisplayName(
   map: Map<string, RequestProfileSummary>,
   userId: string | null,
+  fallback = "Pengguna",
 ): string {
   if (!userId) return "-";
   const found = map.get(userId);
-  return found?.full_name?.trim() || "Pengguna";
+  return found?.full_name?.trim() || fallback;
 }

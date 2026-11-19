@@ -72,6 +72,7 @@ import {
 } from "@/lib/constants";
 import type { BackupDiffSummary } from "@/lib/exports/csv";
 import type { MonthlyUpdatePeriod } from "@/lib/period";
+import { ROLE_LABELS } from "@/lib/rbac";
 import type {
   Json,
   LocationCode,
@@ -156,6 +157,13 @@ export function BackupClient({
   backups,
 }: BackupClientProps) {
   const { user, role, can } = useRole();
+  const canExportFinancial = can("export.financial");
+  const canSubmitOpname = can("reconciliation.submit");
+  const canVerifyAdmin = can("reconciliation.verify_admin");
+  const canApproveFinal = can("reconciliation.approve_final");
+  const canViewBackups = can("backup.view");
+  const canRunBackup = can("backup.run_manual");
+  const canRestoreBackup = can("backup.restore");
   const [isPending, startTransition] = useTransition();
   const [reconciliation, setReconciliation] = useState<MonthlyReconciliation | null>(
     initialReconciliation,
@@ -315,11 +323,16 @@ export function BackupClient({
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Ekspor, Rekonsiliasi & Backup Center
+            {canViewBackups
+              ? "Ekspor, Rekonsiliasi & Backup Center"
+              : "Cek Ruangan & Ekspor Operasional"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            Pusat ekspor multi-format (.CSV / .XLSX / .PDF), siklus pengkinian data
-            minggu terakhir, dan snapshot Point-in-Time Restore.
+            {canViewBackups
+              ? canRestoreBackup
+                ? "Pusat ekspor multi-format (.CSV / .XLSX / .PDF), siklus pengkinian data akhir bulan, cadangan data, dan Point-in-Time Restore."
+                : "Pusat ekspor multi-format (.CSV / .XLSX / .PDF), siklus pengkinian data akhir bulan, dan cadangan data (backup)."
+              : "Ekspor laporan operasional ruangan & alat terapi (tanpa data harga) serta checklist pengecekan ruangan bulanan."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -358,11 +371,14 @@ export function BackupClient({
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <ArrowDownToLine className="size-4" />
-              Mesin Ekspor Multi-Format
+              {canExportFinancial
+                ? "Mesin Ekspor Multi-Format"
+                : "Ekspor Data Operasional"}
             </CardTitle>
             <CardDescription>
-              Unduh laporan operasional instan. Kredensial Subscription Vault selalu
-              dimasking dan data biaya dibatasi sesuai peran Anda ({role}).
+              {canExportFinancial
+                ? `Unduh laporan operasional & aset instan sesuai peran Anda (${ROLE_LABELS[role].title}). Kredensial Brankas Akun Digital selalu dimasking.`
+                : `Unduh laporan operasional barang, anomali, dan arsip (tanpa data harga, pengiriman, brankas akun, atau audit) untuk peran ${ROLE_LABELS[role].title}.`}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-3">
@@ -373,7 +389,7 @@ export function BackupClient({
                   <Badge variant="outline">PapaParse UTF-8</Badge>
                 </div>
                 <p className="text-muted-foreground text-xs">
-                  Format tabular ringan dengan UTF-8 BOM untuk Microsoft Excel &
+                  Format tabular ringan dengan UTF-8 BOM untuk Microsoft Excel &amp;
                   analisis data.
                 </p>
               </div>
@@ -383,13 +399,27 @@ export function BackupClient({
                     <SelectValue placeholder="Pilih cakupan CSV" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Semua Modul (Bundel)</SelectItem>
-                    <SelectItem value="inventory">Inventaris & Part Mainan</SelectItem>
-                    <SelectItem value="anomalies">Anomali Stok & Sanitasi</SelectItem>
-                    <SelectItem value="subscriptions">Vault Langganan</SelectItem>
-                    <SelectItem value="archives">Arsip Berkas</SelectItem>
-                    <SelectItem value="deliveries">Log Pengiriman</SelectItem>
-                    <SelectItem value="audit">Log Aktivitas (Audit)</SelectItem>
+                    <SelectItem value="all">
+                      {canExportFinancial
+                        ? "Semua Modul (Bundel)"
+                        : "Semua Modul Operasional"}
+                    </SelectItem>
+                    <SelectItem value="inventory">
+                      {canExportFinancial
+                        ? "Inventaris & Part Mainan"
+                        : "Barang & Alat Terapi (Tanpa Harga)"}
+                    </SelectItem>
+                    <SelectItem value="anomalies">Anomali Stok &amp; Sanitasi</SelectItem>
+                    <SelectItem value="archives">Arsip Berkas &amp; SOP</SelectItem>
+                    {canExportFinancial && (
+                      <>
+                        <SelectItem value="subscriptions">
+                          Brankas Akun Digital
+                        </SelectItem>
+                        <SelectItem value="deliveries">Log Pengiriman</SelectItem>
+                        <SelectItem value="audit">Riwayat Aktivitas (Audit)</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
                 <Button asChild size="sm" variant="outline" className="w-full">
@@ -408,11 +438,14 @@ export function BackupClient({
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="font-medium">Workbook .XLSX</span>
-                  <Badge variant="outline">ExcelJS 5 Tab</Badge>
+                  <Badge variant="outline">
+                    {canExportFinancial ? "ExcelJS 5 Tab" : "ExcelJS Operasional"}
+                  </Badge>
                 </div>
                 <p className="text-muted-foreground text-xs">
-                  Tab: Ringkasan, Inventaris & Part Mainan, Vault Langganan (masked),
-                  Arsip Berkas, dan Log Pengiriman.
+                  {canExportFinancial
+                    ? "Tab: Ringkasan, Inventaris & Part Mainan, Brankas Akun Digital (masked), Arsip Berkas, dan Log Pengiriman."
+                    : "Tab operasional: Ringkasan (termasuk anomali), Barang & Alat Terapi (tanpa harga), dan Arsip Berkas."}
                 </p>
               </div>
               <Button asChild size="sm" variant="outline" className="w-full">
@@ -430,8 +463,9 @@ export function BackupClient({
                   <Badge variant="outline">Star Champs Official</Badge>
                 </div>
                 <p className="text-muted-foreground text-xs">
-                  Header resmi Star Champs, statistik eksekutif, tabel anomali stok, dan
-                  blok tanda tangan 3 kolom.
+                  {canExportFinancial
+                    ? "Header resmi Star Champs, statistik eksekutif, tabel anomali stok, dan blok tanda tangan 3 kolom."
+                    : "Header resmi Star Champs, ringkasan operasional ruangan, tabel anomali alat terapi, dan blok tanda tangan."}
                 </p>
               </div>
               <Button asChild size="sm" className="w-full">
@@ -491,7 +525,7 @@ export function BackupClient({
                 const entry = checklist[roomCode];
                 const stat = roomStatMap.get(roomCode);
                 const checked = Boolean(entry?.checked);
-                const canToggle = can("reconciliation.submit") && !isLocked;
+                const canToggle = canSubmitOpname && !isLocked;
 
                 return (
                   <label
@@ -541,108 +575,128 @@ export function BackupClient({
             </div>
           </div>
 
-          {/* Stage 1 Approvals */}
+          {/* Stage Approvals (no disabled cross-role buttons) */}
           <div className="grid gap-3 md:grid-cols-3">
             <div className="flex flex-col justify-between gap-3 rounded-lg border p-4">
               <div>
                 <p className="text-muted-foreground text-xs font-medium uppercase">
-                  Pemeriksaan Kepala Terapis
+                  Pemeriksaan {ROLE_LABELS.TEAM_LEADER.title}
                 </p>
                 <p className="mt-1 font-medium">
                   {reconciliation?.approved_by_leader
-                    ? approvers.leaderName ?? "Team Leader"
+                    ? approvers.leaderName ?? ROLE_LABELS.TEAM_LEADER.title
                     : "Belum disetujui"}
                 </p>
                 <p className="text-muted-foreground text-xs">
                   {reconciliation?.approved_by_leader_at
                     ? formatDateWIB(reconciliation.approved_by_leader_at, true)
-                    : "Menunggu konfirmasi opname Team Leader"}
+                    : `Menunggu konfirmasi opname ${ROLE_LABELS.TEAM_LEADER.title}`}
                 </p>
               </div>
-              <Button
-                size="sm"
-                variant={reconciliation?.approved_by_leader ? "outline" : "default"}
-                disabled={
-                  role !== "TEAM_LEADER" ||
-                  isLocked ||
-                  isPending ||
-                  Boolean(reconciliation?.approved_by_leader)
-                }
-                onClick={() => handleApproveStage("leader")}
-              >
-                {reconciliation?.approved_by_leader
-                  ? "Sudah Disetujui Leader"
-                  : "Setujui (Team Leader)"}
-              </Button>
+              {reconciliation?.approved_by_leader ? (
+                <Badge variant="secondary" className="w-fit">
+                  <CheckCircle2 className="mr-1 size-3.5 text-emerald-600" />
+                  Sudah Disetujui
+                </Badge>
+              ) : (role === "TEAM_LEADER" || role === "OWNER") && !isLocked ? (
+                <Button
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => handleApproveStage("leader")}
+                >
+                  Setujui ({ROLE_LABELS[role].title})
+                </Button>
+              ) : (
+                <Badge variant="outline" className="w-fit">
+                  {isLocked
+                    ? "Periode Terkunci"
+                    : `Menunggu ${ROLE_LABELS.TEAM_LEADER.title}`}
+                </Badge>
+              )}
             </div>
 
             <div className="flex flex-col justify-between gap-3 rounded-lg border p-4">
               <div>
                 <p className="text-muted-foreground text-xs font-medium uppercase">
-                  Verifikasi Admin Ops
+                  Verifikasi {ROLE_LABELS.SUPER_ADMIN.title}
                 </p>
                 <p className="mt-1 font-medium">
                   {reconciliation?.verified_by_admin
-                    ? approvers.adminName ?? "Super Admin"
+                    ? approvers.adminName ?? ROLE_LABELS.SUPER_ADMIN.title
                     : "Belum diverifikasi"}
                 </p>
                 <p className="text-muted-foreground text-xs">
                   {reconciliation?.verified_by_admin_at
                     ? formatDateWIB(reconciliation.verified_by_admin_at, true)
-                    : "Menunggu verifikasi data & snapshot Super Admin"}
+                    : `Menunggu verifikasi data ${ROLE_LABELS.SUPER_ADMIN.title}`}
                 </p>
               </div>
-              <Button
-                size="sm"
-                variant={reconciliation?.verified_by_admin ? "outline" : "default"}
-                disabled={
-                  role !== "SUPER_ADMIN" ||
-                  isLocked ||
-                  isPending ||
-                  Boolean(reconciliation?.verified_by_admin)
-                }
-                onClick={() => handleApproveStage("admin")}
-              >
-                {reconciliation?.verified_by_admin
-                  ? "Sudah Diverifikasi Admin"
-                  : "Verifikasi (Super Admin)"}
-              </Button>
+              {reconciliation?.verified_by_admin ? (
+                <Badge variant="secondary" className="w-fit">
+                  <CheckCircle2 className="mr-1 size-3.5 text-emerald-600" />
+                  Sudah Diverifikasi
+                </Badge>
+              ) : canVerifyAdmin && !isLocked ? (
+                <Button
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => handleApproveStage("admin")}
+                >
+                  Verifikasi ({ROLE_LABELS[role].title})
+                </Button>
+              ) : (
+                <Badge variant="outline" className="w-fit">
+                  {isLocked
+                    ? "Periode Terkunci"
+                    : `Menunggu ${ROLE_LABELS.SUPER_ADMIN.title}`}
+                </Badge>
+              )}
             </div>
 
             <div className="flex flex-col justify-between gap-3 rounded-lg border p-4">
               <div>
                 <p className="text-muted-foreground text-xs font-medium uppercase">
-                  Pengesahan Akhir & Kunci
+                  Pengesahan Akhir &amp; Kunci
                 </p>
                 <p className="mt-1 font-medium">
                   {reconciliation?.approved_by_owner
-                    ? approvers.ownerName ?? "Owner"
+                    ? approvers.ownerName ?? ROLE_LABELS.OWNER.title
                     : "Menunggu Pengesahan"}
                 </p>
                 <p className="text-muted-foreground text-xs">
                   {reconciliation?.locked_at
                     ? `Dikunci: ${formatDateWIB(reconciliation.locked_at, true)}`
-                    : "Mengunci periode rekonsiliasi bulan ini"}
+                    : `Mengunci periode rekonsiliasi bulan ini`}
                 </p>
               </div>
-              <Button
-                size="sm"
-                variant={isLocked ? "secondary" : "default"}
-                disabled={role !== "OWNER" || isLocked || isPending}
-                onClick={() => setOwnerLockDialogOpen(true)}
-              >
-                <Lock className="mr-1.5 size-3.5" />
-                {isLocked ? "Periode Terkunci" : "Sahkan & Kunci (Owner)"}
-              </Button>
+              {isLocked ? (
+                <Badge variant="secondary" className="w-fit">
+                  <Lock className="mr-1 size-3.5" />
+                  Periode Terkunci
+                </Badge>
+              ) : canApproveFinal ? (
+                <Button
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => setOwnerLockDialogOpen(true)}
+                >
+                  <Lock className="mr-1.5 size-3.5" />
+                  Sahkan &amp; Kunci ({ROLE_LABELS.OWNER.title})
+                </Button>
+              ) : (
+                <Badge variant="outline" className="w-fit">
+                  Menunggu Pengesahan {ROLE_LABELS.OWNER.title}
+                </Badge>
+              )}
             </div>
           </div>
 
-          {/* Stage 2 & Stage 3 Backup Snapshot Controls */}
+          {/* Stage 2 & Stage 3 Backup Snapshot Controls (OWNER & Admin Operasional) */}
           <Can action="backup.run_manual">
             <div className="bg-muted/30 flex flex-col justify-between gap-3 rounded-lg border p-4 sm:flex-row sm:items-center">
               <div className="space-y-0.5">
                 <p className="text-sm font-semibold">
-                  Tahap 2 & 3 — Snapshot Otomatis & Cut-Off Bulanan (Khusus Super Admin)
+                  Tahap 2 &amp; 3 — Snapshot Cadangan &amp; Cut-Off Bulanan
                 </p>
                 <p className="text-muted-foreground text-xs">
                   Membuat bundel JSON + .XLSX + .CSV + .PDF ke bucket privat{" "}
@@ -662,7 +716,7 @@ export function BackupClient({
                   }
                 >
                   <DatabaseBackup className="mr-1.5 size-3.5" />
-                  Pre-Update (`BKP-PRE-{period.periodCode}`)
+                  Pre-Update (BKP-PRE-{period.periodCode})
                 </Button>
                 <Button
                   size="sm"
@@ -676,7 +730,7 @@ export function BackupClient({
                   }
                 >
                   <ShieldCheck className="mr-1.5 size-3.5" />
-                  Cut-Off (`BKP-FINAL-{period.periodCode}`)
+                  Cut-Off (BKP-FINAL-{period.periodCode})
                 </Button>
                 <Button
                   size="sm"
@@ -692,24 +746,25 @@ export function BackupClient({
         </CardContent>
       </Card>
 
-      {/* 3. Backup Vault List (OWNER & SUPER_ADMIN) */}
+      {/* 3. Backup Vault List (OWNER & Admin Operasional) */}
       <Can action="backup.view">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <DatabaseBackup className="size-4" />
-              Backup Vault (`system_backups`)
+              Backup Vault (<code>system_backups</code>)
             </CardTitle>
             <CardDescription>
-              Riwayat seluruh snapshot, bundel laporan, perbandingan perubahan (Diff
-              Viewer), dan pemulihan Point-in-Time Restore.
+              {canRestoreBackup
+                ? "Riwayat seluruh snapshot, bundel laporan, perbandingan perubahan (Diff Viewer), dan pemulihan Point-in-Time Restore."
+                : "Riwayat seluruh snapshot cadangan data, bundel laporan, dan perbandingan perubahan (Diff Viewer)."}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {backups.length === 0 ? (
               <p className="text-muted-foreground py-6 text-center text-sm">
-                Belum ada snapshot backup tersimpan. Super Admin dapat memicu Pre-Update
-                atau Backup Manual di atas.
+                Belum ada snapshot backup tersimpan. Gunakan tombol Pre-Update atau
+                Backup Manual di atas untuk membuat cadangan data.
               </p>
             ) : (
               <Table>
@@ -749,20 +804,22 @@ export function BackupClient({
                           {counts.archives_hybrid ?? 0} arsip
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {(["xlsx", "csv", "pdf", "json"] as const).map((ext) => (
-                              <Button
-                                key={ext}
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 px-2 font-mono text-xs uppercase"
-                                disabled={isPending}
-                                onClick={() => handleDownloadBackup(bkp.id, ext)}
-                              >
-                                .{ext}
-                              </Button>
-                            ))}
-                          </div>
+                          <Can action="backup.download">
+                            <div className="flex flex-wrap gap-1">
+                              {(["xlsx", "csv", "pdf", "json"] as const).map((ext) => (
+                                <Button
+                                  key={ext}
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2 font-mono text-xs uppercase"
+                                  disabled={isPending}
+                                  onClick={() => handleDownloadBackup(bkp.id, ext)}
+                                >
+                                  .{ext}
+                                </Button>
+                              ))}
+                            </div>
+                          </Can>
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1.5">
@@ -799,272 +856,280 @@ export function BackupClient({
         </Card>
       </Can>
 
-      {/* Snapshot Diff Viewer Dialog */}
-      <Dialog
-        open={Boolean(diffBackup)}
-        onOpenChange={(open) => !open && setDiffBackup(null)}
-      >
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <GitCompare className="size-4" />
-              Snapshot Diff Viewer —{" "}
-              <span className="font-mono">{diffBackup?.backup_code}</span>
-            </DialogTitle>
-            <DialogDescription>
-              {selectedDiff?.previous_backup_code
-                ? `Dibandingkan terhadap snapshot sebelumnya: ${selectedDiff.previous_backup_code} (${formatDateWIB(selectedDiff.previous_created_at, true)})`
-                : "Snapshot awal (belum ada backup pembanding sebelumnya)."}
-            </DialogDescription>
-          </DialogHeader>
+      {/* Snapshot Diff Viewer Dialog (OWNER & Admin Operasional) */}
+      {canViewBackups && (
+        <Dialog
+          open={Boolean(diffBackup)}
+          onOpenChange={(open) => !open && setDiffBackup(null)}
+        >
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <GitCompare className="size-4" />
+                Snapshot Diff Viewer —{" "}
+                <span className="font-mono">{diffBackup?.backup_code}</span>
+              </DialogTitle>
+              <DialogDescription>
+                {selectedDiff?.previous_backup_code
+                  ? `Dibandingkan terhadap snapshot sebelumnya: ${selectedDiff.previous_backup_code} (${formatDateWIB(selectedDiff.previous_created_at, true)})`
+                  : "Snapshot awal (belum ada backup pembanding sebelumnya)."}
+              </DialogDescription>
+            </DialogHeader>
 
-          {selectedDiff ? (
-            <div className="space-y-4 text-sm">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-lg border p-3">
-                  <p className="text-muted-foreground text-xs">Item Baru Ditambahkan</p>
-                  <p className="text-lg font-semibold">
-                    {selectedDiff.new_items_count} item
-                  </p>
-                  <p className="text-muted-foreground text-xs">
-                    Item dihapus/keluar: {selectedDiff.removed_items_count}
-                  </p>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <p className="text-muted-foreground text-xs">
-                    Anomali Part Kurang (PART_KURANG)
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-semibold">
-                      {selectedDiff.part_kurang_count} item
-                    </span>
-                    {formatDeltaBadge(selectedDiff.part_kurang_delta)}
-                  </div>
-                  <p className="text-muted-foreground text-xs">
-                    Stok rendah: {selectedDiff.low_stock_count} · Perlu sanitasi:{" "}
-                    {selectedDiff.needs_sanitization_count}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-lg border p-3">
-                <div className="flex items-center justify-between">
-                  <div>
+            {selectedDiff ? (
+              <div className="space-y-4 text-sm">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border p-3">
+                    <p className="text-muted-foreground text-xs">Item Baru Ditambahkan</p>
+                    <p className="text-lg font-semibold">
+                      {selectedDiff.new_items_count} item
+                    </p>
                     <p className="text-muted-foreground text-xs">
-                      Estimasi Biaya Langganan Vault / Bulan
-                    </p>
-                    <p className="text-base font-semibold">
-                      {formatRupiah(selectedDiff.subscription_monthly_cost_current)}
+                      Item dihapus/keluar: {selectedDiff.removed_items_count}
                     </p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-muted-foreground text-xs">Delta Biaya</p>
-                    {formatDeltaBadge(selectedDiff.subscription_cost_delta, true)}
-                  </div>
-                </div>
-              </div>
-
-              {selectedDiff.new_items.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-semibold uppercase">
-                    Daftar Item Baru (maks. 50)
-                  </p>
-                  <div className="max-h-36 overflow-y-auto rounded-md border p-2 text-xs">
-                    {selectedDiff.new_items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between py-1"
-                      >
-                        <span>
-                          <span className="font-mono">{item.item_code}</span> —{" "}
-                          {item.name}
-                        </span>
-                        <Badge variant="outline">{item.room_code}</Badge>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {selectedDiff.part_kurang_items.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-semibold uppercase">
-                    Item Berstatus PART_KURANG
-                  </p>
-                  <div className="max-h-36 overflow-y-auto rounded-md border p-2 text-xs">
-                    {selectedDiff.part_kurang_items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between py-1"
-                      >
-                        <span>
-                          <span className="font-mono">{item.item_code}</span> —{" "}
-                          {item.name} ({item.room_code})
-                        </span>
-                        <Badge variant="destructive">
-                          {item.current_parts}/{item.total_parts} part
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-1.5">
-                <p className="text-xs font-semibold uppercase">Perubahan Jumlah Baris</p>
-                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-                  {Object.entries(selectedDiff.row_deltas).map(([table, info]) => (
-                    <div
-                      key={table}
-                      className="flex items-center justify-between rounded border px-2.5 py-1.5"
-                    >
-                      <span className="truncate font-mono">{table}</span>
-                      <span className="font-semibold">
-                        {info.current} ({info.delta >= 0 ? `+${info.delta}` : info.delta})
+                  <div className="rounded-lg border p-3">
+                    <p className="text-muted-foreground text-xs">
+                      Anomali Part Kurang (PART_KURANG)
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-semibold">
+                        {selectedDiff.part_kurang_count} item
                       </span>
+                      {formatDeltaBadge(selectedDiff.part_kurang_delta)}
                     </div>
-                  ))}
+                    <p className="text-muted-foreground text-xs">
+                      Stok rendah: {selectedDiff.low_stock_count} · Perlu sanitasi:{" "}
+                      {selectedDiff.needs_sanitization_count}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-muted-foreground text-xs">
+                        Estimasi Biaya Langganan Brankas Digital / Bulan
+                      </p>
+                      <p className="text-base font-semibold">
+                        {formatRupiah(selectedDiff.subscription_monthly_cost_current)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-muted-foreground text-xs">Delta Biaya</p>
+                      {formatDeltaBadge(selectedDiff.subscription_cost_delta, true)}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedDiff.new_items.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold uppercase">
+                      Daftar Item Baru (maks. 50)
+                    </p>
+                    <div className="max-h-36 overflow-y-auto rounded-md border p-2 text-xs">
+                      {selectedDiff.new_items.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between py-1"
+                        >
+                          <span>
+                            <span className="font-mono">{item.item_code}</span> —{" "}
+                            {item.name}
+                          </span>
+                          <Badge variant="outline">{item.room_code}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedDiff.part_kurang_items.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold uppercase">
+                      Item Berstatus PART_KURANG
+                    </p>
+                    <div className="max-h-36 overflow-y-auto rounded-md border p-2 text-xs">
+                      {selectedDiff.part_kurang_items.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between py-1"
+                        >
+                          <span>
+                            <span className="font-mono">{item.item_code}</span> —{" "}
+                            {item.name} ({item.room_code})
+                          </span>
+                          <Badge variant="destructive">
+                            {item.current_parts}/{item.total_parts} part
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold uppercase">Perubahan Jumlah Baris</p>
+                  <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                    {Object.entries(selectedDiff.row_deltas).map(([table, info]) => (
+                      <div
+                        key={table}
+                        className="flex items-center justify-between rounded border px-2.5 py-1.5"
+                      >
+                        <span className="truncate font-mono">{table}</span>
+                        <span className="font-semibold">
+                          {info.current} ({info.delta >= 0 ? `+${info.delta}` : info.delta})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                Data ringkasan diff belum tersedia untuk snapshot ini.
+              </p>
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Point-in-Time Restore Dialog (OWNER only) */}
+      {canRestoreBackup && (
+        <Dialog
+          open={Boolean(restoreBackup)}
+          onOpenChange={(open) => !open && setRestoreBackup(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <RotateCcw className="size-4" />
+                Point-in-Time Restore (Khusus Owner)
+              </DialogTitle>
+              <DialogDescription>
+                Sistem akan otomatis membuat <strong>Pre-Restore Safety Backup</strong>{" "}
+                terlebih dahulu, lalu memulihkan data ke kondisi snapshot{" "}
+                <code className="font-semibold">{restoreBackup?.backup_code}</code>. Item
+                yang dibuat setelah snapshot akan dipindahkan ke Recycle Bin (soft-delete).
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirm-restore-code">
+                Ketik ulang kode backup{" "}
+                <code className="font-semibold">{restoreBackup?.backup_code}</code> untuk
+                konfirmasi:
+              </Label>
+              <Input
+                id="confirm-restore-code"
+                value={restoreConfirmCode}
+                onChange={(e) => setRestoreConfirmCode(e.target.value)}
+                placeholder={restoreBackup?.backup_code ?? ""}
+              />
             </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              Data ringkasan diff belum tersedia untuk snapshot ini.
-            </p>
-          )}
-        </DialogContent>
-      </Dialog>
 
-      {/* Point-in-Time Restore Dialog (SUPER_ADMIN only) */}
-      <Dialog
-        open={Boolean(restoreBackup)}
-        onOpenChange={(open) => !open && setRestoreBackup(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <RotateCcw className="size-4" />
-              Point-in-Time Restore (Super Admin)
-            </DialogTitle>
-            <DialogDescription>
-              Sistem akan otomatis membuat <strong>Pre-Restore Safety Backup</strong>{" "}
-              terlebih dahulu, lalu memulihkan data ke kondisi snapshot{" "}
-              <code className="font-semibold">{restoreBackup?.backup_code}</code>. Item
-              yang dibuat setelah snapshot akan dipindahkan ke Recycle Bin (soft-delete).
-            </DialogDescription>
-          </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setRestoreBackup(null)}
+                disabled={isPending}
+              >
+                Batal
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={
+                  isPending ||
+                  !restoreBackup ||
+                  restoreConfirmCode.trim().toUpperCase() !==
+                    restoreBackup.backup_code.toUpperCase()
+                }
+                onClick={handleConfirmRestore}
+              >
+                {isPending ? "Memulihkan..." : "Jalankan Restore Aman"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
-          <div className="space-y-2">
-            <Label htmlFor="confirm-restore-code">
-              Ketik ulang kode backup{" "}
-              <code className="font-semibold">{restoreBackup?.backup_code}</code> untuk
-              konfirmasi:
-            </Label>
-            <Input
-              id="confirm-restore-code"
-              value={restoreConfirmCode}
-              onChange={(e) => setRestoreConfirmCode(e.target.value)}
-              placeholder={restoreBackup?.backup_code ?? ""}
-            />
-          </div>
+      {/* Manual Backup Dialog (OWNER & Admin Operasional) */}
+      {canRunBackup && (
+        <Dialog open={manualDialogOpen} onOpenChange={setManualDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Buat Backup Manual Sekarang</DialogTitle>
+              <DialogDescription>
+                Menyimpan dump JSON lengkap (tanpa secret plaintext/encrypted) beserta
+                bundel .XLSX, .CSV, dan .PDF ke storage privat <code>backups</code>.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="manual-backup-notes">Catatan Backup (Opsional)</Label>
+              <Textarea
+                id="manual-backup-notes"
+                value={manualNotes}
+                onChange={(e) => setManualNotes(e.target.value)}
+                placeholder="Contoh: Snapshot sebelum audit eksternal / migrasi rak"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setManualDialogOpen(false)}
+                disabled={isPending}
+              >
+                Batal
+              </Button>
+              <Button
+                disabled={isPending}
+                onClick={() => handleCreateBackup("MANUAL", manualNotes)}
+              >
+                {isPending ? "Memproses..." : "Buat Snapshot"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setRestoreBackup(null)}
-              disabled={isPending}
-            >
-              Batal
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={
-                isPending ||
-                !restoreBackup ||
-                restoreConfirmCode.trim().toUpperCase() !==
-                  restoreBackup.backup_code.toUpperCase()
-              }
-              onClick={handleConfirmRestore}
-            >
-              {isPending ? "Memulihkan..." : "Jalankan Restore Aman"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Manual Backup Dialog */}
-      <Dialog open={manualDialogOpen} onOpenChange={setManualDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Buat Backup Manual Sekarang</DialogTitle>
-            <DialogDescription>
-              Menyimpan dump JSON lengkap (tanpa secret plaintext/encrypted) beserta
-              bundel .XLSX, .CSV, dan .PDF ke storage privat <code>backups</code>.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="manual-backup-notes">Catatan Backup (Opsional)</Label>
-            <Textarea
-              id="manual-backup-notes"
-              value={manualNotes}
-              onChange={(e) => setManualNotes(e.target.value)}
-              placeholder="Contoh: Snapshot sebelum audit eksternal / migrasi rak"
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setManualDialogOpen(false)}
-              disabled={isPending}
-            >
-              Batal
-            </Button>
-            <Button
-              disabled={isPending}
-              onClick={() => handleCreateBackup("MANUAL", manualNotes)}
-            >
-              {isPending ? "Memproses..." : "Buat Snapshot"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Owner Final Approval & Lock Dialog */}
-      <Dialog open={ownerLockDialogOpen} onOpenChange={setOwnerLockDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Pengesahan Akhir & Kunci Periode ({period.periodCode})</DialogTitle>
-            <DialogDescription>
-              Setelah dikunci oleh Owner, daftar opname dan persetujuan periode{" "}
-              <strong>{period.periodLabel}</strong> tidak dapat diubah lagi.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="owner-lock-notes">Catatan Pengesahan Owner (Opsional)</Label>
-            <Textarea
-              id="owner-lock-notes"
-              value={ownerNotes}
-              onChange={(e) => setOwnerNotes(e.target.value)}
-              placeholder="Contoh: Disetujui sesuai hasil opname akhir bulan."
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setOwnerLockDialogOpen(false)}
-              disabled={isPending}
-            >
-              Batal
-            </Button>
-            <Button
-              disabled={isPending}
-              onClick={() => handleApproveStage("owner", ownerNotes)}
-            >
-              {isPending ? "Mengunci..." : "Sahkan & Kunci Periode"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Owner Final Approval & Lock Dialog (OWNER only) */}
+      {canApproveFinal && (
+        <Dialog open={ownerLockDialogOpen} onOpenChange={setOwnerLockDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Pengesahan Akhir &amp; Kunci Periode ({period.periodCode})</DialogTitle>
+              <DialogDescription>
+                Setelah dikunci oleh Owner, daftar opname dan persetujuan periode{" "}
+                <strong>{period.periodLabel}</strong> tidak dapat diubah lagi.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="owner-lock-notes">Catatan Pengesahan Owner (Opsional)</Label>
+              <Textarea
+                id="owner-lock-notes"
+                value={ownerNotes}
+                onChange={(e) => setOwnerNotes(e.target.value)}
+                placeholder="Contoh: Disetujui sesuai hasil opname akhir bulan."
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setOwnerLockDialogOpen(false)}
+                disabled={isPending}
+              >
+                Batal
+              </Button>
+              <Button
+                disabled={isPending}
+                onClick={() => handleApproveStage("owner", ownerNotes)}
+              >
+                {isPending ? "Mengunci..." : "Sahkan & Kunci Periode"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

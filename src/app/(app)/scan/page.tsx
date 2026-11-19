@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { requireRouteAccess } from "@/lib/auth";
 import { lookupScanTargetAction, type ScanLookupResult } from "@/lib/actions/scan";
+import { can } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { ScanClient, type RecentScanFeedRow } from "./scan-client";
 
@@ -9,12 +10,42 @@ export const metadata: Metadata = {
   title: "Scan Pinjam & Kembali",
 };
 
+function sanitizeLookupValuation(
+  lookup: ScanLookupResult | null,
+  canViewValuation: boolean,
+): ScanLookupResult | null {
+  if (!lookup || canViewValuation) return lookup;
+  if (lookup.kind === "item") {
+    return {
+      ...lookup,
+      item: {
+        ...lookup.item,
+        purchase_price: 0,
+        residual_value: 0,
+        useful_life_months: null,
+        acquisition_date: null,
+      },
+    };
+  }
+  return {
+    ...lookup,
+    bundledItems: lookup.bundledItems.map((it) => ({
+      ...it,
+      purchase_price: 0,
+      residual_value: 0,
+      useful_life_months: null,
+      acquisition_date: null,
+    })),
+  };
+}
+
 export default async function ScanPage({
   searchParams,
 }: {
   searchParams: Promise<{ code?: string }>;
 }) {
-  await requireRouteAccess("/scan");
+  const user = await requireRouteAccess("/scan");
+  const canViewValuation = can(user.role, "inventory.view_valuation");
   const resolvedParams = await searchParams;
   const initialCode = resolvedParams.code?.trim() ?? "";
 
@@ -24,7 +55,7 @@ export default async function ScanPage({
   if (initialCode) {
     const res = await lookupScanTargetAction(initialCode);
     if (res.ok) {
-      initialLookup = res.data;
+      initialLookup = sanitizeLookupValuation(res.data, canViewValuation);
     } else {
       initialError = res.error;
     }

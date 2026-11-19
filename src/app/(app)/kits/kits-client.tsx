@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { Can } from "@/components/rbac/can";
+import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,10 @@ export function KitsClient({
   recentKitBorrows,
   todayWib,
 }: KitsClientProps) {
+  const { user, role, can } = useRole();
+  const canManageKits = can("kits.manage");
+  const canReturnAnyKit = role !== "STAFF";
+
   const [search, setSearch] = useState("");
   const [roomFilter, setRoomFilter] = useState(ALL_OPTION);
   const [statusFilter, setStatusFilter] = useState(ALL_OPTION);
@@ -386,7 +391,9 @@ export function KitsClient({
             <Boxes className="text-muted-foreground size-10 opacity-50" />
             <p className="font-medium">Belum ada kit yang sesuai</p>
             <p className="text-muted-foreground text-sm">
-              Buat kit baru untuk mengelompokkan beberapa mainan terapi dalam satu check-out.
+              {canManageKits
+                ? "Buat kit baru untuk mengelompokkan beberapa mainan terapi dalam satu check-out."
+                : "Belum ada paket alat (kit) yang cocok dengan filter pencarian Anda."}
             </p>
           </CardContent>
         </Card>
@@ -518,19 +525,25 @@ export function KitsClient({
 
                   <Can action="kits.checkout">
                     {kit.status === "DIPINJAM" ? (
-                      <Button
-                        variant="default"
-                        size="sm"
-                        onClick={() => handleOpenReturnDialog(kit)}
-                        disabled={rowBusy}
-                      >
-                        {rowBusy ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          <ArrowLeftRight className="size-4" />
-                        )}
-                        Kembalikan Kit
-                      </Button>
+                      canReturnAnyKit || activeBorrow?.borrower_id === user.id ? (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => handleOpenReturnDialog(kit)}
+                          disabled={rowBusy}
+                        >
+                          {rowBusy ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <ArrowLeftRight className="size-4" />
+                          )}
+                          Kembalikan Kit
+                        </Button>
+                      ) : (
+                        <Badge variant="secondary" className="text-xs font-normal">
+                          Dipinjam oleh {activeBorrow?.borrower_name || "rekan terapis"}
+                        </Badge>
+                      )
                     ) : (
                       <Button
                         size="sm"
@@ -619,16 +632,18 @@ export function KitsClient({
         </CardContent>
       </Card>
 
-      <KitFormDialog
-        key={editingKit?.id ?? (formOpen ? "kit-new-open" : "kit-new-closed")}
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        editingKit={editingKit}
-        availableItems={items}
-        onSaved={(_saved, message) => {
-          if (message) setFeedback({ type: "success", text: message });
-        }}
-      />
+      {canManageKits && (
+        <KitFormDialog
+          key={editingKit?.id ?? (formOpen ? "kit-new-open" : "kit-new-closed")}
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          editingKit={editingKit}
+          availableItems={items}
+          onSaved={(_saved, message) => {
+            if (message) setFeedback({ type: "success", text: message });
+          }}
+        />
+      )}
 
       <Dialog
         open={Boolean(returnTarget)}

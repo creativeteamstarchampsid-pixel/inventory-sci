@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
-import { isRole, type Role } from "@/lib/rbac";
+import {
+  ROLE_LABELS,
+  canManageTargetRole,
+  isRole,
+  type Role,
+} from "@/lib/rbac";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/types/database";
@@ -76,10 +81,11 @@ export async function createOrInviteUserAction(input: {
   if (!isRole(input.role)) {
     return { ok: false, error: "Peran pengguna tidak valid." };
   }
-  if (input.role === "OWNER" && actor.role !== "OWNER") {
+  if (!canManageTargetRole(actor.role, input.role)) {
     return {
       ok: false,
-      error: "Hanya Owner yang dapat membuat akun dengan peran Owner.",
+      error:
+        "Hanya Owner yang dapat membuat akun dengan peran Owner atau Admin Operasional.",
     };
   }
 
@@ -170,7 +176,7 @@ export async function createOrInviteUserAction(input: {
       entity_type: "profiles",
       entity_id: profile.id,
       entity_code: profile.email,
-      summary: `${input.mode === "invite" ? "Mengundang" : "Membuat"} pengguna ${fullName} (${email}) sebagai ${input.role}`,
+      summary: `${input.mode === "invite" ? "Mengundang" : "Membuat"} pengguna ${fullName} (${email}) sebagai ${ROLE_LABELS[input.role].title}`,
     });
 
     revalidatePath("/settings");
@@ -219,12 +225,13 @@ export async function updateUserRoleAction(input: {
   }
 
   if (
-    actor.role !== "OWNER" &&
-    (target.role === "OWNER" || input.role === "OWNER")
+    !canManageTargetRole(actor.role, target.role) ||
+    !canManageTargetRole(actor.role, input.role)
   ) {
     return {
       ok: false,
-      error: "Hanya Owner yang dapat mengubah atau menetapkan peran Owner.",
+      error:
+        "Hanya Owner yang dapat mengubah atau menetapkan peran Owner maupun Admin Operasional.",
     };
   }
 
@@ -247,7 +254,7 @@ export async function updateUserRoleAction(input: {
   return {
     ok: true,
     data,
-    message: `Peran ${data.full_name || data.email} diperbarui menjadi ${input.role}.`,
+    message: `Peran ${data.full_name || data.email} diperbarui menjadi ${ROLE_LABELS[input.role].title}.`,
   };
 }
 
@@ -274,10 +281,11 @@ export async function toggleUserActiveAction(input: {
     return { ok: false, error: "Pengguna tidak ditemukan." };
   }
 
-  if (actor.role !== "OWNER" && target.role === "OWNER") {
+  if (!canManageTargetRole(actor.role, target.role)) {
     return {
       ok: false,
-      error: "Hanya Owner yang dapat mengubah status aktif akun Owner.",
+      error:
+        "Hanya Owner yang dapat mengubah status aktif akun Owner atau Admin Operasional.",
     };
   }
 
@@ -329,10 +337,11 @@ export async function toggleUserOffboardAction(input: {
     return { ok: false, error: "Pengguna tidak ditemukan." };
   }
 
-  if (actor.role !== "OWNER" && target.role === "OWNER") {
+  if (!canManageTargetRole(actor.role, target.role)) {
     return {
       ok: false,
-      error: "Hanya Owner yang dapat menandai offboarding akun Owner.",
+      error:
+        "Hanya Owner yang dapat menandai offboarding akun Owner atau Admin Operasional.",
     };
   }
 

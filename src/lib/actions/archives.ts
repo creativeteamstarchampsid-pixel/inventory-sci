@@ -233,7 +233,7 @@ export async function getArchiveSignedUrlAction(input: {
       return {
         ok: false,
         error:
-          "Unduhan file versi historis hanya tersedia untuk Team Leader, Super Admin, atau Owner.",
+          "Unduhan file versi historis hanya tersedia untuk Kepala Terapis, Admin Operasional, atau Owner.",
       };
     }
 
@@ -283,15 +283,20 @@ export async function getArchiveSignedUrlAction(input: {
 
 /**
  * Fetches version history rows from `archive_versions` for a given document.
+ * STAFF only sees the active SOP document — historical versions and old Drive links are hidden.
  */
 export async function getArchiveVersionsAction(
   archiveId: string,
 ): Promise<ActionResult<ArchiveVersionItem[]>> {
-  await requireRouteAccess("/archives");
+  const user = await requireRouteAccess("/archives");
   await requireAction("archive.view");
 
   if (!archiveId || !isValidUuid(archiveId)) {
     return { ok: false, error: "ID dokumen arsip tidak valid." };
+  }
+
+  if (user.role === "STAFF") {
+    return { ok: true, data: [] };
   }
 
   const supabase = await createClient();

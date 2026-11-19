@@ -37,31 +37,31 @@ const ADMINS: readonly Role[] = ["OWNER", "SUPER_ADMIN"];
  */
 export const ROUTE_PERMISSIONS: Record<string, readonly Role[]> = {
   "/dashboard": ALL,
-  // User guide for every role.
+  // User guide for every role (shows only the signed-in role's guide).
   "/guide": ALL,
-  // Everyone sees inventory (STAFF: read + report missing parts / damage).
+  // Everyone sees inventory (STAFF/TEAM_LEADER: read + hygiene + report issues; ADMINS: full CRUD & valuation).
   "/inventory": ALL,
-  // Kits: STAFF can view and check out kits; SUPER_ADMIN/OWNER manage them.
+  // Kits: STAFF/TEAM_LEADER can view and check out/return; ADMINS manage them.
   "/kits": ALL,
   // Barcode & label print studio is an admin tool.
   "/barcode-studio": ADMINS,
-  // Borrow / return scanning – primary STAFF workflow, open to all.
+  // Borrow / return scanning – open to all; Stock Opname tab gated by inventory.validate_opname.
   "/scan": ALL,
-  // STAFF has no access to the Subscription Vault; TEAM_LEADER is view-limited.
-  "/vault": MANAGEMENT,
-  // Hybrid archive: STAFF can read SOPs / documents (RLS limits the rows).
+  // Subscription Vault: Owner & Admin Operasional only.
+  "/vault": ADMINS,
+  // Hybrid archive: STAFF reads public SOPs only (enforced by RLS); TEAM_LEADER reads all docs; ADMINS manage.
   "/archives": ALL,
-  // Deliveries: managed by SUPER_ADMIN, visible to OWNER and TEAM_LEADER.
-  "/deliveries": MANAGEMENT,
-  // Internal Request Hub: STAFF create tickets, management approves.
+  // Deliveries & logistics: Owner & Admin Operasional only.
+  "/deliveries": ADMINS,
+  // Internal Request Hub: STAFF create & see own tickets; MANAGEMENT approves per stage.
   "/requests": ALL,
-  // Activity stream / audit trail: oversight roles only.
-  "/audit-log": MANAGEMENT,
-  // Export & Backup Center: STAFF has no access to backups.
+  // Activity stream / audit trail: Owner & Admin Operasional only.
+  "/audit-log": ADMINS,
+  // Export, Monthly Reconciliation & Backup Center: TEAM_LEADER gets room opname + operational exports; ADMINS get backups; OWNER gets final lock & restore.
   "/backup": MANAGEMENT,
-  // 30-day recycle bin (soft-delete restore).
+  // 30-day recycle bin (view & restore: ADMINS; permanent purge: OWNER only).
   "/recycle-bin": ADMINS,
-  // Personal settings for everyone; user management gated by action below.
+  // Personal settings for everyone; user management gated by users.manage / users.manage_admins.
   "/settings": ALL,
 };
 
@@ -107,13 +107,14 @@ export function canAccessRoute(role: Role | null | undefined, pathname: string):
 export const ACTION_PERMISSIONS = {
   // Inventory, office assets & therapy toys
   "inventory.view": ALL,
+  "inventory.view_valuation": ADMINS, // harga beli, nilai buku, penyusutan
   "inventory.create": ADMINS,
   "inventory.update": ADMINS,
   "inventory.delete": ADMINS,
   "inventory.report_issue": ALL, // missing parts / damage report
-  "inventory.update_hygiene": ["OWNER", "SUPER_ADMIN", "TEAM_LEADER", "STAFF"],
-  "inventory.validate_opname": MANAGEMENT, // room stock-opname validation
-  "inventory.writeoff_request": ADMINS,
+  "inventory.update_hygiene": ALL,
+  "inventory.validate_opname": MANAGEMENT, // room & item stock-opname validation
+  "inventory.writeoff_request": ADMINS, // submit PENGHAPUSAN_ASET ticket
 
   // Kits
   "kits.view": ALL,
@@ -126,48 +127,54 @@ export const ACTION_PERMISSIONS = {
   // Scan borrow / return
   "scan.borrow_return": ALL,
 
-  // Subscription vault
-  "vault.view_limited": MANAGEMENT, // service, plan, renewal, slots – no secrets
+  // Subscription vault (ADMINS only — Owner & Admin Operasional)
+  "vault.view_limited": ADMINS,
   "vault.view_billing": ADMINS, // cost, payment method
   "vault.reveal_secret": ADMINS, // decrypt + copy, always audit-logged
-  "vault.manage": ["SUPER_ADMIN"],
+  "vault.manage": ADMINS, // create, edit, rotate password, soft-delete
 
   // Hybrid archive
   "archive.view": ALL,
   "archive.manage": ADMINS,
 
-  // Deliveries & logistics
-  "delivery.view": MANAGEMENT,
-  "delivery.manage": ["SUPER_ADMIN"],
-  "delivery.convert_to_stock": ["SUPER_ADMIN"],
+  // Deliveries & logistics (ADMINS only — Owner & Admin Operasional)
+  "delivery.view": ADMINS,
+  "delivery.manage": ADMINS,
+  "delivery.convert_to_stock": ADMINS,
 
   // Internal requests & e-approval
   "request.create": ALL,
   "request.view_all": MANAGEMENT,
-  "request.approve": MANAGEMENT, // intermediate approval steps
-  "approval.final": ["OWNER"], // final e-approval (monthly reports, write-offs)
-  "writeoff.approve": ["OWNER"],
+  "request.approve": MANAGEMENT, // Stage 1 approval (MENUNGGU_TEAM_LEADER)
+  "request.approve_admin": ADMINS, // Stage 2 verification (MENUNGGU_ADMIN)
+  "request.complete": ADMINS, // DISETUJUI -> SELESAI
+  "request.delete": ADMINS, // soft-delete ticket to recycle bin
+  "approval.final": ["OWNER"], // final e-approval (MENUNGGU_OWNER)
+  "writeoff.approve": ["OWNER"], // approve write-off & set DIHAPUSBUKU
 
-  // Audit trail
-  "audit.view": MANAGEMENT,
+  // Audit trail (ADMINS only)
+  "audit.view": ADMINS,
 
   // Export, monthly reconciliation & backups
-  "export.data": MANAGEMENT,
-  "reconciliation.submit": ["SUPER_ADMIN", "TEAM_LEADER"],
-  "reconciliation.approve_final": ["OWNER"],
+  "export.data": MANAGEMENT, // operational exports (TL without valuation/vault/deliveries/audit)
+  "export.financial": ADMINS, // valuation, deliveries, vault, audit exports
+  "reconciliation.submit": MANAGEMENT, // room opname checklist & Team Leader stage
+  "reconciliation.verify_admin": ADMINS, // Admin Ops verification stage (Owner may also sign)
+  "reconciliation.approve_final": ["OWNER"], // final lock & sign-off
   "backup.view": ADMINS,
   "backup.download": ADMINS,
-  "backup.run_manual": ["SUPER_ADMIN"],
-  "backup.restore": ["SUPER_ADMIN"],
+  "backup.run_manual": ADMINS, // create manual / pre-update / cut-off backup
+  "backup.restore": ["OWNER"], // destructive point-in-time DB restore (OWNER only)
 
   // Recycle bin
   "recycle.view": ADMINS,
   "recycle.restore": ADMINS,
-  "recycle.purge": ["SUPER_ADMIN"],
+  "recycle.purge": ["OWNER"], // permanent hard-delete & purge >30 days (OWNER only)
 
-  // Settings
+  // Settings & user management
   "settings.profile": ALL,
-  "users.manage": ADMINS,
+  "users.manage": ADMINS, // manage TEAM_LEADER & STAFF (and all roles for OWNER)
+  "users.manage_admins": ["OWNER"], // manage OWNER & SUPER_ADMIN accounts (OWNER only)
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Action = keyof typeof ACTION_PERMISSIONS;
@@ -182,6 +189,37 @@ export function hasAnyRole(
   roles: readonly Role[],
 ): boolean {
   return !!role && roles.includes(role);
+}
+
+/**
+ * Whether `actorRole` is allowed to manage (create, change role, activate,
+ * deactivate, or offboard) a user with `targetRole`.
+ * - OWNER may manage all 4 roles.
+ * - SUPER_ADMIN (Admin Operasional) may manage TEAM_LEADER and STAFF only.
+ */
+export function canManageTargetRole(
+  actorRole: Role | null | undefined,
+  targetRole: Role,
+): boolean {
+  if (actorRole === "OWNER") return true;
+  if (actorRole === "SUPER_ADMIN") {
+    return targetRole === "TEAM_LEADER" || targetRole === "STAFF";
+  }
+  return false;
+}
+
+/**
+ * Roles that `actorRole` may assign when inviting/creating a user or changing
+ * another user's role.
+ */
+export function getAssignableRoles(actorRole: Role | null | undefined): Role[] {
+  if (actorRole === "OWNER") {
+    return ["OWNER", "SUPER_ADMIN", "TEAM_LEADER", "STAFF"];
+  }
+  if (actorRole === "SUPER_ADMIN") {
+    return ["TEAM_LEADER", "STAFF"];
+  }
+  return [];
 }
 
 /** Where to send a signed-in user who lands on `/` or is bounced from a route. */

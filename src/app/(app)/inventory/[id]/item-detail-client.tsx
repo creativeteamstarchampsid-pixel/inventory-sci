@@ -97,6 +97,11 @@ export function ItemDetailClient({
 }: ItemDetailClientProps) {
   const router = useRouter();
   const { can } = useRole();
+  const canViewValuation = can("inventory.view_valuation");
+  const canApproveWriteoff = can("writeoff.approve");
+  const canCreateItem = can("inventory.create");
+  const canUpdateItem = can("inventory.update");
+  const lockedWrittenOff = item.condition === "DIHAPUSBUKU" && !canApproveWriteoff;
 
   const [partsValue, setPartsValue] = useState(String(item.current_parts));
   const [stockValue, setStockValue] = useState(String(item.stock_qty));
@@ -398,16 +403,25 @@ export function ItemDetailClient({
                     <Select
                       value={item.condition}
                       onValueChange={(v) => handleConditionChange(v as ItemCondition)}
-                      disabled={isPending}
+                      disabled={isPending || lockedWrittenOff}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {(Object.keys(CONDITION_LABELS) as ItemCondition[])
-                          .filter((k) => k !== "DIHAPUSBUKU" || can("inventory.update"))
+                          .filter(
+                            (k) =>
+                              k !== "DIHAPUSBUKU" ||
+                              canApproveWriteoff ||
+                              item.condition === "DIHAPUSBUKU",
+                          )
                           .map((key) => (
-                            <SelectItem key={key} value={key}>
+                            <SelectItem
+                              key={key}
+                              value={key}
+                              disabled={key === "DIHAPUSBUKU" && !canApproveWriteoff}
+                            >
                               {CONDITION_LABELS[key]}
                             </SelectItem>
                           ))}
@@ -443,40 +457,45 @@ export function ItemDetailClient({
             </Card>
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Nilai Aset & Penyusutan Garis Lurus</CardTitle>
-              <CardDescription>
-                Perhitungan otomatis berdasarkan harga beli, tanggal perolehan, umur manfaat, dan nilai residu.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                <div>
-                  <p className="text-muted-foreground text-xs">Tanggal Perolehan</p>
-                  <p className="text-sm font-medium">{formatDateWIB(item.acquisition_date)}</p>
+          {canViewValuation && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Nilai Aset & Penyusutan Garis Lurus</CardTitle>
+                <CardDescription>
+                  Perhitungan otomatis berdasarkan harga beli, tanggal perolehan, umur manfaat, dan
+                  nilai residu.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                  <div>
+                    <p className="text-muted-foreground text-xs">Tanggal Perolehan</p>
+                    <p className="text-sm font-medium">{formatDateWIB(item.acquisition_date)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">Harga Beli</p>
+                    <p className="text-sm font-medium">{formatRupiah(item.purchase_price)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">Umur Manfaat</p>
+                    <p className="text-sm font-medium">
+                      {item.useful_life_months ? `${item.useful_life_months} Bulan` : "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">Akumulasi Penyusutan</p>
+                    <p className="text-sm font-medium">{formatRupiah(depreciationAccumulated)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">Nilai Buku Saat Ini</p>
+                    <p className="text-primary text-base font-semibold">
+                      {formatRupiah(bookValue)}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Harga Beli</p>
-                  <p className="text-sm font-medium">{formatRupiah(item.purchase_price)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Umur Manfaat</p>
-                  <p className="text-sm font-medium">
-                    {item.useful_life_months ? `${item.useful_life_months} Bulan` : "-"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Akumulasi Penyusutan</p>
-                  <p className="text-sm font-medium">{formatRupiah(depreciationAccumulated)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground text-xs">Nilai Buku Saat Ini</p>
-                  <p className="text-primary text-base font-semibold">{formatRupiah(bookValue)}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-2">
@@ -611,28 +630,32 @@ export function ItemDetailClient({
         </div>
       </div>
 
-      <ItemFormDialog
-        key={`edit-${item.id}-${editOpen}`}
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        editingItem={item}
-        initialSignedPhotoUrl={signedPhotoUrl}
-        parentCandidates={allItemsForParentSelect}
-        onSaved={(_saved, message) => {
-          if (message) setFeedback({ type: "success", text: message });
-        }}
-      />
+      {canUpdateItem && (
+        <ItemFormDialog
+          key={`edit-${item.id}-${editOpen}`}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          editingItem={item}
+          initialSignedPhotoUrl={signedPhotoUrl}
+          parentCandidates={allItemsForParentSelect}
+          onSaved={(_saved, message) => {
+            if (message) setFeedback({ type: "success", text: message });
+          }}
+        />
+      )}
 
-      <ItemFormDialog
-        key={`sub-${item.id}-${createSubOpen}`}
-        open={createSubOpen}
-        onOpenChange={setCreateSubOpen}
-        defaultParentId={item.id}
-        parentCandidates={allItemsForParentSelect}
-        onSaved={(_saved, message) => {
-          if (message) setFeedback({ type: "success", text: message });
-        }}
-      />
+      {canCreateItem && (
+        <ItemFormDialog
+          key={`sub-${item.id}-${createSubOpen}`}
+          open={createSubOpen}
+          onOpenChange={setCreateSubOpen}
+          defaultParentId={item.id}
+          parentCandidates={allItemsForParentSelect}
+          onSaved={(_saved, message) => {
+            if (message) setFeedback({ type: "success", text: message });
+          }}
+        />
+      )}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-md">

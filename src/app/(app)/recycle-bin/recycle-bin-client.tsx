@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { Can } from "@/components/rbac/can";
+import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,6 +76,8 @@ const TAB_CONFIG: Array<{
 
 export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
   const router = useRouter();
+  const { can } = useRole();
+  const canPurge = can("recycle.purge");
   const [isPending, startTransition] = useTransition();
   const [activeTab, setActiveTab] = useState<RecycleTable>("items_master");
   const [purgeTarget, setPurgeTarget] = useState<DeletedRecordRow | null>(null);
@@ -145,7 +148,7 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
           </h1>
           <p className="text-muted-foreground text-sm">
             Data yang dihapus lunak (soft-delete) disimpan selama 30 hari sebelum
-            dibersihkan permanen oleh sistem cron atau Super Admin.
+            dibersihkan permanen oleh sistem otomatis atau Owner.
           </p>
         </div>
 
@@ -159,7 +162,7 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
               onClick={handlePurgeExpired}
             >
               <Trash2 className="mr-1.5 size-3.5" />
-              Bersihkan Kadaluarsa (&gt; 30 Hari)
+              Bersihkan &gt; 30 Hari
             </Button>
           </Can>
         </div>
@@ -186,7 +189,9 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
             Daftar Data Terhapus per Modul
           </CardTitle>
           <CardDescription>
-            Pulihkan data ke status aktif atau hapus permanen (khusus Super Admin).
+            {canPurge
+              ? "Pulihkan data ke status aktif atau hapus permanen (khusus Owner)."
+              : "Pulihkan data yang terhapus kembali ke status aktif. Penghapusan permanen hanya dapat dilakukan oleh Owner."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -279,7 +284,7 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
                                     onClick={() => setPurgeTarget(row)}
                                   >
                                     <Trash2 className="mr-1 size-3.5" />
-                                    Purge
+                                    Hapus Permanen
                                   </Button>
                                 </Can>
                               </div>
@@ -296,42 +301,44 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
         </CardContent>
       </Card>
 
-      {/* Permanent Purge Confirmation Dialog */}
-      <Dialog
-        open={Boolean(purgeTarget)}
-        onOpenChange={(open) => !open && setPurgeTarget(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-destructive flex items-center gap-2">
-              <AlertTriangle className="size-4" />
-              Hapus Permanen (Tidak Dapat Dibatalkan)
-            </DialogTitle>
-            <DialogDescription>
-              Anda akan menghapus permanen{" "}
-              <code className="font-semibold">{purgeTarget?.code}</code> (
-              {purgeTarget?.title}). Data yang di-purge tidak dapat dipulihkan lagi dari
-              Recycle Bin.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setPurgeTarget(null)}
-              disabled={isPending}
-            >
-              Batal
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={isPending}
-              onClick={handleConfirmPurge}
-            >
-              {isPending ? "Menghapus..." : "Hapus Permanen"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Permanent Purge Confirmation Dialog (OWNER only) */}
+      {canPurge && (
+        <Dialog
+          open={Boolean(purgeTarget)}
+          onOpenChange={(open) => !open && setPurgeTarget(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="text-destructive flex items-center gap-2">
+                <AlertTriangle className="size-4" />
+                Hapus Permanen (Tidak Dapat Dibatalkan)
+              </DialogTitle>
+              <DialogDescription>
+                Anda akan menghapus permanen{" "}
+                <code className="font-semibold">{purgeTarget?.code}</code> (
+                {purgeTarget?.title}). Data yang di-purge tidak dapat dipulihkan lagi dari
+                Recycle Bin.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setPurgeTarget(null)}
+                disabled={isPending}
+              >
+                Batal
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={isPending}
+                onClick={handleConfirmPurge}
+              >
+                {isPending ? "Menghapus..." : "Hapus Permanen"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

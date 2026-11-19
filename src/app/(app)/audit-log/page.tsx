@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 
 import { requireRouteAccess } from "@/lib/auth";
-import { scrubVaultAuditEntry } from "@/lib/exports/csv";
+import { ROLE_LABELS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import type { AuditLog } from "@/types/database";
 import { AuditLogClient } from "./audit-log-client";
 
 export const metadata: Metadata = {
-  title: "Log Aktivitas",
+  title: "Riwayat Aktivitas",
 };
 
 type SearchParamsInput = Promise<{
@@ -22,7 +22,7 @@ export default async function AuditLogPage({
 }: {
   searchParams: SearchParamsInput;
 }) {
-  const user = await requireRouteAccess("/audit-log");
+  await requireRouteAccess("/audit-log");
   const resolvedParams = await searchParams;
 
   const action = resolvedParams.action?.trim() || "ALL";
@@ -64,18 +64,16 @@ export default async function AuditLogPage({
       .order("full_name", { ascending: true }),
   ]);
 
-  const rawLogs = (logsRes.data ?? []) as AuditLog[];
-  const sanitizedLogs =
-    user.role === "TEAM_LEADER" ? rawLogs.map(scrubVaultAuditEntry) : rawLogs;
+  const logs = (logsRes.data ?? []) as AuditLog[];
 
   const actors = (profilesRes.data ?? []).map((p) => ({
     id: p.id,
-    label: `${p.full_name?.trim() || p.email || "Pengguna"} (${p.role})`,
+    label: `${p.full_name?.trim() || p.email || "Pengguna"} (${ROLE_LABELS[p.role]?.title ?? p.role})`,
   }));
 
   return (
     <AuditLogClient
-      initialLogs={sanitizedLogs}
+      initialLogs={logs}
       actors={actors}
       initialFilters={{
         action,

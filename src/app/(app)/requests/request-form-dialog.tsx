@@ -29,6 +29,7 @@ import {
   updateRequestAction,
 } from "@/lib/actions/requests";
 import { REQUEST_TYPE_LABELS } from "@/lib/constants";
+import { ROLE_LABELS } from "@/lib/rbac";
 import type { InternalRequest, RequestType } from "@/types/database";
 import {
   requiresOwnerFinalApproval,
@@ -57,7 +58,13 @@ export function RequestFormDialog({
 }: RequestFormDialogProps) {
   const { can } = useRole();
   const canLinkVault = can("vault.view_limited");
+  const canRequestWriteoff = can("inventory.writeoff_request");
+  const isManagement = can("request.view_all");
   const isEditing = Boolean(editingRequest);
+
+  const availableRequestTypes = (
+    Object.keys(REQUEST_TYPE_LABELS) as RequestType[]
+  ).filter((rt) => rt !== "PENGHAPUSAN_ASET" || canRequestWriteoff);
 
   const [requestType, setRequestType] =
     useState<RequestType>("PENGADAAN_BARANG");
@@ -157,8 +164,9 @@ export function RequestFormDialog({
               : "Buat Tiket Pengajuan Internal"}
           </DialogTitle>
           <DialogDescription>
-            Tiket akan masuk ke alur persetujuan bertingkat (Team Leader →
-            Super Admin → Owner jika diperlukan).
+            {isManagement
+              ? `Tiket akan diproses secara berjenjang (${ROLE_LABELS.TEAM_LEADER.title} → ${ROLE_LABELS.SUPER_ADMIN.title} → ${ROLE_LABELS.OWNER.title} bila diperlukan).`
+              : "Ajukan kebutuhan barang, laporan kerusakan, kepingan hilang, atau akses akun untuk ditindaklanjuti."}
           </DialogDescription>
         </DialogHeader>
 
@@ -180,13 +188,11 @@ export function RequestFormDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(REQUEST_TYPE_LABELS) as RequestType[]).map(
-                  (rt) => (
-                    <SelectItem key={rt} value={rt}>
-                      {REQUEST_TYPE_LABELS[rt]}
-                    </SelectItem>
-                  ),
-                )}
+                {availableRequestTypes.map((rt) => (
+                  <SelectItem key={rt} value={rt}>
+                    {REQUEST_TYPE_LABELS[rt]}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -209,7 +215,11 @@ export function RequestFormDialog({
               id="req_desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Jelaskan kebutuhan, detail kerusakan, bagian yang hilang, atau alasan penghapusan aset..."
+              placeholder={
+                canRequestWriteoff
+                  ? "Jelaskan kebutuhan, detail kerusakan, bagian yang hilang, atau alasan penghapusan aset..."
+                  : "Jelaskan kebutuhan barang, detail kerusakan, atau bagian mainan yang hilang..."
+              }
               rows={4}
               required
               minLength={5}
@@ -250,7 +260,7 @@ export function RequestFormDialog({
 
           {canLinkVault && (
             <div className="space-y-1.5">
-              <Label>Tautkan Akun Subscription Vault (Opsional)</Label>
+              <Label>Tautkan Akun Brankas Digital (Opsional)</Label>
               <Select value={relatedSubId} onValueChange={setRelatedSubId}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Pilih akun langganan..." />
@@ -267,25 +277,36 @@ export function RequestFormDialog({
             </div>
           )}
 
-          {needsOwnerFinal ? (
-            <Alert variant="warning">
-              <ShieldAlert className="size-4" />
-              <AlertDescription>
-                Pengajuan{" "}
-                <strong>
-                  {requestType === "PENGHAPUSAN_ASET"
-                    ? "Penghapusan Aset"
-                    : "Pengadaan Barang Beranggaran"}
-                </strong>{" "}
-                wajib melalui verifikasi Admin dan{" "}
-                <strong>Pengesahan Final Owner</strong>.
-              </AlertDescription>
-            </Alert>
+          {isManagement ? (
+            needsOwnerFinal ? (
+              <Alert variant="warning">
+                <ShieldAlert className="size-4" />
+                <AlertDescription>
+                  Pengajuan{" "}
+                  <strong>
+                    {requestType === "PENGHAPUSAN_ASET"
+                      ? "Penghapusan Aset"
+                      : "Pengadaan Barang Beranggaran"}
+                  </strong>{" "}
+                  wajib melalui verifikasi {ROLE_LABELS.SUPER_ADMIN.title} dan{" "}
+                  <strong>Pengesahan Final {ROLE_LABELS.OWNER.title}</strong>.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <Alert>
+                <Info className="size-4" />
+                <AlertDescription>
+                  Alur standar: Persetujuan {ROLE_LABELS.TEAM_LEADER.title} →
+                  Verifikasi {ROLE_LABELS.SUPER_ADMIN.title}.
+                </AlertDescription>
+              </Alert>
+            )
           ) : (
             <Alert>
               <Info className="size-4" />
               <AlertDescription>
-                Alur standar: Persetujuan Team Leader → Verifikasi Admin Ops.
+                Pengajuan Anda akan ditinjau oleh {ROLE_LABELS.TEAM_LEADER.title}{" "}
+                dan diproses lebih lanjut oleh tim operasional.
               </AlertDescription>
             </Alert>
           )}

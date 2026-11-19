@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { ImagePlus, Loader2, Trash2 } from "lucide-react";
 
+import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,7 +70,10 @@ export function ItemFormDialog({
   parentCandidates,
   onSaved,
 }: ItemFormDialogProps) {
+  const { can } = useRole();
+  const canApproveWriteoff = can("writeoff.approve");
   const isEditing = Boolean(editingItem);
+  const lockedWrittenOff = editingItem?.condition === "DIHAPUSBUKU" && !canApproveWriteoff;
   const defaultParent =
     !editingItem && defaultParentId
       ? parentCandidates.find((item) => item.id === defaultParentId) ?? null
@@ -538,19 +542,35 @@ export function ItemFormDialog({
               <Select
                 value={condition}
                 onValueChange={(v) => setCondition(v as ItemCondition)}
-                disabled={isPending}
+                disabled={isPending || lockedWrittenOff}
               >
                 <SelectTrigger id="item-condition" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(CONDITION_LABELS) as ItemCondition[]).map((key) => (
-                    <SelectItem key={key} value={key}>
-                      {CONDITION_LABELS[key]}
-                    </SelectItem>
-                  ))}
+                  {(Object.keys(CONDITION_LABELS) as ItemCondition[])
+                    .filter(
+                      (key) =>
+                        key !== "DIHAPUSBUKU" ||
+                        canApproveWriteoff ||
+                        editingItem?.condition === "DIHAPUSBUKU",
+                    )
+                    .map((key) => (
+                      <SelectItem
+                        key={key}
+                        value={key}
+                        disabled={key === "DIHAPUSBUKU" && !canApproveWriteoff}
+                      >
+                        {CONDITION_LABELS[key]}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
+              {!canApproveWriteoff && (
+                <p className="text-muted-foreground text-[11px]">
+                  Status Dihapusbuku hanya dapat disahkan oleh Owner melalui alur penghapusan aset.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">

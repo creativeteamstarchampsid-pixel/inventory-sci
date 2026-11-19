@@ -236,17 +236,67 @@ export async function approveReconciliationStage(input: {
     };
   }
 
-  const user = await requireAction("reconciliation.submit");
-  if (input.stage === "leader" && user.role !== "TEAM_LEADER") {
+  if (input.stage === "admin") {
+    const user = await requireAction("reconciliation.verify_admin");
+    const { data: existing, error: fetchErr } = await supabase
+      .from("monthly_reconciliations")
+      .select("*")
+      .eq("period_ym", input.periodYm)
+      .maybeSingle();
+
+    if (fetchErr) return { ok: false, error: fetchErr.message };
+    if (existing?.locked_at) {
+      return {
+        ok: false,
+        error: "Periode rekonsiliasi sudah dikunci oleh Owner.",
+      };
+    }
+
+    const patch = {
+      verified_by_admin: user.id,
+      verified_by_admin_at: nowIso,
+      ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}),
+    };
+
+    let saved: MonthlyReconciliation | null = null;
+    if (existing) {
+      const { data, error } = await supabase
+        .from("monthly_reconciliations")
+        .update(patch)
+        .eq("id", existing.id)
+        .select("*")
+        .single();
+      if (error) return { ok: false, error: error.message };
+      saved = data;
+    } else {
+      const { data, error } = await supabase
+        .from("monthly_reconciliations")
+        .insert({
+          period_ym: input.periodYm,
+          ...patch,
+        })
+        .select("*")
+        .single();
+      if (error) return { ok: false, error: error.message };
+      saved = data;
+    }
+
+    revalidatePath("/backup");
+    revalidatePath("/dashboard");
+    revalidatePath("/audit-log");
     return {
-      ok: false,
-      error: "Persetujuan pemeriksaan Kepala Terapis hanya untuk peran Team Leader.",
+      ok: true,
+      data: saved,
+      message: "Verifikasi Admin Operasional berhasil dicatat.",
     };
   }
-  if (input.stage === "admin" && user.role !== "SUPER_ADMIN") {
+
+  const user = await requireAction("reconciliation.submit");
+  if (user.role !== "TEAM_LEADER" && user.role !== "OWNER") {
     return {
       ok: false,
-      error: "Verifikasi Admin Ops hanya untuk peran Super Admin.",
+      error:
+        "Persetujuan pemeriksaan Kepala Terapis hanya untuk peran Kepala Terapis atau Owner.",
     };
   }
 
@@ -264,18 +314,11 @@ export async function approveReconciliationStage(input: {
     };
   }
 
-  const patch =
-    input.stage === "leader"
-      ? {
-          approved_by_leader: user.id,
-          approved_by_leader_at: nowIso,
-          ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}),
-        }
-      : {
-          verified_by_admin: user.id,
-          verified_by_admin_at: nowIso,
-          ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}),
-        };
+  const patch = {
+    approved_by_leader: user.id,
+    approved_by_leader_at: nowIso,
+    ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}),
+  };
 
   let saved: MonthlyReconciliation | null = null;
   if (existing) {
@@ -306,10 +349,7 @@ export async function approveReconciliationStage(input: {
   return {
     ok: true,
     data: saved,
-    message:
-      input.stage === "leader"
-        ? "Persetujuan Team Leader berhasil dicatat."
-        : "Verifikasi Admin Ops berhasil dicatat.",
+    message: "Persetujuan Kepala Terapis berhasil dicatat.",
   };
 }
 

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
-import { can } from "@/lib/rbac";
+import { can, type Role } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import type {
   AssetType,
@@ -121,6 +121,17 @@ function toSafeInt(value: unknown, fallback = 0): number {
   return Math.trunc(toSafeNumber(value, fallback));
 }
 
+function sanitizeItemForRole(item: ItemMaster, role: Role): ItemMaster {
+  if (can(role, "inventory.view_valuation")) return item;
+  return {
+    ...item,
+    purchase_price: 0,
+    residual_value: 0,
+    useful_life_months: null,
+    acquisition_date: null,
+  };
+}
+
 function revalidateInventoryPaths(itemId?: string) {
   revalidatePath("/inventory");
   if (itemId) revalidatePath(`/inventory/${itemId}`);
@@ -176,6 +187,12 @@ export async function createItemAction(
 
   let condition: ItemCondition =
     input.condition && VALID_CONDITIONS.includes(input.condition) ? input.condition : "BAIK";
+  if (condition === "DIHAPUSBUKU" && !can(user.role, "writeoff.approve")) {
+    return {
+      ok: false,
+      error: "Hanya Owner yang dapat menetapkan status Dihapusbuku.",
+    };
+  }
   if (totalParts > 1 && currentParts < totalParts && condition === "BAIK") {
     condition = "PART_KURANG";
   }
@@ -308,6 +325,16 @@ export async function updateItemAction(
   let condition = input.condition ?? existing.condition;
   if (!VALID_CONDITIONS.includes(condition)) {
     return { ok: false, error: "Kondisi barang tidak valid." };
+  }
+  if (
+    condition !== existing.condition &&
+    (condition === "DIHAPUSBUKU" || existing.condition === "DIHAPUSBUKU") &&
+    !can(user.role, "writeoff.approve")
+  ) {
+    return {
+      ok: false,
+      error: "Hanya Owner yang dapat mengubah status Dihapusbuku.",
+    };
   }
   if (totalParts > 1 && currentParts < totalParts && condition === "BAIK") {
     condition = "PART_KURANG";
@@ -522,7 +549,7 @@ export async function updateItemHygieneAction(
   revalidateInventoryPaths(id);
   return {
     ok: true,
-    data,
+    data: sanitizeItemForRole(data, user.role),
     message: `Status sanitasi ${data.item_code} diperbarui.`,
   };
 }
@@ -587,7 +614,7 @@ export async function updateItemPartsAction(
   revalidateInventoryPaths(id);
   return {
     ok: true,
-    data,
+    data: sanitizeItemForRole(data, user.role),
     message: `Part ${data.item_code} diperbarui (${data.current_parts}/${data.total_parts}).`,
   };
 }
@@ -603,14 +630,35 @@ export async function updateItemConditionAction(
   if (!VALID_CONDITIONS.includes(condition)) {
     return { ok: false, error: "Status kondisi tidak valid." };
   }
-  if (condition === "DIHAPUSBUKU" && !can(user.role, "inventory.update")) {
+  if (condition === "DIHAPUSBUKU" && !can(user.role, "writeoff.approve")) {
     return {
       ok: false,
-      error: "Hanya Owner atau Super Admin yang dapat mengubah kondisi menjadi Dihapusbuku.",
+      error: "Hanya Owner yang dapat mengubah kondisi menjadi Dihapusbuku.",
     };
   }
 
   const supabase = await createClient();
+  const { data: existing, error: fetchError } = await supabase
+    .from("items_master")
+    .select("condition")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (fetchError || !existing) {
+    return { ok: false, error: "Item inventaris tidak ditemukan." };
+  }
+  if (
+    existing.condition === "DIHAPUSBUKU" &&
+    condition !== "DIHAPUSBUKU" &&
+    !can(user.role, "writeoff.approve")
+  ) {
+    return {
+      ok: false,
+      error: "Hanya Owner yang dapat mengubah status item Dihapusbuku.",
+    };
+  }
+
   const { data, error } = await supabase
     .from("items_master")
     .update({
@@ -632,7 +680,7 @@ export async function updateItemConditionAction(
   revalidateInventoryPaths(id);
   return {
     ok: true,
-    data,
+    data: sanitizeItemForRole(data, user.role),
     message: `Kondisi ${data.item_code} diperbarui.`,
   };
 }

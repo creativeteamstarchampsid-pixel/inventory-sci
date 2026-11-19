@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
-import { can } from "@/lib/rbac";
+import { can, type Role } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import type {
   BorrowTransaction,
@@ -82,6 +82,17 @@ function cleanOptionalText(value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function sanitizeItemForRole(item: ItemMaster, role: Role): ItemMaster {
+  if (can(role, "inventory.view_valuation")) return item;
+  return {
+    ...item,
+    purchase_price: 0,
+    residual_value: 0,
+    useful_life_months: null,
+    acquisition_date: null,
+  };
 }
 
 type ParsedScanToken =
@@ -175,7 +186,7 @@ function revalidateScanPaths(itemId?: string) {
 export async function lookupScanTargetAction(
   rawCode: string,
 ): Promise<ActionResult<ScanLookupResult>> {
-  await requireAction("scan.borrow_return");
+  const user = await requireAction("scan.borrow_return");
   const parsed = parseScannedToken(rawCode);
   if (!parsed) {
     return { ok: false, error: "Masukkan atau scan kode barcode/QR terlebih dahulu." };
@@ -267,7 +278,7 @@ export async function lookupScanTargetAction(
       ok: true,
       data: {
         kind: "item",
-        item: matchedItem,
+        item: sanitizeItemForRole(matchedItem, user.role),
         photoSignedUrl,
         activeBorrow,
         recentBorrows: enriched,
@@ -298,14 +309,19 @@ export async function lookupScanTargetAction(
       enriched.find((row) => row.status === "DIPINJAM" || row.status === "TERLAMBAT") ??
       null;
 
-    const canReturnActiveBorrow = true;
+    const canReturnActiveBorrow =
+      !activeBorrow ||
+      activeBorrow.borrower_id === user.id ||
+      user.role !== "STAFF";
 
     return {
       ok: true,
       data: {
         kind: "kit",
         kit: matchedKit,
-        bundledItems: bundledRes.data ?? [],
+        bundledItems: (bundledRes.data ?? []).map((item) =>
+          sanitizeItemForRole(item, user.role),
+        ),
         activeBorrow,
         recentBorrows: enriched,
         canReturnActiveBorrow,
@@ -394,7 +410,7 @@ export async function borrowItemViaScanAction(input: {
   revalidateScanPaths(item.id);
   return {
     ok: true,
-    data: { transaction, item },
+    data: { transaction, item: sanitizeItemForRole(item, user.role) },
     message: `Peminjaman ${item.item_code} berhasil dicatat (${transaction.transaction_code}).`,
   };
 }
@@ -458,12 +474,13 @@ export async function returnItemViaScanAction(input: {
   let nextCondition = item.condition;
   if (input.conditionOverride && VALID_CONDITIONS.includes(input.conditionOverride)) {
     if (
-      input.conditionOverride === "DIHAPUSBUKU" &&
-      !can(user.role, "inventory.update")
+      input.conditionOverride !== item.condition &&
+      (input.conditionOverride === "DIHAPUSBUKU" || item.condition === "DIHAPUSBUKU") &&
+      !can(user.role, "writeoff.approve")
     ) {
       return {
         ok: false,
-        error: "Hanya Owner atau Super Admin yang dapat menandai item Dihapusbuku.",
+        error: "Hanya Owner yang dapat mengubah status item Dihapusbuku.",
       };
     }
     nextCondition = input.conditionOverride;
@@ -547,7 +564,10 @@ export async function returnItemViaScanAction(input: {
   revalidateScanPaths(item.id);
   return {
     ok: true,
-    data: { transaction: updatedBorrow, item: updatedItem },
+    data: {
+      transaction: updatedBorrow,
+      item: sanitizeItemForRole(updatedItem, user.role),
+    },
     message: isMissingParts
       ? `Pengembalian ${updatedItem.item_code} dicatat dengan status PART KURANG (${partsAfter}/${updatedItem.total_parts}).`
       : `Pengembalian ${updatedItem.item_code} berhasil dicatat.`,
@@ -562,7 +582,7 @@ export async function quickStockOpnameAction(input: {
   condition: ItemCondition;
   notes?: string | null;
 }): Promise<ActionResult<ItemMaster>> {
-  const user = await requireAction("scan.borrow_return");
+  const user = await requireAction("inventory.validate_opname");
   if (!input.itemId) {
     return { ok: false, error: "ID item tidak valid." };
   }
@@ -572,10 +592,10 @@ export async function quickStockOpnameAction(input: {
   if (!VALID_CONDITIONS.includes(input.condition)) {
     return { ok: false, error: "Kondisi barang tidak valid." };
   }
-  if (input.condition === "DIHAPUSBUKU" && !can(user.role, "inventory.update")) {
+  if (input.condition === "DIHAPUSBUKU" && !can(user.role, "writeoff.approve")) {
     return {
       ok: false,
-      error: "Hanya Owner atau Super Admin yang dapat menandai kondisi Dihapusbuku.",
+      error: "Hanya Owner yang dapat menandai kondisi Dihapusbuku.",
     };
   }
 
@@ -589,6 +609,17 @@ export async function quickStockOpnameAction(input: {
 
   if (itemErr || !item) {
     return { ok: false, error: "Item inventaris tidak ditemukan." };
+  }
+
+  if (
+    item.condition === "DIHAPUSBUKU" &&
+    input.condition !== "DIHAPUSBUKU" &&
+    !can(user.role, "writeoff.approve")
+  ) {
+    return {
+      ok: false,
+      error: "Hanya Owner yang dapat mengubah status item Dihapusbuku.",
+    };
   }
 
   const safeParts = Math.trunc(Number(input.currentParts));
@@ -681,7 +712,7 @@ export async function quickStockOpnameAction(input: {
   revalidateScanPaths(updatedItem.id);
   return {
     ok: true,
-    data: updatedItem,
+    data: sanitizeItemForRole(updatedItem, user.role),
     message:
       stockChanged && !canEditMasterStock
         ? `Stock Opname ${updatedItem.item_code} tercatat. Selisih stok fisik (${safeStock} vs ${item.stock_qty}) dicatat untuk peninjauan Admin.`

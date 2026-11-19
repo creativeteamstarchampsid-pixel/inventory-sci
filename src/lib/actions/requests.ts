@@ -87,6 +87,17 @@ export async function createRequestAction(
     return { ok: false, error: "Jenis tiket pengajuan tidak valid." };
   }
 
+  if (
+    input.request_type === "PENGHAPUSAN_ASET" &&
+    !can(user.role, "inventory.writeoff_request")
+  ) {
+    return {
+      ok: false,
+      error:
+        "Hanya Owner atau Admin Operasional yang dapat mengajukan tiket Penghapusan Aset.",
+    };
+  }
+
   const title = input.title?.trim() ?? "";
   if (title.length < 3) {
     return { ok: false, error: "Judul pengajuan minimal 3 karakter." };
@@ -201,7 +212,7 @@ export async function updateRequestAction(
       };
     }
 
-    const isAdmin = user.role === "OWNER" || user.role === "SUPER_ADMIN";
+    const isAdmin = can(user.role, "request.approve_admin");
     if (existing.requested_by !== user.id && !isAdmin) {
       return {
         ok: false,
@@ -314,24 +325,42 @@ export async function approveRequestAction(
     }
 
     if (existing.status === "MENUNGGU_ADMIN") {
-      if (user.role !== "SUPER_ADMIN" && user.role !== "OWNER") {
+      if (!can(user.role, "request.approve_admin")) {
         return {
           ok: false,
-          error: "Verifikasi tahap Admin hanya dapat dilakukan oleh Super Admin atau Owner.",
+          error:
+            "Verifikasi tahap Admin hanya dapat dilakukan oleh Owner atau Admin Operasional.",
         };
       }
 
+      // When OWNER approves at MENUNGGU_ADMIN, finalize straight to DISETUJUI with owner_approved_by
+      // (matches DB trigger `guard_internal_requests_transition` — avoids double approval).
+      const isOwnerFinal = can(user.role, "approval.final");
       const mustEscalateToOwner =
-        ticketRequiresOwnerApproval(existing) || Boolean(options?.escalateToOwner);
+        !isOwnerFinal &&
+        (ticketRequiresOwnerApproval(existing) || Boolean(options?.escalateToOwner));
       const nextStatus = mustEscalateToOwner ? "MENUNGGU_OWNER" : "DISETUJUI";
+
+      const updatePatch: {
+        status: "MENUNGGU_OWNER" | "DISETUJUI";
+        admin_verified_by: string;
+        admin_verified_at: string;
+        owner_approved_by?: string;
+        owner_approved_at?: string;
+      } = {
+        status: nextStatus,
+        admin_verified_by: user.id,
+        admin_verified_at: nowIso,
+      };
+
+      if (isOwnerFinal) {
+        updatePatch.owner_approved_by = user.id;
+        updatePatch.owner_approved_at = nowIso;
+      }
 
       const { data, error } = await supabase
         .from("internal_requests")
-        .update({
-          status: nextStatus,
-          admin_verified_by: user.id,
-          admin_verified_at: nowIso,
-        })
+        .update(updatePatch)
         .eq("id", requestId)
         .eq("status", "MENUNGGU_ADMIN")
         .is("deleted_at", null)
@@ -447,12 +476,12 @@ export async function rejectRequestAction(
 
     if (
       existing.status === "MENUNGGU_ADMIN" &&
-      user.role !== "SUPER_ADMIN" &&
-      user.role !== "OWNER"
+      !can(user.role, "request.approve_admin")
     ) {
       return {
         ok: false,
-        error: "Penolakan pada tahap Admin hanya dapat dilakukan oleh Super Admin atau Owner.",
+        error:
+          "Penolakan pada tahap Admin hanya dapat dilakukan oleh Owner atau Admin Operasional.",
       };
     }
 
@@ -488,17 +517,10 @@ export async function rejectRequestAction(
 export async function completeRequestAction(
   requestId: string,
 ): Promise<RequestActionResult<{ request: InternalRequest }>> {
-  const user = await requireAction("request.approve");
+  await requireAction("request.complete");
 
   if (!UUID_RE.test(requestId)) {
     return { ok: false, error: "ID tiket tidak valid." };
-  }
-
-  if (user.role !== "OWNER" && user.role !== "SUPER_ADMIN") {
-    return {
-      ok: false,
-      error: "Hanya Super Admin atau Owner yang dapat menandai tiket Selesai.",
-    };
   }
 
   try {
@@ -550,17 +572,10 @@ export async function completeRequestAction(
 export async function softDeleteRequestAction(
   requestId: string,
 ): Promise<RequestActionResult<{ id: string }>> {
-  const user = await requireAction("request.approve");
+  const user = await requireAction("request.delete");
 
   if (!UUID_RE.test(requestId)) {
     return { ok: false, error: "ID tiket tidak valid." };
-  }
-
-  if (user.role !== "OWNER" && user.role !== "SUPER_ADMIN") {
-    return {
-      ok: false,
-      error: "Hanya Super Admin atau Owner yang dapat menghapus tiket ke Recycle Bin.",
-    };
   }
 
   try {

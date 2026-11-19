@@ -29,6 +29,7 @@ import {
   formatDateWIB,
   formatRupiah,
 } from "@/lib/constants";
+import { ROLE_LABELS } from "@/lib/rbac";
 import type { InternalRequest } from "@/types/database";
 import {
   REQUEST_STATUS_BADGE_VARIANT,
@@ -67,21 +68,27 @@ export function RequestDetailDialog({
   onOpenReject,
   onComplete,
 }: RequestDetailDialogProps) {
-  const { role, can } = useRole();
+  const { can } = useRole();
 
   if (!request) return null;
+
+  const isManagement = can("request.view_all");
+  const canLinkVault = can("vault.view_limited");
+  const canApproveStage1 = can("request.approve");
+  const canApproveAdmin = can("request.approve_admin");
+  const canApproveFinal = can("approval.final");
+  const canComplete = can("request.complete");
 
   const linkedItem = request.related_item_id
     ? itemsMap.get(request.related_item_id)
     : undefined;
   const linkedSub =
-    can("vault.view_limited") && request.related_sub_id
+    canLinkVault && request.related_sub_id
       ? subsMap.get(request.related_sub_id)
       : undefined;
 
   const ownerRequired = requiresOwnerFinalApproval(request);
   const isBusy = busyActionId === request.id;
-  const isAdmin = role === "OWNER" || role === "SUPER_ADMIN";
 
   const step1Done = Boolean(request.team_leader_approved_at);
   const step2Done = Boolean(request.admin_verified_at);
@@ -100,7 +107,7 @@ export function RequestDetailDialog({
             <Badge variant={REQUEST_STATUS_BADGE_VARIANT[request.status]}>
               {REQUEST_STATUS_LABELS[request.status]}
             </Badge>
-            {ownerRequired && (
+            {isManagement && ownerRequired && (
               <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300">
                 Wajib Pengesahan Owner
               </Badge>
@@ -129,7 +136,7 @@ export function RequestDetailDialog({
             )}
           </div>
 
-          {(linkedItem || linkedSub || request.related_sub_id) && (
+          {(linkedItem || linkedSub) && (
             <div className="flex flex-wrap gap-2">
               {linkedItem && (
                 <Link
@@ -150,12 +157,6 @@ export function RequestDetailDialog({
                     {linkedSub.sub_code}
                   </span>
                   <span>{linkedSub.service_name}</span>
-                </div>
-              )}
-              {!linkedSub && request.related_sub_id && (
-                <div className="bg-muted/40 inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs">
-                  <KeyRound className="size-3.5 text-muted-foreground" />
-                  <span>Tertaut ke akun Subscription Vault</span>
                 </div>
               )}
             </div>
@@ -186,7 +187,7 @@ export function RequestDetailDialog({
                 }`}
               >
                 <div className="flex items-center justify-between gap-1 font-semibold">
-                  <span>1. Team Leader</span>
+                  <span>1. {ROLE_LABELS.TEAM_LEADER.title}</span>
                   {step1Done ? (
                     <CheckCircle2 className="size-3.5 text-emerald-600" />
                   ) : (
@@ -199,6 +200,7 @@ export function RequestDetailDialog({
                       {profileDisplayName(
                         profilesMap,
                         request.team_leader_approved_by,
+                        ROLE_LABELS.TEAM_LEADER.title,
                       )}
                     </p>
                     <p>{formatDateWIB(request.team_leader_approved_at, true)}</p>
@@ -223,7 +225,7 @@ export function RequestDetailDialog({
                 }`}
               >
                 <div className="flex items-center justify-between gap-1 font-semibold">
-                  <span>2. Super Admin</span>
+                  <span>2. {ROLE_LABELS.SUPER_ADMIN.title}</span>
                   {step2Done ? (
                     <CheckCircle2 className="size-3.5 text-emerald-600" />
                   ) : (
@@ -236,6 +238,7 @@ export function RequestDetailDialog({
                       {profileDisplayName(
                         profilesMap,
                         request.admin_verified_by,
+                        ROLE_LABELS.SUPER_ADMIN.title,
                       )}
                     </p>
                     <p>{formatDateWIB(request.admin_verified_at, true)}</p>
@@ -243,7 +246,7 @@ export function RequestDetailDialog({
                 ) : (
                   <p className="text-muted-foreground mt-1 text-[11px]">
                     {request.status === "MENUNGGU_ADMIN"
-                      ? "Menunggu verifikasi Admin"
+                      ? `Menunggu verifikasi ${ROLE_LABELS.SUPER_ADMIN.title}`
                       : "Tahap berikutnya"}
                   </p>
                 )}
@@ -260,7 +263,7 @@ export function RequestDetailDialog({
                 }`}
               >
                 <div className="flex items-center justify-between gap-1 font-semibold">
-                  <span>3. Owner (Final)</span>
+                  <span>3. {ROLE_LABELS.OWNER.title} (Final)</span>
                   {step3Done ? (
                     <ShieldCheck className="size-3.5 text-emerald-600" />
                   ) : (
@@ -273,20 +276,21 @@ export function RequestDetailDialog({
                       {profileDisplayName(
                         profilesMap,
                         request.owner_approved_by,
+                        ROLE_LABELS.OWNER.title,
                       )}
                     </p>
                     <p>{formatDateWIB(request.owner_approved_at, true)}</p>
                   </div>
                 ) : step3Skipped ? (
                   <p className="text-muted-foreground mt-1 text-[11px]">
-                    Selesai di tahap Admin
+                    Selesai di tahap {ROLE_LABELS.SUPER_ADMIN.title}
                   </p>
                 ) : (
                   <p className="text-muted-foreground mt-1 text-[11px]">
                     {request.status === "MENUNGGU_OWNER"
-                      ? "Menunggu pengesahan Owner"
+                      ? `Menunggu pengesahan ${ROLE_LABELS.OWNER.title}`
                       : ownerRequired
-                        ? "Wajib pengesahan Owner"
+                        ? `Wajib pengesahan ${ROLE_LABELS.OWNER.title}`
                         : "Opsional / Eskalasi"}
                   </p>
                 )}
@@ -296,7 +300,7 @@ export function RequestDetailDialog({
         </div>
 
         <DialogFooter className="flex-wrap gap-2">
-          {request.status === "MENUNGGU_TEAM_LEADER" && can("request.approve") && (
+          {request.status === "MENUNGGU_TEAM_LEADER" && canApproveStage1 && (
             <>
               <Button
                 type="button"
@@ -311,12 +315,14 @@ export function RequestDetailDialog({
                 onClick={() => onApprove(request)}
                 disabled={isBusy}
               >
-                Setujui (Team Leader) → Admin
+                {canApproveAdmin
+                  ? "Teruskan ke Tahap Admin"
+                  : `Setujui (${ROLE_LABELS.TEAM_LEADER.title}) → ${ROLE_LABELS.SUPER_ADMIN.title}`}
               </Button>
             </>
           )}
 
-          {request.status === "MENUNGGU_ADMIN" && isAdmin && (
+          {request.status === "MENUNGGU_ADMIN" && canApproveAdmin && (
             <>
               <Button
                 type="button"
@@ -326,7 +332,7 @@ export function RequestDetailDialog({
               >
                 Tolak
               </Button>
-              {!ownerRequired && (
+              {!canApproveFinal && !ownerRequired && (
                 <Button
                   type="button"
                   variant="outline"
@@ -343,9 +349,11 @@ export function RequestDetailDialog({
                 onClick={() => onApprove(request)}
                 disabled={isBusy}
               >
-                {ownerRequired
-                  ? "Verifikasi → Teruskan ke Owner"
-                  : "Verifikasi & Setujui"}
+                {canApproveFinal
+                  ? "Sahkan Langsung (Disetujui)"
+                  : ownerRequired
+                    ? "Verifikasi → Teruskan ke Owner"
+                    : "Verifikasi & Setujui"}
               </Button>
             </>
           )}
@@ -354,9 +362,11 @@ export function RequestDetailDialog({
             <Can
               action="approval.final"
               fallback={
-                <span className="text-muted-foreground text-xs">
-                  Hanya Owner yang dapat mengesahkan tahap ini.
-                </span>
+                isManagement ? (
+                  <Badge variant="outline" className="text-xs">
+                    Menunggu Pengesahan Owner
+                  </Badge>
+                ) : null
               }
             >
               <Button
@@ -387,7 +397,7 @@ export function RequestDetailDialog({
             </Can>
           )}
 
-          {request.status === "DISETUJUI" && isAdmin && (
+          {request.status === "DISETUJUI" && canComplete && (
             <Button
               type="button"
               onClick={() => onComplete(request)}

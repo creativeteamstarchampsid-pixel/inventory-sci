@@ -78,6 +78,7 @@ import {
   LOCATION_LABELS,
   formatDateWIB,
 } from "@/lib/constants";
+import { ROLE_LABELS } from "@/lib/rbac";
 import { createClient as createBrowserSupabase } from "@/lib/supabase/client";
 import type { ArchiveHybrid, ArchivePhysicalStatus, UserRole } from "@/types/database";
 
@@ -170,6 +171,7 @@ export function ArchivesClient({
   schemaError,
 }: ArchivesClientProps) {
   const { role, can } = useRole();
+  const isStaff = role === "STAFF";
   const canManage = can("archive.manage");
 
   const [search, setSearch] = useState(initialCode ?? "");
@@ -599,11 +601,11 @@ export function ArchivesClient({
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <Archive className="text-primary size-6" />
-            Arsip Hybrid (Fisik &amp; Digital)
+            {isStaff ? "Panduan SOP" : "Arsip Hybrid (Fisik & Digital)"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            {role === "STAFF"
-              ? "Direktori SOP dan dokumen operasional publik Star Champs Indonesia."
+            {isStaff
+              ? "Direktori panduan SOP terapi dan dokumen operasional untuk Tim Terapis."
               : "Pemetaan lemari fisik (L01–L04), penyimpanan file privat terenkripsi, tautan Google Drive & riwayat versi."}
           </p>
         </div>
@@ -650,56 +652,60 @@ export function ArchivesClient({
         </Alert>
       )}
 
-      {/* Cabinet Mapping Overview Cards (L01 - L04) */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {ARCHIVE_CABINET_OPTIONS.map((cab) => {
-          const code = cab.value as ArchiveCabinetCode;
-          const stats = cabinetStats.get(code) ?? {
-            total: 0,
-            available: 0,
-            borrowed: 0,
-            old: 0,
-          };
-          const selected = cabinetFilter === code;
+      {/* Cabinet Mapping Overview Cards (L01 - L04) — hidden for STAFF */}
+      {!isStaff && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {ARCHIVE_CABINET_OPTIONS.map((cab) => {
+            const code = cab.value as ArchiveCabinetCode;
+            const stats = cabinetStats.get(code) ?? {
+              total: 0,
+              available: 0,
+              borrowed: 0,
+              old: 0,
+            };
+            const selected = cabinetFilter === code;
 
-          return (
-            <button
-              key={code}
-              type="button"
-              onClick={() =>
-                setCabinetFilter((prev) => (prev === code ? "ALL" : code))
-              }
-              className={`bg-card text-card-foreground hover:border-primary/60 flex flex-col gap-2 rounded-xl border p-4 text-left shadow-xs transition-colors ${
-                selected ? "border-primary ring-primary/20 ring-2" : ""
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-xs font-semibold">{code}</span>
-                <FolderOpen className="text-muted-foreground size-4" />
-              </div>
-              <div className="font-semibold">{cab.shortLabel}</div>
-              <div className="text-muted-foreground flex flex-wrap gap-2 text-xs">
-                <span>{stats.total} berkas</span>
-                <span>·</span>
-                <span>{stats.available} tersedia</span>
-                {stats.borrowed > 0 && (
-                  <span className="text-destructive font-medium">
-                    · {stats.borrowed} dipinjam
-                  </span>
-                )}
-              </div>
-            </button>
-          );
-        })}
-      </div>
+            return (
+              <button
+                key={code}
+                type="button"
+                onClick={() =>
+                  setCabinetFilter((prev) => (prev === code ? "ALL" : code))
+                }
+                className={`bg-card text-card-foreground hover:border-primary/60 flex flex-col gap-2 rounded-xl border p-4 text-left shadow-xs transition-colors ${
+                  selected ? "border-primary ring-primary/20 ring-2" : ""
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-semibold">{code}</span>
+                  <FolderOpen className="text-muted-foreground size-4" />
+                </div>
+                <div className="font-semibold">{cab.shortLabel}</div>
+                <div className="text-muted-foreground flex flex-wrap gap-2 text-xs">
+                  <span>{stats.total} berkas</span>
+                  <span>·</span>
+                  <span>{stats.available} tersedia</span>
+                  {stats.borrowed > 0 && (
+                    <span className="text-destructive font-medium">
+                      · {stats.borrowed} dipinjam
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Filters & Table */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Daftar Dokumen Arsip</CardTitle>
+          <CardTitle className="text-base">
+            {isStaff ? "Daftar Dokumen SOP" : "Daftar Dokumen Arsip"}
+          </CardTitle>
           <CardDescription>
-            Menampilkan {filteredArchives.length} dari {archives.length} dokumen arsip
-            {role === "STAFF" ? " (hanya SOP publik staff)" : ""}.
+            Menampilkan {filteredArchives.length} dari {archives.length}{" "}
+            {isStaff ? "dokumen SOP" : "dokumen arsip"}.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -710,7 +716,9 @@ export function ArchivesClient({
             >
               <TabsList className="flex-wrap">
                 <TabsTrigger value="all">Semua</TabsTrigger>
-                <TabsTrigger value="sop">SOP Publik Staff</TabsTrigger>
+                {!isStaff && (
+                  <TabsTrigger value="sop">SOP Publik Terapis</TabsTrigger>
+                )}
                 <TabsTrigger value="storage">Ada File Storage</TabsTrigger>
                 <TabsTrigger value="drive">Ada Google Drive</TabsTrigger>
               </TabsList>
@@ -722,48 +730,56 @@ export function ArchivesClient({
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Cari kode, judul, laci..."
+                  placeholder={
+                    isStaff
+                      ? "Cari kode atau judul SOP..."
+                      : "Cari kode, judul, laci..."
+                  }
                   className="pl-8"
                 />
               </div>
 
-              <Select
-                value={cabinetFilter}
-                onValueChange={(v) =>
-                  setCabinetFilter(v as "ALL" | ArchiveCabinetCode)
-                }
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Semua Lemari" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">Semua Lemari</SelectItem>
-                  {ARCHIVE_CABINET_OPTIONS.map((c) => (
-                    <SelectItem key={c.value} value={c.value}>
-                      {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {!isStaff && (
+                <>
+                  <Select
+                    value={cabinetFilter}
+                    onValueChange={(v) =>
+                      setCabinetFilter(v as "ALL" | ArchiveCabinetCode)
+                    }
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Semua Lemari" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">Semua Lemari</SelectItem>
+                      {ARCHIVE_CABINET_OPTIONS.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-              <Select
-                value={statusFilter}
-                onValueChange={(v) =>
-                  setStatusFilter(v as "ALL" | ArchivePhysicalStatus)
-                }
-              >
-                <SelectTrigger className="w-44">
-                  <SelectValue placeholder="Semua Status Fisik" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">Semua Status Fisik</SelectItem>
-                  {Object.entries(ARCHIVE_STATUS_LABELS).map(([k, label]) => (
-                    <SelectItem key={k} value={k}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(v) =>
+                      setStatusFilter(v as "ALL" | ArchivePhysicalStatus)
+                    }
+                  >
+                    <SelectTrigger className="w-44">
+                      <SelectValue placeholder="Semua Status Fisik" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">Semua Status Fisik</SelectItem>
+                      {Object.entries(ARCHIVE_STATUS_LABELS).map(([k, label]) => (
+                        <SelectItem key={k} value={k}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
 
               <Select
                 value={categoryFilter}
@@ -827,10 +843,15 @@ export function ArchivesClient({
                             <Badge variant="secondary" className="text-[11px]">
                               {doc.category}
                             </Badge>
-                            {doc.is_sop_public_to_staff ? (
+                            {isStaff ? (
                               <Badge className="bg-emerald-600 text-[11px] text-white hover:bg-emerald-600">
                                 <Globe className="size-3" />
-                                SOP Publik Staff
+                                SOP Resmi
+                              </Badge>
+                            ) : doc.is_sop_public_to_staff ? (
+                              <Badge className="bg-emerald-600 text-[11px] text-white hover:bg-emerald-600">
+                                <Globe className="size-3" />
+                                SOP Publik Terapis
                               </Badge>
                             ) : (
                               <Badge variant="outline" className="text-[11px]">
@@ -942,15 +963,21 @@ export function ArchivesClient({
                           <div className="text-muted-foreground text-xs">
                             Diperbarui {formatDateWIB(doc.updated_at, true)}
                           </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleOpenVersionHistory(doc)}
-                          >
-                            <History className="size-3.5" />
-                            Riwayat Versi (v{doc.version_no})
-                          </Button>
+                          {!isStaff ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenVersionHistory(doc)}
+                            >
+                              <History className="size-3.5" />
+                              Riwayat Versi (v{doc.version_no})
+                            </Button>
+                          ) : (
+                            <Badge variant="outline" className="font-mono text-[11px]">
+                              Versi Aktif v{doc.version_no}
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
 
@@ -1186,7 +1213,7 @@ export function ArchivesClient({
                         </SelectItem>
                         {activeProfiles.map((p) => (
                           <SelectItem key={p.id} value={p.id}>
-                            {p.full_name || p.id} ({p.role})
+                            {p.full_name || p.id} ({ROLE_LABELS[p.role]?.title ?? p.role})
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1293,10 +1320,10 @@ export function ArchivesClient({
             <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
               <div className="space-y-0.5">
                 <Label htmlFor="arc-sop" className="cursor-pointer">
-                  Publikasikan untuk Staff (Terapis)
+                  Publikasikan untuk {ROLE_LABELS.STAFF.title}
                 </Label>
                 <p className="text-muted-foreground text-xs">
-                  Jika aktif, seluruh Staff dapat membaca dan mengunduh dokumen SOP ini.
+                  Jika aktif, seluruh {ROLE_LABELS.STAFF.title} dapat membaca dan mengunduh dokumen SOP ini.
                 </p>
               </div>
               <Switch
@@ -1420,65 +1447,62 @@ export function ArchivesClient({
                 </div>
               </div>
 
-              {/* Historical Versions */}
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Versi Sebelumnya</div>
+              {/* Historical Versions — hidden completely for STAFF */}
+              {!isStaff && (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Versi Sebelumnya</div>
 
-                {historyLoading && (
-                  <p className="text-muted-foreground py-4 text-center text-sm">
-                    Memuat riwayat versi...
-                  </p>
-                )}
+                  {historyLoading && (
+                    <p className="text-muted-foreground py-4 text-center text-sm">
+                      Memuat riwayat versi...
+                    </p>
+                  )}
 
-                {historyError && (
-                  <Alert variant="destructive">
-                    <AlertTriangle className="size-4" />
-                    <AlertDescription>{historyError}</AlertDescription>
-                  </Alert>
-                )}
+                  {historyError && (
+                    <Alert variant="destructive">
+                      <AlertTriangle className="size-4" />
+                      <AlertDescription>{historyError}</AlertDescription>
+                    </Alert>
+                  )}
 
-                {!historyLoading && !historyError && historyVersions.length === 0 && (
-                  <p className="text-muted-foreground rounded-md border py-4 text-center text-sm">
-                    Belum ada revisi sebelumnya. Dokumen masih berada di versi awal (v1).
-                  </p>
-                )}
+                  {!historyLoading && !historyError && historyVersions.length === 0 && (
+                    <p className="text-muted-foreground rounded-md border py-4 text-center text-sm">
+                      Belum ada revisi sebelumnya. Dokumen masih berada di versi awal (v1).
+                    </p>
+                  )}
 
-                {historyVersions.map((ver) => {
-                  const canStaffOpenOldFile =
-                    role !== "STAFF" ||
-                    ver.digital_file_url === historyDoc.digital_file_url;
-                  const safeVerDriveLink = safeExternalUrl(ver.drive_link);
+                  {historyVersions.map((ver) => {
+                    const safeVerDriveLink = safeExternalUrl(ver.drive_link);
 
-                  return (
-                    <div
-                      key={ver.id}
-                      className="space-y-2 rounded-lg border p-3 text-sm"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="font-mono">
-                            v{ver.version_no}
-                          </Badge>
-                          <span className="text-muted-foreground text-xs">
-                            {formatDateWIB(ver.created_at, true)}
-                          </span>
+                    return (
+                      <div
+                        key={ver.id}
+                        className="space-y-2 rounded-lg border p-3 text-sm"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="font-mono">
+                              v{ver.version_no}
+                            </Badge>
+                            <span className="text-muted-foreground text-xs">
+                              {formatDateWIB(ver.created_at, true)}
+                            </span>
+                          </div>
+                          {ver.uploader_name && (
+                            <span className="text-muted-foreground text-xs">
+                              Oleh {ver.uploader_name}
+                            </span>
+                          )}
                         </div>
-                        {ver.uploader_name && (
-                          <span className="text-muted-foreground text-xs">
-                            Oleh {ver.uploader_name}
-                          </span>
+
+                        {ver.change_notes && (
+                          <p className="text-muted-foreground text-xs">
+                            Catatan: {ver.change_notes}
+                          </p>
                         )}
-                      </div>
 
-                      {ver.change_notes && (
-                        <p className="text-muted-foreground text-xs">
-                          Catatan: {ver.change_notes}
-                        </p>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        {ver.digital_file_url ? (
-                          canStaffOpenOldFile ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {ver.digital_file_url ? (
                             <>
                               <Button
                                 type="button"
@@ -1511,36 +1535,32 @@ export function ArchivesClient({
                                 Unduh
                               </Button>
                             </>
-                          ) : (
-                            <Badge variant="secondary" className="text-xs">
-                              File historis khusus manajemen
-                            </Badge>
-                          )
-                        ) : null}
+                          ) : null}
 
-                        {safeVerDriveLink ? (
-                          <Button asChild size="sm" variant="outline">
-                            <a
-                              href={safeVerDriveLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              <ExternalLink className="size-3.5" />
-                              Google Drive (v{ver.version_no})
-                            </a>
-                          </Button>
-                        ) : null}
+                          {safeVerDriveLink ? (
+                            <Button asChild size="sm" variant="outline">
+                              <a
+                                href={safeVerDriveLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <ExternalLink className="size-3.5" />
+                                Google Drive (v{ver.version_no})
+                              </a>
+                            </Button>
+                          ) : null}
 
-                        {!ver.digital_file_url && !safeVerDriveLink && (
-                          <span className="text-muted-foreground text-xs">
-                            Versi ini belum memiliki lampiran digital.
-                          </span>
-                        )}
+                          {!ver.digital_file_url && !safeVerDriveLink && (
+                            <span className="text-muted-foreground text-xs">
+                              Versi ini belum memiliki lampiran digital.
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1605,7 +1625,7 @@ export function ArchivesClient({
                     </SelectItem>
                     {activeProfiles.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
-                        {p.full_name || p.id} ({p.role})
+                        {p.full_name || p.id} ({ROLE_LABELS[p.role]?.title ?? p.role})
                       </SelectItem>
                     ))}
                   </SelectContent>

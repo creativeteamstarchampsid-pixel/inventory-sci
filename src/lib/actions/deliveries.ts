@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type {
   AssetType,
@@ -1083,14 +1084,25 @@ export async function convertInboundToStockAction(
       .maybeSingle();
 
     if (updateError || !updatedDelivery) {
-      // Compensating rollback so items are not orphaned without conversion stamp
-      await supabase
-        .from("items_master")
-        .delete()
-        .in(
-          "id",
-          insertedItems.map((i) => i.id),
-        );
+      // Compensating rollback so items are not orphaned without conversion stamp.
+      // Hard delete is OWNER-only in RLS; for Admin Operasional, use service-role admin client
+      // if configured, otherwise fall back to soft-delete so active inventory stays clean.
+      const insertedIds = insertedItems.map((i) => i.id);
+      if (user.role === "OWNER") {
+        await supabase.from("items_master").delete().in("id", insertedIds);
+      } else if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        const admin = createAdminClient();
+        await admin.from("items_master").delete().in("id", insertedIds);
+      } else {
+        await supabase
+          .from("items_master")
+          .update({
+            deleted_at: nowIso,
+            deleted_by: user.id,
+            updated_by: user.id,
+          })
+          .in("id", insertedIds);
+      }
       return {
         ok: false,
         error:

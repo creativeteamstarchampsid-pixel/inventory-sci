@@ -3,19 +3,34 @@ import { notFound } from "next/navigation";
 
 import { requireRouteAccess } from "@/lib/auth";
 import type { BorrowHistoryEntry } from "@/lib/actions/scan";
+import { can } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
+import type { ItemMaster } from "@/types/database";
 import { ItemDetailClient } from "./item-detail-client";
 
 export const metadata: Metadata = {
   title: "Detail Item Inventaris",
 };
 
+function sanitizeValuation(row: ItemMaster, canViewValuation: boolean): ItemMaster {
+  if (canViewValuation) return row;
+  return {
+    ...row,
+    purchase_price: 0,
+    residual_value: 0,
+    useful_life_months: null,
+    acquisition_date: null,
+  };
+}
+
 export default async function InventoryDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireRouteAccess("/inventory");
+  const user = await requireRouteAccess("/inventory");
+  const canViewValuation = can(user.role, "inventory.view_valuation");
+  const canManageInventory = can(user.role, "inventory.create") || can(user.role, "inventory.update");
   const { id } = await params;
 
   const supabase = await createClient();
@@ -46,11 +61,13 @@ export default async function InventoryDetailPage({
       .eq("parent_item_id", item.id)
       .is("deleted_at", null)
       .order("item_code", { ascending: true }),
-    supabase
-      .from("items_master")
-      .select("*")
-      .is("deleted_at", null)
-      .order("item_code", { ascending: true }),
+    canManageInventory
+      ? supabase
+          .from("items_master")
+          .select("*")
+          .is("deleted_at", null)
+          .order("item_code", { ascending: true })
+      : Promise.resolve({ data: [] as ItemMaster[] }),
     supabase
       .from("borrow_transactions")
       .select("*")
@@ -103,10 +120,14 @@ export default async function InventoryDetailPage({
 
   return (
     <ItemDetailClient
-      item={item}
+      item={sanitizeValuation(item, canViewValuation)}
       parentItem={parentRes.data ?? null}
-      childItems={childrenRes.data ?? []}
-      allItemsForParentSelect={allItemsRes.data ?? []}
+      childItems={(childrenRes.data ?? []).map((child) =>
+        sanitizeValuation(child, canViewValuation),
+      )}
+      allItemsForParentSelect={(allItemsRes.data ?? []).map((entry) =>
+        sanitizeValuation(entry, canViewValuation),
+      )}
       borrowHistory={borrowHistory}
       signedPhotoUrl={signedPhotoUrl}
       todayWib={todayWib}

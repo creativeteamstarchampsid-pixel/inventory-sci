@@ -434,6 +434,23 @@ export async function returnKitAction(
     .limit(1)
     .maybeSingle();
 
+  if (user.role === "STAFF") {
+    if (!activeBorrow) {
+      return {
+        ok: false,
+        error:
+          "Tidak ada transaksi peminjaman aktif pada kit ini untuk Anda kembalikan.",
+      };
+    }
+    if (activeBorrow.borrower_id !== user.id) {
+      return {
+        ok: false,
+        error:
+          "Terapis hanya dapat mengembalikan kit yang dipinjam oleh akun sendiri.",
+      };
+    }
+  }
+
   const itemUpdateMap = new Map<string, KitReturnItemUpdate>();
   for (const upd of options?.itemUpdates ?? []) {
     itemUpdateMap.set(upd.itemId, upd);

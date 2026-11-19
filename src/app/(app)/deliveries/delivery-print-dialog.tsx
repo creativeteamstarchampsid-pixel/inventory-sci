@@ -458,7 +458,7 @@ function DocumentSheetContent({
         <div className="rounded border border-slate-200 p-3">
           <p className="font-semibold">Saksi / PIC Operasional</p>
           <p className="text-[11px] text-slate-500">
-            {bastMeta.witnessName || delivery.pic_name || "Admin Ops"}
+            {bastMeta.witnessName || delivery.pic_name || "Admin Operasional"}
           </p>
           <div className="h-14" />
           <p className="border-t border-slate-900 pt-1 text-[11px]">
@@ -517,7 +517,7 @@ export function DeliveryPrintDialog({
     handoverPurpose: bastPurpose.trim() || delivery.package_type,
     senderRoleLabel: senderRoleLabel.trim() || "Admin Operasional",
     receiverRoleLabel: receiverRoleLabel.trim() || "Staf / Pihak Eksternal",
-    witnessName: witnessName.trim() || delivery.pic_name || "Admin Ops",
+    witnessName: witnessName.trim() || delivery.pic_name || "Admin Operasional",
   };
 
   async function handleDownloadPdf() {

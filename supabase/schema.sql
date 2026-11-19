@@ -244,11 +244,21 @@ begin
        or new.offboarded_at is distinct from old.offboarded_at
        or new.email is distinct from old.email
        or new.created_at is distinct from old.created_at then
-      raise exception 'Hanya Owner atau Super Admin yang dapat mengubah peran, email, atau status akun.';
+      raise exception 'Hanya Owner atau Admin Operasional yang dapat mengubah peran, email, atau status akun.';
     end if;
   elsif not public.has_role(array['OWNER']::public.user_role[]) then
-    if old.role = 'OWNER' or new.role = 'OWNER' then
-      raise exception 'Hanya Owner yang dapat menetapkan atau mengubah akun Owner.';
+    -- SUPER_ADMIN (Admin Operasional) dapat memperbarui profil pribadinya (tanpa kolom hak akses),
+    -- namun hanya boleh mengelola akun TEAM_LEADER dan STAFF — tidak boleh mengelola OWNER atau sesama SUPER_ADMIN.
+    if old.id = auth.uid() then
+      if new.role is distinct from old.role
+         or new.is_active is distinct from old.is_active
+         or new.offboarded_at is distinct from old.offboarded_at
+         or new.email is distinct from old.email
+         or new.created_at is distinct from old.created_at then
+        raise exception 'Hanya Owner yang dapat mengubah peran, email, atau status akun Owner maupun Admin Operasional.';
+      end if;
+    elsif old.role in ('OWNER', 'SUPER_ADMIN') or new.role in ('OWNER', 'SUPER_ADMIN') then
+      raise exception 'Hanya Owner yang dapat menetapkan atau mengubah akun Owner maupun Admin Operasional.';
     end if;
   end if;
 
@@ -482,6 +492,12 @@ as $$
 declare
   v_parent_code text;
 begin
+  if auth.uid() is not null
+     and new.condition = 'DIHAPUSBUKU'
+     and not public.has_role(array['OWNER']::public.user_role[]) then
+    raise exception 'Hanya Owner yang dapat menetapkan status Dihapusbuku.';
+  end if;
+
   if new.item_code is null or btrim(new.item_code) = '' then
     if new.parent_item_id is not null then
       select item_code into v_parent_code
@@ -594,13 +610,15 @@ begin
        or new.created_at is distinct from old.created_at
        or new.deleted_at is distinct from old.deleted_at
        or new.deleted_by is distinct from old.deleted_by then
-      raise exception 'Hanya Owner/Super Admin yang dapat mengubah data master atau menghapus item.';
+      raise exception 'Hanya Owner atau Admin Operasional yang dapat mengubah data master atau menghapus item.';
     end if;
+  end if;
 
-    if new.condition is distinct from old.condition
-       and (new.condition = 'DIHAPUSBUKU' or old.condition = 'DIHAPUSBUKU') then
-      raise exception 'Hanya Owner/Super Admin yang dapat mengubah status Dihapusbuku.';
-    end if;
+  -- Penetapan/perubahan status DIHAPUSBUKU (write-off) khusus OWNER (writeoff.approve)
+  if new.condition is distinct from old.condition
+     and (new.condition = 'DIHAPUSBUKU' or old.condition = 'DIHAPUSBUKU')
+     and not public.has_role(array['OWNER']::public.user_role[]) then
+    raise exception 'Hanya Owner yang dapat menetapkan atau mengubah status Dihapusbuku.';
   end if;
 
   new.updated_by := coalesce(auth.uid(), new.updated_by);
@@ -705,7 +723,12 @@ begin
        or new.created_at is distinct from old.created_at
        or new.deleted_at is distinct from old.deleted_at
        or new.deleted_by is distinct from old.deleted_by then
-      raise exception 'Hanya Owner/Super Admin yang dapat mengubah komposisi kit.';
+      raise exception 'Hanya Owner atau Admin Operasional yang dapat mengubah komposisi kit.';
+    end if;
+
+    if new.status is distinct from old.status
+       and (new.status = 'NONAKTIF' or old.status = 'NONAKTIF') then
+      raise exception 'Hanya Owner atau Admin Operasional yang dapat mengaktifkan atau menonaktifkan kit.';
     end if;
   end if;
 
@@ -822,6 +845,10 @@ begin
       raise exception 'Staff hanya dapat memperbarui kolom pengembalian pada transaksi peminjaman aktif.';
     end if;
 
+    if old.kit_id is not null and old.borrower_id is distinct from auth.uid() then
+      raise exception 'Terapis hanya dapat mengembalikan kit yang dipinjam oleh akun sendiri.';
+    end if;
+
     if old.borrower_id is distinct from auth.uid()
        and new.status not in ('DIKEMBALIKAN', 'HILANG_PART') then
       raise exception 'Hanya peminjam awal atau manajemen yang dapat mengubah transaksi yang belum dikembalikan.';
@@ -927,37 +954,8 @@ begin
     raise exception 'Akses ditolak: sesi autentikasi tidak valid.';
   end if;
 
-  if not public.has_role(array['SUPER_ADMIN']::public.user_role[]) then
-    if not public.has_role(array['OWNER']::public.user_role[]) then
-      raise exception 'Akses ditolak untuk memperbarui Subscription Vault.';
-    end if;
-
-    -- OWNER hanya diizinkan memulihkan data dari Recycle Bin (recycle.restore)
-    if not (old.deleted_at is not null and new.deleted_at is null and new.deleted_by is null) then
-      raise exception 'Hanya Super Admin yang dapat mengelola atau menghapus akun Subscription Vault.';
-    end if;
-
-    if new.service_name is distinct from old.service_name
-       or new.plan_name is distinct from old.plan_name
-       or new.login_email is distinct from old.login_email
-       or new.password_encrypted is distinct from old.password_encrypted
-       or new.pin_recovery_encrypted is distinct from old.pin_recovery_encrypted
-       or new.billing_cycle is distinct from old.billing_cycle
-       or new.cost is distinct from old.cost
-       or new.currency is distinct from old.currency
-       or new.payment_method is distinct from old.payment_method
-       or new.payment_account_label is distinct from old.payment_account_label
-       or new.renewal_date is distinct from old.renewal_date
-       or new.auto_renew is distinct from old.auto_renew
-       or new.max_slots is distinct from old.max_slots
-       or new.assigned_users_json is distinct from old.assigned_users_json
-       or new.password_rotated_at is distinct from old.password_rotated_at
-       or new.notes is distinct from old.notes
-       or new.is_active is distinct from old.is_active
-       or new.created_by is distinct from old.created_by
-       or new.created_at is distinct from old.created_at then
-      raise exception 'Owner hanya dapat memulihkan akun dari Recycle Bin tanpa mengubah isi vault.';
-    end if;
+  if not public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]) then
+    raise exception 'Hanya Owner atau Admin Operasional yang dapat mengelola Subscription Vault.';
   end if;
 
   new.updated_by := coalesce(auth.uid(), new.updated_by);
@@ -1147,38 +1145,8 @@ begin
     raise exception 'Akses ditolak: sesi autentikasi tidak valid.';
   end if;
 
-  if not public.has_role(array['SUPER_ADMIN']::public.user_role[]) then
-    if not public.has_role(array['OWNER']::public.user_role[]) then
-      raise exception 'Akses ditolak untuk memperbarui data pengiriman.';
-    end if;
-
-    -- OWNER hanya diizinkan memulihkan data dari Recycle Bin (recycle.restore)
-    if not (old.deleted_at is not null and new.deleted_at is null and new.deleted_by is null) then
-      raise exception 'Hanya Super Admin yang dapat mengelola atau menghapus log pengiriman.';
-    end if;
-
-    if new.direction is distinct from old.direction
-       or new.package_type is distinct from old.package_type
-       or new.courier_name is distinct from old.courier_name
-       or new.tracking_number is distinct from old.tracking_number
-       or new.shipping_cost is distinct from old.shipping_cost
-       or new.sender_name is distinct from old.sender_name
-       or new.sender_address is distinct from old.sender_address
-       or new.receiver_name is distinct from old.receiver_name
-       or new.receiver_address is distinct from old.receiver_address
-       or new.pic_name is distinct from old.pic_name
-       or new.is_fragile is distinct from old.is_fragile
-       or new.items_payload_json is distinct from old.items_payload_json
-       or new.proof_photo_url is distinct from old.proof_photo_url
-       or new.status is distinct from old.status
-       or new.converted_to_stock_at is distinct from old.converted_to_stock_at
-       or new.shipped_at is distinct from old.shipped_at
-       or new.received_at is distinct from old.received_at
-       or new.notes is distinct from old.notes
-       or new.created_by is distinct from old.created_by
-       or new.created_at is distinct from old.created_at then
-      raise exception 'Owner hanya dapat memulihkan log pengiriman dari Recycle Bin tanpa mengubah datanya.';
-    end if;
+  if not public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]) then
+    raise exception 'Hanya Owner atau Admin Operasional yang dapat mengelola data pengiriman.';
   end if;
 
   new.updated_by := coalesce(auth.uid(), new.updated_by);
@@ -1384,6 +1352,10 @@ begin
   else
     if new.requested_by is not null and new.requested_by is distinct from auth.uid() then
       raise exception 'Pengaju tiket harus sesuai dengan akun yang sedang masuk.';
+    end if;
+    if new.request_type = 'PENGHAPUSAN_ASET'
+       and not public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]) then
+      raise exception 'Hanya Owner atau Admin Operasional yang dapat mengajukan tiket Penghapusan Aset.';
     end if;
     new.requested_by := auth.uid();
     new.status := 'MENUNGGU_TEAM_LEADER';
@@ -1885,10 +1857,10 @@ begin
         and coalesce(nullif(current_setting('role', true), ''), 'none') in ('none', 'postgres')
       )
     ) then
-      raise exception 'Akses ditolak: hanya Super Admin atau server terautentikasi yang dapat mengenkripsi kredensial vault.';
+      raise exception 'Akses ditolak: hanya Owner, Admin Operasional, atau server terautentikasi yang dapat mengenkripsi kredensial vault.';
     end if;
-  elsif not public.has_role(array['SUPER_ADMIN']::public.user_role[]) then
-    raise exception 'Akses ditolak: hanya Super Admin yang dapat mengenkripsi kredensial vault.';
+  elsif not public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]) then
+    raise exception 'Akses ditolak: hanya Owner atau Admin Operasional yang dapat mengenkripsi kredensial vault.';
   end if;
 
   if p_plaintext is null or p_plaintext = '' then
@@ -1981,7 +1953,7 @@ begin
 end;
 $$;
 
--- Safe view for Management (TEAM_LEADER tidak melihat biaya, metode bayar, atau secret)
+-- Safe view for Admins (Owner & Admin Operasional; tanpa secret bytea)
 create or replace view public.subscriptions_vault_directory
 with (security_barrier = true)
 as
@@ -2018,7 +1990,7 @@ select
   s.updated_at
 from public.subscriptions_vault s
 where s.deleted_at is null
-  and public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]);
+  and public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]);
 
 -- -----------------------------------------------------------------------------
 -- 9. RECYCLE BIN PURGE HELPER (30 HARI)
@@ -2047,10 +2019,10 @@ begin
         and coalesce(nullif(current_setting('role', true), ''), 'none') in ('none', 'postgres')
       )
     ) then
-      raise exception 'Hanya Super Admin atau Cron Server yang dapat mengosongkan Recycle Bin.';
+      raise exception 'Hanya Owner atau Cron Server yang dapat mengosongkan Recycle Bin.';
     end if;
-  elsif not public.has_role(array['SUPER_ADMIN']::public.user_role[]) then
-    raise exception 'Hanya Super Admin atau Cron Server yang dapat mengosongkan Recycle Bin.';
+  elsif not public.has_role(array['OWNER']::public.user_role[]) then
+    raise exception 'Hanya Owner atau Cron Server yang dapat mengosongkan Recycle Bin.';
   end if;
 
   if p_days is null or p_days < 0 then
@@ -2113,276 +2085,328 @@ alter table public.audit_logs enable row level security;
 -- profiles
 drop policy if exists "profiles_select_active_or_self" on public.profiles;
 create policy "profiles_select_active_or_self" on public.profiles
-  for select using (id = auth.uid() or public.is_active_user());
+  for select to authenticated
+  using (id = (select auth.uid()) or (select public.is_active_user()));
 
 drop policy if exists "profiles_insert_admins" on public.profiles;
 create policy "profiles_insert_admins" on public.profiles
-  for insert with check (
-    public.has_role(array['OWNER']::public.user_role[])
-    or (public.has_role(array['SUPER_ADMIN']::public.user_role[]) and role <> 'OWNER')
+  for insert to authenticated
+  with check (
+    (select public.has_role(array['OWNER']::public.user_role[]))
+    or (
+      (select public.has_role(array['SUPER_ADMIN']::public.user_role[]))
+      and role in ('TEAM_LEADER', 'STAFF')
+    )
   );
 
 drop policy if exists "profiles_update_admins_or_self" on public.profiles;
 create policy "profiles_update_admins_or_self" on public.profiles
-  for update
+  for update to authenticated
   using (
-    (id = auth.uid() and public.is_active_user())
-    or public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
+    (id = (select auth.uid()) and (select public.is_active_user()))
+    or (select public.has_role(array['OWNER']::public.user_role[]))
+    or (
+      (select public.has_role(array['SUPER_ADMIN']::public.user_role[]))
+      and role in ('TEAM_LEADER', 'STAFF')
+    )
   )
   with check (
-    (id = auth.uid() and public.is_active_user())
-    or public.has_role(array['OWNER']::public.user_role[])
-    or (public.has_role(array['SUPER_ADMIN']::public.user_role[]) and role <> 'OWNER')
+    (id = (select auth.uid()) and (select public.is_active_user()))
+    or (select public.has_role(array['OWNER']::public.user_role[]))
+    or (
+      (select public.has_role(array['SUPER_ADMIN']::public.user_role[]))
+      and role in ('TEAM_LEADER', 'STAFF')
+    )
   );
 
 drop policy if exists "profiles_delete_admins" on public.profiles;
 create policy "profiles_delete_admins" on public.profiles
-  for delete using (
-    public.has_role(array['OWNER']::public.user_role[])
-    or (public.has_role(array['SUPER_ADMIN']::public.user_role[]) and role <> 'OWNER')
+  for delete to authenticated
+  using (
+    (select public.has_role(array['OWNER']::public.user_role[]))
+    or (
+      (select public.has_role(array['SUPER_ADMIN']::public.user_role[]))
+      and role in ('TEAM_LEADER', 'STAFF')
+    )
   );
 
 -- code_sequences (admin-readable only; mutated by security definer functions)
 drop policy if exists "code_sequences_select_admins" on public.code_sequences;
 create policy "code_sequences_select_admins" on public.code_sequences
-  for select using (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]));
+  for select to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 -- items_master
 drop policy if exists "items_master_select_all" on public.items_master;
 create policy "items_master_select_all" on public.items_master
-  for select using (
-    public.is_active_user()
-    and (deleted_at is null or public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+  for select to authenticated
+  using (
+    (select public.is_active_user())
+    and (deleted_at is null or (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
   );
 
 drop policy if exists "items_master_insert_admins" on public.items_master;
 create policy "items_master_insert_admins" on public.items_master
-  for insert with check (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]));
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "items_master_update_operational" on public.items_master;
 create policy "items_master_update_operational" on public.items_master
-  for update
+  for update to authenticated
   using (
-    public.is_active_user()
-    and (deleted_at is null or public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+    (select public.is_active_user())
+    and (deleted_at is null or (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
   )
-  with check (public.is_active_user());
+  with check ((select public.is_active_user()));
 
 drop policy if exists "items_master_delete_super_admin" on public.items_master;
-create policy "items_master_delete_super_admin" on public.items_master
-  for delete using (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "items_master_delete_owner" on public.items_master;
+create policy "items_master_delete_owner" on public.items_master
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER']::public.user_role[])));
 
 -- item_kits
 drop policy if exists "item_kits_select_all" on public.item_kits;
 create policy "item_kits_select_all" on public.item_kits
-  for select using (
-    public.is_active_user()
-    and (deleted_at is null or public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+  for select to authenticated
+  using (
+    (select public.is_active_user())
+    and (deleted_at is null or (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
   );
 
 drop policy if exists "item_kits_insert_admins" on public.item_kits;
 create policy "item_kits_insert_admins" on public.item_kits
-  for insert with check (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]));
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "item_kits_update_operational" on public.item_kits;
 create policy "item_kits_update_operational" on public.item_kits
-  for update
+  for update to authenticated
   using (
-    public.is_active_user()
-    and (deleted_at is null or public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+    (select public.is_active_user())
+    and (deleted_at is null or (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
   )
-  with check (public.is_active_user());
+  with check ((select public.is_active_user()));
 
 drop policy if exists "item_kits_delete_super_admin" on public.item_kits;
-create policy "item_kits_delete_super_admin" on public.item_kits
-  for delete using (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "item_kits_delete_owner" on public.item_kits;
+create policy "item_kits_delete_owner" on public.item_kits
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER']::public.user_role[])));
 
 -- borrow_transactions
 drop policy if exists "borrow_select_all" on public.borrow_transactions;
 create policy "borrow_select_all" on public.borrow_transactions
-  for select using (public.is_active_user());
+  for select to authenticated
+  using ((select public.is_active_user()));
 
 drop policy if exists "borrow_insert_all" on public.borrow_transactions;
 create policy "borrow_insert_all" on public.borrow_transactions
-  for insert with check (
-    public.is_active_user()
-    and (borrower_id = auth.uid() or public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]))
+  for insert to authenticated
+  with check (
+    (select public.is_active_user())
+    and (
+      borrower_id = (select auth.uid())
+      or (select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]))
+    )
   );
 
 drop policy if exists "borrow_update_actor_or_mgmt" on public.borrow_transactions;
 create policy "borrow_update_actor_or_mgmt" on public.borrow_transactions
-  for update
+  for update to authenticated
   using (
-    public.is_active_user()
+    (select public.is_active_user())
     and (
       status in ('DIPINJAM', 'TERLAMBAT')
-      or public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[])
+      or (select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]))
     )
   )
-  with check (public.is_active_user());
+  with check ((select public.is_active_user()));
 
 drop policy if exists "borrow_delete_super_admin" on public.borrow_transactions;
-create policy "borrow_delete_super_admin" on public.borrow_transactions
-  for delete using (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "borrow_delete_owner" on public.borrow_transactions;
+create policy "borrow_delete_owner" on public.borrow_transactions
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER']::public.user_role[])));
 
--- subscriptions_vault (TEAM_LEADER menggunakan view subscriptions_vault_directory; STAFF tidak punya akses)
+-- subscriptions_vault (khusus OWNER & SUPER_ADMIN; TEAM_LEADER & STAFF tidak punya akses)
 drop policy if exists "vault_select_admins" on public.subscriptions_vault;
 create policy "vault_select_admins" on public.subscriptions_vault
-  for select using (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]));
+  for select to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "vault_insert_super_admin" on public.subscriptions_vault;
-create policy "vault_insert_super_admin" on public.subscriptions_vault
-  for insert with check (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "vault_insert_admins" on public.subscriptions_vault;
+create policy "vault_insert_admins" on public.subscriptions_vault
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "vault_update_super_admin" on public.subscriptions_vault;
-create policy "vault_update_super_admin" on public.subscriptions_vault
-  for update
-  using (
-    public.has_role(array['SUPER_ADMIN']::public.user_role[])
-    or (public.has_role(array['OWNER']::public.user_role[]) and deleted_at is not null)
-  )
-  with check (
-    public.has_role(array['SUPER_ADMIN']::public.user_role[])
-    or (public.has_role(array['OWNER']::public.user_role[]) and deleted_at is null and deleted_by is null)
-  );
+drop policy if exists "vault_update_admins" on public.subscriptions_vault;
+create policy "vault_update_admins" on public.subscriptions_vault
+  for update to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "vault_delete_super_admin" on public.subscriptions_vault;
-create policy "vault_delete_super_admin" on public.subscriptions_vault
-  for delete using (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "vault_delete_owner" on public.subscriptions_vault;
+create policy "vault_delete_owner" on public.subscriptions_vault
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER']::public.user_role[])));
 
 -- archives_hybrid & archive_versions
 drop policy if exists "archives_select_by_role" on public.archives_hybrid;
 create policy "archives_select_by_role" on public.archives_hybrid
-  for select using (
-    (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
-    or (deleted_at is null and public.has_role(array['TEAM_LEADER']::public.user_role[]))
-    or (deleted_at is null and is_sop_public_to_staff = true and public.is_active_user())
+  for select to authenticated
+  using (
+    (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+    or (deleted_at is null and (select public.has_role(array['TEAM_LEADER']::public.user_role[])))
+    or (deleted_at is null and is_sop_public_to_staff = true and (select public.is_active_user()))
   );
 
 drop policy if exists "archives_insert_admins" on public.archives_hybrid;
 create policy "archives_insert_admins" on public.archives_hybrid
-  for insert with check (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]));
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "archives_update_admins" on public.archives_hybrid;
 create policy "archives_update_admins" on public.archives_hybrid
-  for update
-  using (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
-  with check (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]));
+  for update to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "archives_delete_super_admin" on public.archives_hybrid;
-create policy "archives_delete_super_admin" on public.archives_hybrid
-  for delete using (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "archives_delete_owner" on public.archives_hybrid;
+create policy "archives_delete_owner" on public.archives_hybrid
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER']::public.user_role[])));
 
 drop policy if exists "archive_versions_select_by_role" on public.archive_versions;
 create policy "archive_versions_select_by_role" on public.archive_versions
-  for select using (
+  for select to authenticated
+  using (
     exists (
       select 1 from public.archives_hybrid a
       where a.id = archive_versions.archive_id
         and (
-          public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
-          or (a.deleted_at is null and public.has_role(array['TEAM_LEADER']::public.user_role[]))
-          or (a.deleted_at is null and a.is_sop_public_to_staff = true and public.is_active_user())
+          (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+          or (a.deleted_at is null and (select public.has_role(array['TEAM_LEADER']::public.user_role[])))
         )
     )
   );
 
 drop policy if exists "archive_versions_insert_admins" on public.archive_versions;
 create policy "archive_versions_insert_admins" on public.archive_versions
-  for insert with check (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]));
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
--- deliveries_log
+-- deliveries_log (khusus OWNER & SUPER_ADMIN)
 drop policy if exists "deliveries_select_management" on public.deliveries_log;
-create policy "deliveries_select_management" on public.deliveries_log
-  for select using (
-    (public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
-    or (deleted_at is null and public.has_role(array['TEAM_LEADER']::public.user_role[]))
-  );
+drop policy if exists "deliveries_select_admins" on public.deliveries_log;
+create policy "deliveries_select_admins" on public.deliveries_log
+  for select to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "deliveries_insert_super_admin" on public.deliveries_log;
-create policy "deliveries_insert_super_admin" on public.deliveries_log
-  for insert with check (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "deliveries_insert_admins" on public.deliveries_log;
+create policy "deliveries_insert_admins" on public.deliveries_log
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "deliveries_update_super_admin" on public.deliveries_log;
-create policy "deliveries_update_super_admin" on public.deliveries_log
-  for update
-  using (
-    public.has_role(array['SUPER_ADMIN']::public.user_role[])
-    or (public.has_role(array['OWNER']::public.user_role[]) and deleted_at is not null)
-  )
-  with check (
-    public.has_role(array['SUPER_ADMIN']::public.user_role[])
-    or (public.has_role(array['OWNER']::public.user_role[]) and deleted_at is null and deleted_by is null)
-  );
+drop policy if exists "deliveries_update_admins" on public.deliveries_log;
+create policy "deliveries_update_admins" on public.deliveries_log
+  for update to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "deliveries_delete_super_admin" on public.deliveries_log;
-create policy "deliveries_delete_super_admin" on public.deliveries_log
-  for delete using (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "deliveries_delete_owner" on public.deliveries_log;
+create policy "deliveries_delete_owner" on public.deliveries_log
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER']::public.user_role[])));
 
--- system_backups
+-- system_backups (OWNER & SUPER_ADMIN baca/buat/perbarui; hapus permanen khusus OWNER)
 drop policy if exists "backups_select_admins" on public.system_backups;
 create policy "backups_select_admins" on public.system_backups
-  for select using (
-    public.has_role(array['SUPER_ADMIN']::public.user_role[])
-    or (deleted_at is null and public.has_role(array['OWNER']::public.user_role[]))
-  );
+  for select to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "backups_insert_super_admin" on public.system_backups;
-create policy "backups_insert_super_admin" on public.system_backups
-  for insert with check (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "backups_insert_admins" on public.system_backups;
+create policy "backups_insert_admins" on public.system_backups
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "backups_update_super_admin" on public.system_backups;
-create policy "backups_update_super_admin" on public.system_backups
-  for update
-  using (public.has_role(array['SUPER_ADMIN']::public.user_role[]))
-  with check (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "backups_update_admins" on public.system_backups;
+create policy "backups_update_admins" on public.system_backups
+  for update to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "backups_delete_super_admin" on public.system_backups;
-create policy "backups_delete_super_admin" on public.system_backups
-  for delete using (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "backups_delete_owner" on public.system_backups;
+create policy "backups_delete_owner" on public.system_backups
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER']::public.user_role[])));
 
 -- monthly_reconciliations
 drop policy if exists "reconciliations_select_management" on public.monthly_reconciliations;
 create policy "reconciliations_select_management" on public.monthly_reconciliations
-  for select using (public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]));
+  for select to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[])));
 
 drop policy if exists "reconciliations_insert_management" on public.monthly_reconciliations;
 create policy "reconciliations_insert_management" on public.monthly_reconciliations
-  for insert with check (public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]));
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[])));
 
 drop policy if exists "reconciliations_update_management" on public.monthly_reconciliations;
 create policy "reconciliations_update_management" on public.monthly_reconciliations
-  for update
-  using (public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]))
-  with check (public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]));
+  for update to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[])))
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[])));
 
 -- internal_requests
 drop policy if exists "requests_select_by_role" on public.internal_requests;
 create policy "requests_select_by_role" on public.internal_requests
-  for select using (
-    public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
-    or (deleted_at is null and public.has_role(array['TEAM_LEADER']::public.user_role[]))
-    or (deleted_at is null and requested_by = auth.uid() and public.is_active_user())
+  for select to authenticated
+  using (
+    (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+    or (deleted_at is null and (select public.has_role(array['TEAM_LEADER']::public.user_role[])))
+    or (deleted_at is null and requested_by = (select auth.uid()) and (select public.is_active_user()))
   );
 
 drop policy if exists "requests_insert_all" on public.internal_requests;
 create policy "requests_insert_all" on public.internal_requests
-  for insert with check (
-    public.is_active_user() and requested_by = auth.uid()
+  for insert to authenticated
+  with check (
+    (select public.is_active_user())
+    and requested_by = (select auth.uid())
+    and (
+      request_type <> 'PENGHAPUSAN_ASET'
+      or (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+    )
   );
 
 drop policy if exists "requests_update_management" on public.internal_requests;
 create policy "requests_update_management" on public.internal_requests
-  for update
+  for update to authenticated
   using (
-    public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
-    or (deleted_at is null and public.has_role(array['TEAM_LEADER']::public.user_role[]))
-    or (deleted_at is null and requested_by = auth.uid() and status = 'MENUNGGU_TEAM_LEADER' and public.is_active_user())
+    (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+    or (deleted_at is null and (select public.has_role(array['TEAM_LEADER']::public.user_role[])))
+    or (
+      deleted_at is null
+      and requested_by = (select auth.uid())
+      and status = 'MENUNGGU_TEAM_LEADER'
+      and (select public.is_active_user())
+    )
   )
   with check (
-    public.has_role(array['OWNER']::public.user_role[])
+    (select public.has_role(array['OWNER']::public.user_role[]))
     or (
-      public.has_role(array['SUPER_ADMIN']::public.user_role[])
+      (select public.has_role(array['SUPER_ADMIN']::public.user_role[]))
       and (
         deleted_at is not null
         or status not in ('DISETUJUI', 'SELESAI')
@@ -2394,7 +2418,7 @@ create policy "requests_update_management" on public.internal_requests
       )
     )
     or (
-      public.has_role(array['TEAM_LEADER']::public.user_role[])
+      (select public.has_role(array['TEAM_LEADER']::public.user_role[]))
       and deleted_at is null
       and deleted_by is null
       and status in ('MENUNGGU_TEAM_LEADER', 'MENUNGGU_ADMIN', 'DITOLAK')
@@ -2404,8 +2428,8 @@ create policy "requests_update_management" on public.internal_requests
       and owner_approved_at is null
     )
     or (
-      public.is_active_user()
-      and requested_by = auth.uid()
+      (select public.is_active_user())
+      and requested_by = (select auth.uid())
       and deleted_at is null
       and deleted_by is null
       and status = 'MENUNGGU_TEAM_LEADER'
@@ -2420,39 +2444,42 @@ create policy "requests_update_management" on public.internal_requests
   );
 
 drop policy if exists "requests_delete_super_admin" on public.internal_requests;
-create policy "requests_delete_super_admin" on public.internal_requests
-  for delete using (public.has_role(array['SUPER_ADMIN']::public.user_role[]));
+drop policy if exists "requests_delete_owner" on public.internal_requests;
+create policy "requests_delete_owner" on public.internal_requests
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER']::public.user_role[])));
 
--- audit_logs (append-only; terbaca oleh manajemen)
+-- audit_logs (append-only; terbaca khusus OWNER & SUPER_ADMIN)
 drop policy if exists "audit_logs_select_management" on public.audit_logs;
-create policy "audit_logs_select_management" on public.audit_logs
-  for select using (
-    public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
-    or (
-      public.has_role(array['TEAM_LEADER']::public.user_role[])
-      and entity_type <> 'subscriptions_vault'
-    )
-  );
+drop policy if exists "audit_logs_select_admins" on public.audit_logs;
+create policy "audit_logs_select_admins" on public.audit_logs
+  for select to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
 
 drop policy if exists "audit_logs_insert_active" on public.audit_logs;
 create policy "audit_logs_insert_active" on public.audit_logs
-  for insert with check (
-    public.is_active_user()
-    and actor_id = auth.uid()
-    and (actor_role is null or actor_role = public.current_user_role())
+  for insert to authenticated
+  with check (
+    (select public.is_active_user())
+    and actor_id = (select auth.uid())
+    and (actor_role is null or actor_role = (select public.current_user_role()))
     and old_data is null
     and new_data is null
     and char_length(btrim(action)) > 0
     and char_length(btrim(summary)) > 0
     and (
-      (action = 'STOCK_OPNAME' and entity_type = 'items_master')
-      or (
-        public.has_role(array['TEAM_LEADER']::public.user_role[])
-        and action in ('EXPORT_DATA', 'EXPORT_CSV', 'EXPORT_XLSX', 'EXPORT_PDF')
-        and entity_type <> 'subscriptions_vault'
+      (
+        (select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]))
+        and action = 'STOCK_OPNAME'
+        and entity_type = 'items_master'
       )
       or (
-        public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
+        (select public.has_role(array['TEAM_LEADER']::public.user_role[]))
+        and action in ('EXPORT_DATA', 'EXPORT_CSV', 'EXPORT_XLSX', 'EXPORT_PDF')
+        and entity_type not in ('subscriptions_vault', 'deliveries_log', 'audit_logs')
+      )
+      or (
+        (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
         and action not in ('INSERT', 'UPDATE', 'SOFT_DELETE', 'RESTORE', 'PURGE', 'VAULT_REVEAL')
       )
     )
@@ -2472,80 +2499,88 @@ on conflict (id) do update
 
 drop policy if exists "storage_inventory_read" on storage.objects;
 create policy "storage_inventory_read" on storage.objects
-  for select using (bucket_id = 'inventory-photos' and public.is_active_user());
+  for select to authenticated
+  using (bucket_id = 'inventory-photos' and (select public.is_active_user()));
 
 drop policy if exists "storage_inventory_write" on storage.objects;
 create policy "storage_inventory_write" on storage.objects
-  for all using (
+  for all to authenticated
+  using (
     bucket_id = 'inventory-photos'
-    and public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   )
   with check (
     bucket_id = 'inventory-photos'
-    and public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   );
 
 drop policy if exists "storage_archives_read" on storage.objects;
 create policy "storage_archives_read" on storage.objects
-  for select using (
+  for select to authenticated
+  using (
     bucket_id = 'archives'
     and (
-      public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[])
+      (select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]))
       or exists (
         select 1 from public.archives_hybrid a
         where a.digital_file_url = storage.objects.name
           and a.is_sop_public_to_staff = true
           and a.deleted_at is null
-          and public.is_active_user()
+          and (select public.is_active_user())
       )
     )
   );
 
 drop policy if exists "storage_archives_write" on storage.objects;
 create policy "storage_archives_write" on storage.objects
-  for all using (
+  for all to authenticated
+  using (
     bucket_id = 'archives'
-    and public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   )
   with check (
     bucket_id = 'archives'
-    and public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   );
 
 drop policy if exists "storage_deliveries_read" on storage.objects;
 create policy "storage_deliveries_read" on storage.objects
-  for select using (
+  for select to authenticated
+  using (
     bucket_id = 'delivery-proofs'
-    and public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   );
 
 drop policy if exists "storage_deliveries_write" on storage.objects;
 create policy "storage_deliveries_write" on storage.objects
-  for all using (
+  for all to authenticated
+  using (
     bucket_id = 'delivery-proofs'
-    and public.has_role(array['SUPER_ADMIN']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   )
   with check (
     bucket_id = 'delivery-proofs'
-    and public.has_role(array['SUPER_ADMIN']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   );
 
 drop policy if exists "storage_backups_read" on storage.objects;
 create policy "storage_backups_read" on storage.objects
-  for select using (
+  for select to authenticated
+  using (
     bucket_id = 'backups'
-    and public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   );
 
 drop policy if exists "storage_backups_write" on storage.objects;
 create policy "storage_backups_write" on storage.objects
-  for all using (
+  for all to authenticated
+  using (
     bucket_id = 'backups'
-    and public.has_role(array['SUPER_ADMIN']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   )
   with check (
     bucket_id = 'backups'
-    and public.has_role(array['SUPER_ADMIN']::public.user_role[])
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
   );
 
 -- -----------------------------------------------------------------------------

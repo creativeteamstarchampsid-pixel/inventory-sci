@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { requireUser } from "@/lib/auth";
 import { formatJakartaDate, getMonthlyUpdatePeriod } from "@/lib/period";
-import { canAccessRoute } from "@/lib/rbac";
+import { can, canAccessRoute } from "@/lib/rbac";
 
 export default async function AuthenticatedAppLayout({
   children,
@@ -66,7 +66,7 @@ export default async function AuthenticatedAppLayout({
             </div>
           </header>
 
-          {period.active && (
+          {period.active && can(user.role, "inventory.validate_opname") && (
             <div className="border-b border-amber-200 bg-gradient-to-r from-amber-50 via-orange-50/70 to-amber-50 px-4 py-2.5 text-amber-950 dark:border-amber-800 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 dark:text-amber-100">
               <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 text-sm">
                 <div className="flex items-center gap-2">
@@ -78,19 +78,14 @@ export default async function AuthenticatedAppLayout({
                       : `Tinggal ${period.daysUntilCutoff} hari lagi menuju penutupan laporan akhir bulan.`}
                   </span>
                 </div>
-                {canAccessRoute(user.role, "/backup") ? (
+                {canAccessRoute(user.role, "/backup") && (
                   <Link
                     href="/backup"
                     className="font-semibold text-amber-900 underline underline-offset-4 hover:opacity-80 dark:text-amber-200"
                   >
-                    Buka Laporan Akhir Bulan →
-                  </Link>
-                ) : (
-                  <Link
-                    href="/scan"
-                    className="font-semibold text-amber-900 underline underline-offset-4 hover:opacity-80 dark:text-amber-200"
-                  >
-                    Mulai Cek Ruangan →
+                    {can(user.role, "backup.view")
+                      ? "Buka Laporan Akhir Bulan →"
+                      : "Buka Cek Ruangan & Ekspor →"}
                   </Link>
                 )}
               </div>

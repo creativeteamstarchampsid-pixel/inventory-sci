@@ -19,6 +19,7 @@ export default async function RequestsPage() {
   const user = await requireRouteAccess("/requests");
   const supabase = await createClient();
 
+  const canViewAllRequests = can(user.role, "request.view_all");
   const canViewVaultLimited = can(user.role, "vault.view_limited");
 
   const [requestsRes, profilesRes, itemsRes, subsRes] = await Promise.all([
@@ -27,10 +28,22 @@ export default async function RequestsPage() {
       .select("*")
       .is("deleted_at", null)
       .order("created_at", { ascending: false }),
-    supabase
-      .from("profiles")
-      .select("id, full_name, role, job_title")
-      .order("full_name", { ascending: true }),
+    canViewAllRequests
+      ? supabase
+          .from("profiles")
+          .select("id, full_name, role, job_title")
+          .order("full_name", { ascending: true })
+      : Promise.resolve({
+          data: [
+            {
+              id: user.id,
+              full_name: user.fullName,
+              role: user.role,
+              job_title: null,
+            },
+          ] as RequestProfileSummary[],
+          error: null,
+        }),
     supabase
       .from("items_master")
       .select("id, item_code, name, room_code, condition")

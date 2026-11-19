@@ -61,7 +61,12 @@ import {
   updateUserRoleAction,
 } from "@/lib/actions/settings";
 import { formatDateWIB } from "@/lib/constants";
-import { ROLES, ROLE_LABELS, type Role } from "@/lib/rbac";
+import {
+  canManageTargetRole,
+  getAssignableRoles,
+  ROLE_LABELS,
+  type Role,
+} from "@/lib/rbac";
 import type { Profile } from "@/types/database";
 
 export type OffboardVaultWarning = {
@@ -83,7 +88,9 @@ export function SettingsClient({
   offboardVaultWarnings,
 }: SettingsClientProps) {
   const router = useRouter();
-  const { user, role } = useRole();
+  const { user, role, can } = useRole();
+  const canManageUsers = can("users.manage");
+  const canManageAdmins = can("users.manage_admins");
   const [isPending, startTransition] = useTransition();
 
   // Personal profile state
@@ -210,19 +217,25 @@ export function SettingsClient({
     });
   };
 
-  const assignableRoles: readonly Role[] =
-    role === "OWNER" ? ROLES : ROLES.filter((r) => r !== "OWNER");
+  const assignableRoles = getAssignableRoles(role);
+  const jobTitlePlaceholder =
+    role === "STAFF"
+      ? "Contoh: Terapis Okupasi / Terapis Wicara"
+      : role === "TEAM_LEADER"
+        ? "Contoh: Kepala Terapis / Koordinator Ruang"
+        : "Contoh: Admin Operasional / Direktur";
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Pengaturan Akun & Manajemen Pengguna
+            {canManageUsers ? "Pengaturan Akun & Manajemen Tim" : "Profil Saya"}
           </h1>
           <p className="text-muted-foreground text-sm">
-            Kelola profil pribadi serta peran, status aktif, dan offboarding tim
-            Star Champs Indonesia.
+            {canManageUsers
+              ? "Kelola profil pribadi serta peran, status aktif, dan offboarding tim Star Champs Indonesia."
+              : "Perbarui nama tampilan, nomor telepon, dan informasi jabatan pribadi Anda."}
           </p>
         </div>
         <RoleBadge role={role} showSubtitle />
@@ -313,7 +326,7 @@ export function SettingsClient({
                 id="profile-job"
                 value={jobTitle}
                 onChange={(e) => setJobTitle(e.target.value)}
-                placeholder="Contoh: Terapis Okupasi / Admin Operasional"
+                placeholder={jobTitlePlaceholder}
               />
             </div>
 
@@ -326,7 +339,7 @@ export function SettingsClient({
         </CardContent>
       </Card>
 
-      {/* User Management (OWNER & SUPER_ADMIN) */}
+      {/* User Management (OWNER & Admin Operasional) */}
       <Can action="users.manage">
         <Card>
           <CardHeader>
@@ -334,11 +347,12 @@ export function SettingsClient({
               <div>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Users className="size-4" />
-                  Daftar Anggota Tim & Hak Akses
+                  Daftar Anggota Tim &amp; Hak Akses
                 </CardTitle>
                 <CardDescription>
-                  Tambah anggota tim baru, atur jabatan, aktifkan/nonaktifkan akun, dan tandai
-                  bila ada staf yang sudah keluar agar kata sandi akun kantor segera diganti.
+                  {canManageAdmins
+                    ? "Tambah anggota tim baru (seluruh peran termasuk Owner & Admin Operasional), atur jabatan, status aktif, dan offboarding."
+                    : `Tambah dan kelola akun ${ROLE_LABELS.TEAM_LEADER.title} serta ${ROLE_LABELS.STAFF.title}. Pengelolaan akun ${ROLE_LABELS.OWNER.title} dan ${ROLE_LABELS.SUPER_ADMIN.title} hanya dapat dilakukan oleh ${ROLE_LABELS.OWNER.title}.`}
                 </CardDescription>
               </div>
               <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
@@ -374,7 +388,7 @@ export function SettingsClient({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nama & Jabatan</TableHead>
+                  <TableHead>Nama &amp; Jabatan</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Peran</TableHead>
                   <TableHead>Status Akun</TableHead>
@@ -385,9 +399,8 @@ export function SettingsClient({
               <TableBody>
                 {users.map((member) => {
                   const isSelf = member.id === user.id;
-                  const targetIsOwner = member.role === "OWNER";
-                  const lockedByHierarchy = targetIsOwner && role !== "OWNER";
-                  const disabledManage = isSelf || lockedByHierarchy || isPending;
+                  const canManageMember =
+                    !isSelf && canManageTargetRole(role, member.role);
                   const assignedVaultCodes = vaultWarnMap.get(member.id) ?? [];
 
                   return (
@@ -408,34 +421,40 @@ export function SettingsClient({
                       </TableCell>
                       <TableCell className="text-xs">{member.email ?? "-"}</TableCell>
                       <TableCell>
-                        <Select
-                          value={member.role}
-                          disabled={disabledManage}
-                          onValueChange={(val) =>
-                            handleChangeRole(member.id, val as Role)
-                          }
-                        >
-                          <SelectTrigger size="sm" className="w-40">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(targetIsOwner ? ROLES : assignableRoles).map((r) => (
-                              <SelectItem key={r} value={r}>
-                                {ROLE_LABELS[r].title}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {canManageMember ? (
+                          <Select
+                            value={member.role}
+                            disabled={isPending}
+                            onValueChange={(val) =>
+                              handleChangeRole(member.id, val as Role)
+                            }
+                          >
+                            <SelectTrigger size="sm" className="w-44">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {assignableRoles.map((r) => (
+                                <SelectItem key={r} value={r}>
+                                  {ROLE_LABELS[r].title}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <RoleBadge role={member.role} />
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <Switch
-                            checked={member.is_active}
-                            disabled={disabledManage}
-                            onCheckedChange={(val) =>
-                              handleToggleActive(member.id, val)
-                            }
-                          />
+                          {canManageMember && (
+                            <Switch
+                              checked={member.is_active}
+                              disabled={isPending}
+                              onCheckedChange={(val) =>
+                                handleToggleActive(member.id, val)
+                              }
+                            />
+                          )}
                           <Badge
                             variant={member.is_active ? "secondary" : "destructive"}
                           >
@@ -462,26 +481,32 @@ export function SettingsClient({
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant={member.offboarded_at ? "outline" : "destructive"}
-                          disabled={disabledManage}
-                          onClick={() =>
-                            handleToggleOffboard(member.id, !member.offboarded_at)
-                          }
-                        >
-                          {member.offboarded_at ? (
-                            <>
-                              <UserCheck className="mr-1 size-3.5" />
-                              Aktifkan Kembali
-                            </>
-                          ) : (
-                            <>
-                              <UserX className="mr-1 size-3.5" />
-                              Tandai Sudah Keluar
-                            </>
-                          )}
-                        </Button>
+                        {canManageMember ? (
+                          <Button
+                            size="sm"
+                            variant={member.offboarded_at ? "outline" : "destructive"}
+                            disabled={isPending}
+                            onClick={() =>
+                              handleToggleOffboard(member.id, !member.offboarded_at)
+                            }
+                          >
+                            {member.offboarded_at ? (
+                              <>
+                                <UserCheck className="mr-1 size-3.5" />
+                                Aktifkan Kembali
+                              </>
+                            ) : (
+                              <>
+                                <UserX className="mr-1 size-3.5" />
+                                Tandai Sudah Keluar
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <Badge variant="outline" className="text-[11px]">
+                            {isSelf ? "Akun Anda" : `Dikelola ${ROLE_LABELS.OWNER.title}`}
+                          </Badge>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -493,150 +518,154 @@ export function SettingsClient({
       </Can>
 
       {/* Create / Invite User Dialog */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <UserPlus className="size-4" />
-              Tambah Anggota Tim Baru
-            </DialogTitle>
-            <DialogDescription>
-              Buat akun masuk baru untuk terapis, kepala terapis, atau admin operasional.
-            </DialogDescription>
-          </DialogHeader>
+      {canManageUsers && (
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <UserPlus className="size-4" />
+                Tambah Anggota Tim Baru
+              </DialogTitle>
+              <DialogDescription>
+                {canManageAdmins
+                  ? "Buat akun masuk baru untuk seluruh peran tim Star Champs Indonesia."
+                  : `Buat akun masuk baru untuk ${ROLE_LABELS.TEAM_LEADER.title} atau ${ROLE_LABELS.STAFF.title}.`}
+              </DialogDescription>
+            </DialogHeader>
 
-          {!serviceRoleConfigured && (
-            <Alert variant="warning">
-              <AlertTriangle className="size-4" />
-              <AlertTitle>Kunci Admin Belum Aktif</AlertTitle>
-              <AlertDescription>
-                Hubungi pengelola server untuk mengaktifkan kunci pendaftaran pengguna baru.
-              </AlertDescription>
-            </Alert>
-          )}
+            {!serviceRoleConfigured && (
+              <Alert variant="warning">
+                <AlertTriangle className="size-4" />
+                <AlertTitle>Kunci Admin Belum Aktif</AlertTitle>
+                <AlertDescription>
+                  Hubungi pengelola server untuk mengaktifkan kunci pendaftaran pengguna baru.
+                </AlertDescription>
+              </Alert>
+            )}
 
-          <form onSubmit={handleCreateUser} className="space-y-3">
-            <div className="space-y-1.5">
-              <Label>Metode Pembuatan Akun</Label>
-              <Select
-                value={createMode}
-                onValueChange={(val) =>
-                  setCreateMode(val as "password" | "invite")
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="password">
-                    Buat Langsung dengan Password Awal
-                  </SelectItem>
-                  <SelectItem value="invite">Kirim Undangan Email</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
+            <form onSubmit={handleCreateUser} className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="new-user-name">Nama Lengkap</Label>
-                <Input
-                  id="new-user-name"
-                  value={newFullName}
-                  onChange={(e) => setNewFullName(e.target.value)}
-                  required
-                  placeholder="Nama terapis / admin"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="new-user-email">Email</Label>
-                <Input
-                  id="new-user-email"
-                  type="email"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  required
-                  placeholder="nama@starchamps.id"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>Peran RBAC</Label>
+                <Label>Metode Pembuatan Akun</Label>
                 <Select
-                  value={newRole}
-                  onValueChange={(val) => setNewRole(val as Role)}
+                  value={createMode}
+                  onValueChange={(val) =>
+                    setCreateMode(val as "password" | "invite")
+                  }
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {assignableRoles.map((r) => (
-                      <SelectItem key={r} value={r}>
-                        {ROLE_LABELS[r].title} ({ROLE_LABELS[r].subtitle})
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="password">
+                      Buat Langsung dengan Password Awal
+                    </SelectItem>
+                    <SelectItem value="invite">Kirim Undangan Email</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-user-name">Nama Lengkap</Label>
+                  <Input
+                    id="new-user-name"
+                    value={newFullName}
+                    onChange={(e) => setNewFullName(e.target.value)}
+                    required
+                    placeholder="Nama anggota tim"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-user-email">Email</Label>
+                  <Input
+                    id="new-user-email"
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    required
+                    placeholder="nama@starchamps.id"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>Peran</Label>
+                  <Select
+                    value={newRole}
+                    onValueChange={(val) => setNewRole(val as Role)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assignableRoles.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {ROLE_LABELS[r].title} ({ROLE_LABELS[r].subtitle})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-user-phone">Telepon (Opsional)</Label>
+                  <Input
+                    id="new-user-phone"
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value)}
+                    placeholder="08..."
+                  />
+                </div>
+              </div>
+
               <div className="space-y-1.5">
-                <Label htmlFor="new-user-phone">Telepon (Opsional)</Label>
+                <Label htmlFor="new-user-job">Jabatan (Opsional)</Label>
                 <Input
-                  id="new-user-phone"
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(e.target.value)}
-                  placeholder="08..."
+                  id="new-user-job"
+                  value={newJobTitle}
+                  onChange={(e) => setNewJobTitle(e.target.value)}
+                  placeholder="Terapis Wicara / Koordinator Ruang"
                 />
               </div>
-            </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="new-user-job">Jabatan (Opsional)</Label>
-              <Input
-                id="new-user-job"
-                value={newJobTitle}
-                onChange={(e) => setNewJobTitle(e.target.value)}
-                placeholder="Terapis Wicara / Koordinator Ruang"
-              />
-            </div>
+              {createMode === "password" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-user-password">Password Awal (min. 8 karakter)</Label>
+                  <Input
+                    id="new-user-password"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                    minLength={8}
+                    placeholder="Minimal 8 karakter"
+                  />
+                </div>
+              )}
 
-            {createMode === "password" && (
-              <div className="space-y-1.5">
-                <Label htmlFor="new-user-password">Password Awal (min. 8 karakter)</Label>
-                <Input
-                  id="new-user-password"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
-                  minLength={8}
-                  placeholder="Minimal 8 karakter"
-                />
-              </div>
-            )}
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setCreateDialogOpen(false)}
-                disabled={isPending}
-              >
-                Batal
-              </Button>
-              <Button type="submit" disabled={isPending}>
-                {isPending
-                  ? "Memproses..."
-                  : createMode === "invite"
-                    ? "Kirim Undangan"
-                    : "Buat Akun"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCreateDialogOpen(false)}
+                  disabled={isPending}
+                >
+                  Batal
+                </Button>
+                <Button type="submit" disabled={isPending}>
+                  {isPending
+                    ? "Memproses..."
+                    : createMode === "invite"
+                      ? "Kirim Undangan"
+                      : "Buat Akun"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

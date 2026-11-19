@@ -12,6 +12,7 @@ import {
 
 import { requireAction } from "@/lib/auth";
 import { calculateBookValue, formatDateWIB, formatRupiah } from "@/lib/constants";
+import { ROLE_LABELS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import {
   getStockAnomalies,
@@ -302,6 +303,11 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
   const consumableCount = dataset.items.filter((i) => i.asset_type === "CONSUMABLE").length;
   const opnamePct = dataset.reconciliation?.opname_progress_pct ?? 0;
 
+  const actorRoleLabel =
+    dataset.actorRole === "SYSTEM"
+      ? "Sistem"
+      : ROLE_LABELS[dataset.actorRole].title;
+
   const statCards: Array<{
     label: string;
     value: string;
@@ -313,11 +319,15 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
       value: `${dataset.items.length} Item`,
       sub: `${toyCount} Mainan · ${fixedCount} Aset · ${consumableCount} Habis Pakai`,
     },
-    {
-      label: "NILAI PEROLEHAN & NILAI BUKU",
-      value: formatRupiah(totalBookValue),
-      sub: `Harga beli awal: ${formatRupiah(totalPurchase)}`,
-    },
+    ...(dataset.canViewValuation
+      ? [
+          {
+            label: "NILAI PEROLEHAN & NILAI BUKU",
+            value: formatRupiah(totalBookValue),
+            sub: `Harga beli awal: ${formatRupiah(totalPurchase)}`,
+          },
+        ]
+      : []),
     {
       label: "PART KURANG (PART_KURANG)",
       value: `${anomalies.partKurang.length} Item`,
@@ -330,17 +340,23 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
       sub: "Belum steril / jadwal sanitasi terlewati",
       alert: anomalies.needsSanitation.length > 0,
     },
+    ...(dataset.canExportFinancial
+      ? [
+          {
+            label: "SUBSCRIPTION VAULT",
+            value: `${activeSubs.length} Aktif`,
+            sub: dataset.canViewBilling
+              ? `Est. ${formatRupiah(Math.round(monthlySubCost))}/bulan (secret termasking)`
+              : "Rincian biaya dibatasi sesuai RBAC",
+          },
+        ]
+      : []),
     {
-      label: "SUBSCRIPTION VAULT",
-      value: `${activeSubs.length} Aktif`,
-      sub: dataset.canViewBilling
-        ? `Est. ${formatRupiah(Math.round(monthlySubCost))}/bulan (secret termasking)`
-        : "Rincian biaya dibatasi sesuai RBAC",
-    },
-    {
-      label: "ARSIP & LOGISTIK",
+      label: dataset.canExportFinancial ? "ARSIP & LOGISTIK" : "ARSIP BERKAS",
       value: `${dataset.archives.length} Berkas`,
-      sub: `${dataset.deliveries.length} log pengiriman · Opname ${opnamePct}%`,
+      sub: dataset.canExportFinancial
+        ? `${dataset.deliveries.length} log pengiriman · Opname ${opnamePct}%`
+        : `Progres Opname Ruangan: ${opnamePct}%`,
     },
   ];
 
@@ -370,7 +386,9 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
           e(
             Text,
             { style: styles.brandSubtitle },
-            "Rekapitulasi Inventaris, Kelengkapan Part, Sanitasi Mainan, Vault & Arsip Hibrida",
+            dataset.canExportFinancial
+              ? "Rekapitulasi Inventaris, Kelengkapan Part, Sanitasi Mainan, Vault & Arsip Hibrida"
+              : "Rekapitulasi Inventaris, Kelengkapan Part, Sanitasi Mainan & Arsip Berkas",
           ),
         ),
         e(
@@ -388,7 +406,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
           e(
             Text,
             { style: styles.metaValue },
-            `${dataset.actorName} (${dataset.actorRole})`,
+            `${dataset.actorName} (${actorRoleLabel})`,
           ),
         ),
       ),
@@ -523,7 +541,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
               View,
               null,
               e(Text, { style: styles.signatureRoleTitle }, "Diverifikasi Oleh"),
-              e(Text, { style: styles.signatureRoleSub }, "Admin Ops (Super Admin)"),
+              e(Text, { style: styles.signatureRoleSub }, "Admin Operasional"),
             ),
             e(
               View,
@@ -542,7 +560,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
                 : e(Text, { style: styles.signaturePending }, "Menunggu verifikasi"),
             ),
           ),
-          // Column 2: Team Leader
+          // Column 2: Kepala Terapis
           e(
             View,
             { style: styles.signatureBox },
@@ -550,7 +568,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
               View,
               null,
               e(Text, { style: styles.signatureRoleTitle }, "Diperiksa Oleh"),
-              e(Text, { style: styles.signatureRoleSub }, "Team Leader (Kepala Terapis)"),
+              e(Text, { style: styles.signatureRoleSub }, "Kepala Terapis"),
             ),
             e(
               View,
@@ -606,7 +624,9 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
         e(
           Text,
           null,
-          "StarOps · Star Champs Indonesia · Dokumen Audit Internal (Kredensial Vault Termasking)",
+          dataset.canExportFinancial
+            ? "StarOps · Star Champs Indonesia · Dokumen Audit Internal (Kredensial Vault Termasking)"
+            : "StarOps · Star Champs Indonesia · Dokumen Operasional Internal",
         ),
         e(Text, {
           render: ({ pageNumber, totalPages }: { pageNumber: number; totalPages: number }) =>

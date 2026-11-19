@@ -3,6 +3,7 @@ import { AlertTriangle } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requireRouteAccess } from "@/lib/auth";
+import { can } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { InventoryClient } from "./inventory-client";
 
@@ -11,7 +12,8 @@ export const metadata: Metadata = {
 };
 
 export default async function InventoryPage() {
-  await requireRouteAccess("/inventory");
+  const user = await requireRouteAccess("/inventory");
+  const canViewValuation = can(user.role, "inventory.view_valuation");
   const supabase = await createClient();
 
   const { data: items, error } = await supabase
@@ -30,7 +32,17 @@ export default async function InventoryPage() {
     );
   }
 
-  const rows = items ?? [];
+  const rows = (items ?? []).map((item) =>
+    canViewValuation
+      ? item
+      : {
+          ...item,
+          purchase_price: 0,
+          residual_value: 0,
+          useful_life_months: null,
+          acquisition_date: null,
+        },
+  );
   const storagePaths = Array.from(
     new Set(
       rows

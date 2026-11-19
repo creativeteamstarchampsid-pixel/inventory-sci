@@ -36,8 +36,9 @@ export function getInitials(name: string) {
 }
 
 export function UserMenu() {
-  const { user, role } = useRole();
+  const { user, role, can } = useRole();
   const { isMobile } = useSidebar();
+  const settingsLabel = can("users.manage") ? "Pengaturan & Tim" : "Profil Saya";
 
   return (
     <SidebarMenu>
@@ -54,7 +55,7 @@ export function UserMenu() {
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{user.fullName}</span>
                 <span className="text-muted-foreground truncate text-xs">
-                  {ROLE_LABELS[role].subtitle}
+                  {ROLE_LABELS[role].title}
                 </span>
               </div>
               <ChevronsUpDown className="ml-auto size-4" aria-hidden />
@@ -78,7 +79,7 @@ export function UserMenu() {
               <DropdownMenuItem asChild>
                 <Link href="/settings">
                   <Settings aria-hidden />
-                  Pengaturan
+                  {settingsLabel}
                 </Link>
               </DropdownMenuItem>
             </DropdownMenuGroup>

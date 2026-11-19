@@ -633,7 +633,7 @@ function BastPdf({
           <View style={styles.signatureCol}>
             <Text style={styles.signatureRole}>Saksi / PIC Operasional</Text>
             <Text style={{ fontSize: 7.5, color: "#64748b" }}>
-              {bastMeta?.witnessName || delivery.pic_name || "Admin Ops"}
+              {bastMeta?.witnessName || delivery.pic_name || "Admin Operasional"}
             </Text>
             <View style={styles.signatureSpace} />
             <Text style={styles.signatureNameLine}>

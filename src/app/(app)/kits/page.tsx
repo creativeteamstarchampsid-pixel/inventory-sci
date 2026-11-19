@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requireRouteAccess } from "@/lib/auth";
 import type { BorrowHistoryEntry } from "@/lib/actions/scan";
+import { can } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import { KitsClient } from "./kits-client";
 
@@ -12,10 +13,11 @@ export const metadata: Metadata = {
 };
 
 export default async function KitsPage() {
-  await requireRouteAccess("/kits");
+  const user = await requireRouteAccess("/kits");
+  const canViewValuation = can(user.role, "inventory.view_valuation");
   const supabase = await createClient();
 
-  const [kitsRes, itemsRes, borrowsRes] = await Promise.all([
+  const [kitsRes, itemsRes, borrowsRes, activeBorrowsRes] = await Promise.all([
     supabase
       .from("item_kits")
       .select("*")
@@ -32,6 +34,12 @@ export default async function KitsPage() {
       .not("kit_id", "is", null)
       .order("borrowed_at", { ascending: false })
       .limit(30),
+    supabase
+      .from("borrow_transactions")
+      .select("*")
+      .not("kit_id", "is", null)
+      .in("status", ["DIPINJAM", "TERLAMBAT"])
+      .order("borrowed_at", { ascending: false }),
   ]);
 
   if (kitsRes.error) {
@@ -45,9 +53,11 @@ export default async function KitsPage() {
   }
 
   const borrows = borrowsRes.data ?? [];
+  const activeBorrows = activeBorrowsRes.data ?? [];
+  const allBorrowsForProfiles = [...borrows, ...activeBorrows];
   const profileIds = Array.from(
     new Set(
-      borrows
+      allBorrowsForProfiles
         .flatMap((row) => [row.borrower_id, row.returned_by])
         .filter((pid): pid is string => Boolean(pid)),
     ),
@@ -64,22 +74,32 @@ export default async function KitsPage() {
     }
   }
 
-  const enrichedBorrows: BorrowHistoryEntry[] = borrows.map((row) => ({
+  const enrichBorrow = (row: (typeof borrows)[number]): BorrowHistoryEntry => ({
     ...row,
     borrower_name: nameMap.get(row.borrower_id) ?? null,
     returned_by_name: row.returned_by ? nameMap.get(row.returned_by) ?? null : null,
-  }));
+  });
+
+  const enrichedBorrows: BorrowHistoryEntry[] = borrows.map(enrichBorrow);
 
   const activeBorrowsByKitId: Record<string, BorrowHistoryEntry> = {};
-  for (const row of enrichedBorrows) {
-    if (
-      row.kit_id &&
-      (row.status === "DIPINJAM" || row.status === "TERLAMBAT") &&
-      !activeBorrowsByKitId[row.kit_id]
-    ) {
+  for (const row of activeBorrows.map(enrichBorrow)) {
+    if (row.kit_id && !activeBorrowsByKitId[row.kit_id]) {
       activeBorrowsByKitId[row.kit_id] = row;
     }
   }
+
+  const sanitizedItems = (itemsRes.data ?? []).map((item) =>
+    canViewValuation
+      ? item
+      : {
+          ...item,
+          purchase_price: 0,
+          residual_value: 0,
+          useful_life_months: null,
+          acquisition_date: null,
+        },
+  );
 
   const todayWib = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Jakarta",
@@ -88,7 +108,7 @@ export default async function KitsPage() {
   return (
     <KitsClient
       kits={kitsRes.data ?? []}
-      items={itemsRes.data ?? []}
+      items={sanitizedItems}
       activeBorrowsByKitId={activeBorrowsByKitId}
       recentKitBorrows={enrichedBorrows.slice(0, 15)}
       todayWib={todayWib}

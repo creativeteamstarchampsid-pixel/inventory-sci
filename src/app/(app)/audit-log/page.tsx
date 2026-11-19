@@ -1,0 +1,88 @@
+import type { Metadata } from "next";
+
+import { requireRouteAccess } from "@/lib/auth";
+import { scrubVaultAuditEntry } from "@/lib/exports/csv";
+import { createClient } from "@/lib/supabase/server";
+import type { AuditLog } from "@/types/database";
+import { AuditLogClient } from "./audit-log-client";
+
+export const metadata: Metadata = {
+  title: "Log Aktivitas",
+};
+
+type SearchParamsInput = Promise<{
+  action?: string;
+  entity?: string;
+  actor?: string;
+  q?: string;
+}>;
+
+export default async function AuditLogPage({
+  searchParams,
+}: {
+  searchParams: SearchParamsInput;
+}) {
+  const user = await requireRouteAccess("/audit-log");
+  const resolvedParams = await searchParams;
+
+  const action = resolvedParams.action?.trim() || "ALL";
+  const entityType = resolvedParams.entity?.trim() || "ALL";
+  const actor = resolvedParams.actor?.trim() || "ALL";
+  const search = resolvedParams.q?.trim() || "";
+
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("audit_logs")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(250);
+
+  if (action !== "ALL") {
+    query = query.eq("action", action);
+  }
+  if (entityType !== "ALL") {
+    query = query.eq("entity_type", entityType);
+  }
+  if (actor === "__SYSTEM__") {
+    query = query.is("actor_id", null);
+  } else if (actor !== "ALL") {
+    query = query.eq("actor_id", actor);
+  }
+  if (search) {
+    const safePattern = `%${search.replaceAll(",", " ").replaceAll("%", "")}%`;
+    query = query.or(
+      `summary.ilike.${safePattern},entity_code.ilike.${safePattern},actor_name.ilike.${safePattern}`,
+    );
+  }
+
+  const [logsRes, profilesRes] = await Promise.all([
+    query,
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, role")
+      .order("full_name", { ascending: true }),
+  ]);
+
+  const rawLogs = (logsRes.data ?? []) as AuditLog[];
+  const sanitizedLogs =
+    user.role === "TEAM_LEADER" ? rawLogs.map(scrubVaultAuditEntry) : rawLogs;
+
+  const actors = (profilesRes.data ?? []).map((p) => ({
+    id: p.id,
+    label: `${p.full_name?.trim() || p.email || "Pengguna"} (${p.role})`,
+  }));
+
+  return (
+    <AuditLogClient
+      initialLogs={sanitizedLogs}
+      actors={actors}
+      initialFilters={{
+        action,
+        entityType,
+        actor,
+        search,
+      }}
+    />
+  );
+}

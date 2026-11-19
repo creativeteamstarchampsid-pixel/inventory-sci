@@ -1,0 +1,72 @@
+/* Print-ready layout rules for Barcode & Label Print Studio */
+
+@media screen {
+  .barcode-print-only {
+    display: none;
+  }
+}
+
+@media print {
+  /* Hide app shell (sidebar, top header, period banner) and studio controls */
+  [data-slot="sidebar"],
+  [data-slot="sidebar-gap"],
+  [data-slot="sidebar-container"],
+  [data-slot="sidebar-inset"] > header,
+  [data-slot="sidebar-inset"] > div:not(:has(#barcode-print-root)),
+  .barcode-no-print {
+    display: none !important;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  [data-slot="sidebar-wrapper"],
+  [data-slot="sidebar-inset"],
+  [data-slot="sidebar-inset"] > div {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: none !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+
+  .barcode-print-only {
+    display: block !important;
+  }
+
+  #barcode-print-root {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  .barcode-print-page {
+    box-sizing: border-box;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: hidden;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .barcode-print-page--break {
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .barcode-print-page--last {
+    page-break-after: auto;
+    break-after: auto;
+  }
+}

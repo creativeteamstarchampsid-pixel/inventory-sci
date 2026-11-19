@@ -1,0 +1,20 @@
+@media print {
+  body > *:not([data-delivery-print-root="true"]) {
+    display: none !important;
+  }
+
+  [data-delivery-print-root="true"] {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  [data-delivery-print-root="true"] * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

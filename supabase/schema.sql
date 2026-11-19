@@ -128,6 +128,7 @@ create index if not exists idx_profiles_role_active on public.profiles (role, is
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at := now();
@@ -188,14 +189,23 @@ set search_path = public
 as $$
 declare
   v_name text;
+  v_is_first_user boolean;
 begin
   v_name := coalesce(
     nullif(btrim(new.raw_user_meta_data ->> 'full_name'), ''),
     split_part(coalesce(new.email, ''), '@', 1)
   );
 
+  select not exists (select 1 from public.profiles) into v_is_first_user;
+
   insert into public.profiles (id, full_name, email, role, is_active)
-  values (new.id, v_name, lower(new.email), 'STAFF', true)
+  values (
+    new.id,
+    v_name,
+    lower(new.email),
+    case when v_is_first_user then 'OWNER'::public.user_role else 'STAFF'::public.user_role end,
+    true
+  )
   on conflict (id) do update
     set email = excluded.email,
         full_name = coalesce(public.profiles.full_name, excluded.full_name);
@@ -2451,13 +2461,14 @@ create policy "audit_logs_insert_active" on public.audit_logs
 -- -----------------------------------------------------------------------------
 -- 11. SUPABASE PRIVATE STORAGE BUCKETS & POLICIES
 -- -----------------------------------------------------------------------------
-insert into storage.buckets (id, name, public)
+insert into storage.buckets (id, name, public, file_size_limit)
 values
-  ('inventory-photos', 'inventory-photos', false),
-  ('archives', 'archives', false),
-  ('delivery-proofs', 'delivery-proofs', false),
-  ('backups', 'backups', false)
-on conflict (id) do nothing;
+  ('inventory-photos', 'inventory-photos', false, 26214400),
+  ('archives', 'archives', false, 26214400),
+  ('delivery-proofs', 'delivery-proofs', false, 26214400),
+  ('backups', 'backups', false, 26214400)
+on conflict (id) do update
+  set file_size_limit = excluded.file_size_limit;
 
 drop policy if exists "storage_inventory_read" on storage.objects;
 create policy "storage_inventory_read" on storage.objects

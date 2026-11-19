@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
+import { getSupabaseEnv } from "@/lib/supabase/env";
 import type { Database } from "@/types/database";
 
 /**
@@ -9,7 +10,7 @@ import type { Database } from "@/types/database";
  * (cron routes, backup jobs) after doing your own authorization checks.
  */
 export function createAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const { url } = getSupabaseEnv();
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !serviceRoleKey) {

@@ -8,6 +8,7 @@ import {
   isPublicRoute,
   isRole,
 } from "@/lib/rbac";
+import { getSupabaseEnv } from "@/lib/supabase/env";
 import type { Database } from "@/types/database";
 
 /**
@@ -37,8 +38,7 @@ function redirectWithCookies(
  */
 export async function updateSession(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const { url, anonKey } = getSupabaseEnv();
 
   // Without configuration nothing can be authenticated; let the login page
   // explain how to configure the app instead of crashing every request.

@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import {
   AlertTriangle,
   Archive,
+  ArrowLeftRight,
+  ArrowRight,
+  BookOpen,
+  Boxes,
   CalendarClock,
   ClipboardCheck,
   DatabaseBackup,
@@ -14,15 +19,16 @@ import {
 
 import { RoleBadge } from "@/components/layout/role-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRouteAccess } from "@/lib/auth";
 import { formatJakartaDate, getJakartaGreeting, getMonthlyUpdatePeriod } from "@/lib/period";
-import { can, ROLE_LABELS } from "@/lib/rbac";
+import { can, ROLE_LABELS, type Role } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import type { AuditLog, MonthlyReconciliation, SubscriptionDirectoryRow } from "@/types/database";
 
 export const metadata: Metadata = {
-  title: "Dashboard",
+  title: "Beranda",
 };
 
 type DashboardMetrics = {
@@ -53,6 +59,64 @@ function daysUntilDate(dateStr: string | null): number | null {
   const today = new Date(`${todayStr}T00:00:00+07:00`).getTime();
   return Math.round((target - today) / 86_400_000);
 }
+
+const ROLE_QUICK_TIPS: Record<
+  Role,
+  {
+    bannerBg: string;
+    summary: string;
+    actions: { label: string; href: string }[];
+  }
+> = {
+  OWNER: {
+    bannerBg:
+      "border-amber-200/80 bg-gradient-to-r from-amber-50/90 via-orange-50/60 to-yellow-50/80 dark:border-amber-900/50 dark:from-amber-950/40 dark:to-orange-950/30",
+    summary:
+      "Sebagai Owner, Anda dapat memantau seluruh kondisi barang, menyetujui pengajuan pembelian atau penghapusan barang rusak berat, serta mengesahkan laporan akhir bulan.",
+    actions: [
+      { label: "Cek Pengajuan Menunggu", href: "/requests" },
+      { label: "Laporan Akhir Bulan", href: "/backup" },
+      { label: "Brankas Akun Digital", href: "/vault" },
+      { label: "Kelola Tim", href: "/settings" },
+    ],
+  },
+  SUPER_ADMIN: {
+    bannerBg:
+      "border-violet-200/80 bg-gradient-to-r from-violet-50/90 via-indigo-50/60 to-fuchsia-50/80 dark:border-violet-900/50 dark:from-violet-950/40 dark:to-indigo-950/30",
+    summary:
+      "Sebagai Admin Operasional, Anda mengelola daftar barang & alat terapi, mencetak stiker barcode, mencatat pengiriman paket, mengatur Brankas Akun Digital, serta membuat akun anggota tim.",
+    actions: [
+      { label: "Kelola Barang & Alat", href: "/inventory" },
+      { label: "Cetak Stiker Barcode", href: "/barcode-studio" },
+      { label: "Catat Paket Kiriman", href: "/deliveries" },
+      { label: "Tambah Anggota Tim", href: "/settings" },
+    ],
+  },
+  TEAM_LEADER: {
+    bannerBg:
+      "border-sky-200/80 bg-gradient-to-r from-sky-50/90 via-cyan-50/60 to-blue-50/80 dark:border-sky-900/50 dark:from-sky-950/40 dark:to-cyan-950/30",
+    summary:
+      "Sebagai Kepala Terapis, Anda mendampingi tim terapis: menyetujui pengajuan dari terapis, memastikan pengecekan alat di ruangan terapi selesai tepat waktu, dan memantau kelengkapan mainan.",
+    actions: [
+      { label: "Setujui Pengajuan Tim", href: "/requests" },
+      { label: "Pinjam & Cek Ruangan", href: "/scan" },
+      { label: "Cek Kondisi Alat Terapi", href: "/inventory" },
+      { label: "Unduh Laporan Bulanan", href: "/backup" },
+    ],
+  },
+  STAFF: {
+    bannerBg:
+      "border-emerald-200/80 bg-gradient-to-r from-emerald-50/90 via-teal-50/60 to-green-50/80 dark:border-emerald-900/50 dark:from-emerald-950/40 dark:to-teal-950/30",
+    summary:
+      "Sebagai Terapis, gunakan menu Pinjam & Kembalikan setiap mengambil atau menaruh alat terapi, perbarui status cuci/bersih mainan selesai sesi, dan lapor jika ada kepingan mainan yang kurang.",
+    actions: [
+      { label: "Pinjam / Kembalikan Alat", href: "/scan" },
+      { label: "Lihat Alat & Mainan", href: "/inventory" },
+      { label: "Pinjam Paket Kit", href: "/kits" },
+      { label: "Buat Pengajuan / Lapor Rusak", href: "/requests" },
+    ],
+  },
+};
 
 async function loadDashboardMetrics(role: Parameters<typeof can>[0], periodCode: string) {
   const supabase = await createClient();
@@ -182,114 +246,164 @@ export default async function DashboardPage() {
   const greeting = getJakartaGreeting();
   const todayLabel = formatJakartaDate();
   const metrics = await loadDashboardMetrics(user.role, period.periodCode);
+  const roleTip = ROLE_QUICK_TIPS[user.role];
 
   return (
     <div className="space-y-6">
+      {/* Greeting Header */}
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {greeting}, {user.fullName}
+          <h1 className="text-2xl font-bold tracking-tight">
+            {greeting}, {user.fullName} 👋
           </h1>
           <p className="text-muted-foreground text-sm">
-            Ringkasan operasional Star Champs Indonesia · {todayLabel}
+            Ringkasan kegiatan Star Champs Indonesia · {todayLabel}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <RoleBadge role={user.role} showSubtitle />
-          <Badge variant="outline">Periode {period.periodLabel}</Badge>
+          <Badge variant="outline" className="bg-white/80 dark:bg-slate-900">
+            Bulan {period.periodLabel}
+          </Badge>
         </div>
       </div>
 
-      {!metrics.schemaReady && (
-        <Card className="border-amber-300 bg-amber-50/70 dark:border-amber-800 dark:bg-amber-950/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base text-amber-900 dark:text-amber-100">
-              <AlertTriangle className="size-4 shrink-0" />
-              Skema Database Supabase Belum Diterapkan
-            </CardTitle>
-            <CardDescription className="text-amber-800 dark:text-amber-200">
-              Jalankan file <code>supabase/schema.sql</code> di Supabase SQL Editor untuk mengaktifkan
-              seluruh tabel inti, auto-coding, RLS, dan audit log.
-            </CardDescription>
-          </CardHeader>
-          {metrics.schemaError && (
-            <CardContent className="pt-0 text-xs text-amber-900/80 dark:text-amber-200/80">
-              Detail: <code>{metrics.schemaError}</code>
-            </CardContent>
-          )}
-        </Card>
-      )}
+      {/* Role Welcome & Quick Action Bar */}
+      <Card className={roleTip.bannerBg}>
+        <CardContent className="flex flex-col justify-between gap-4 p-5 lg:flex-row lg:items-center">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold">
+                Peran Anda: {ROLE_LABELS[user.role].title} ({ROLE_LABELS[user.role].subtitle})
+              </span>
+            </div>
+            <p className="text-muted-foreground max-w-3xl text-sm leading-relaxed">
+              {roleTip.summary}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {roleTip.actions.map((act) => (
+              <Button
+                key={act.href}
+                asChild
+                size="sm"
+                variant="secondary"
+                className="bg-white/90 shadow-2xs hover:bg-white dark:bg-slate-900/80"
+              >
+                <Link href={act.href}>
+                  <span>{act.label}</span>
+                  <ArrowRight className="ml-1 size-3.5 opacity-70" />
+                </Link>
+              </Button>
+            ))}
+            <Button asChild size="sm" className="gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700">
+              <Link href="/guide">
+                <BookOpen className="size-3.5" />
+                <span>Baca Panduan Lengkap</span>
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
+      {/* 4 Colorful Minimalist Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Total Item Aktif</span>
-              <Package className="text-muted-foreground size-4" />
-            </CardDescription>
-            <CardTitle className="text-2xl">{metrics.totalItems}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-xs">
-            {metrics.activeBorrowsCount} transaksi pinjam aktif saat ini
-          </CardContent>
-        </Card>
+        <Link href="/inventory" className="group block">
+          <Card className="h-full border-sky-200/70 bg-gradient-to-br from-sky-50/70 via-white to-white transition-all group-hover:-translate-y-0.5 group-hover:shadow-md dark:border-sky-900/40 dark:from-sky-950/30 dark:via-slate-900 dark:to-slate-900">
+            <CardHeader className="pb-2">
+              <CardDescription className="flex items-center justify-between font-medium text-sky-900/80 dark:text-sky-200">
+                <span>Total Barang & Alat</span>
+                <span className="flex size-8 items-center justify-center rounded-xl bg-sky-100 text-sky-600 dark:bg-sky-900/60 dark:text-sky-300">
+                  <Package className="size-4" />
+                </span>
+              </CardDescription>
+              <CardTitle className="text-3xl font-bold text-sky-950 dark:text-sky-100">
+                {metrics.totalItems}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-muted-foreground text-xs">
+              <strong>{metrics.activeBorrowsCount}</strong> alat sedang dipinjam saat ini
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Part Kurang & Low-Stock</span>
-              <AlertTriangle className="size-4 text-amber-600" />
-            </CardDescription>
-            <CardTitle className="text-2xl">{metrics.partKurangCount}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-xs">
-            {metrics.lowStockCount} barang habis pakai di bawah batas minimum
-          </CardContent>
-        </Card>
+        <Link href="/inventory" className="group block">
+          <Card className="h-full border-amber-200/70 bg-gradient-to-br from-amber-50/70 via-white to-white transition-all group-hover:-translate-y-0.5 group-hover:shadow-md dark:border-amber-900/40 dark:from-amber-950/30 dark:via-slate-900 dark:to-slate-900">
+            <CardHeader className="pb-2">
+              <CardDescription className="flex items-center justify-between font-medium text-amber-900/80 dark:text-amber-200">
+                <span>Kepingan Kurang & Stok Tipis</span>
+                <span className="flex size-8 items-center justify-center rounded-xl bg-amber-100 text-amber-600 dark:bg-amber-900/60 dark:text-amber-300">
+                  <AlertTriangle className="size-4" />
+                </span>
+              </CardDescription>
+              <CardTitle className="text-3xl font-bold text-amber-950 dark:text-amber-100">
+                {metrics.partKurangCount}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-muted-foreground text-xs">
+              <strong>{metrics.lowStockCount}</strong> barang habis pakai perlu diisi ulang
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Perlu Sanitasi</span>
-              <Sparkles className="text-muted-foreground size-4" />
-            </CardDescription>
-            <CardTitle className="text-2xl">{metrics.needsSanitationCount}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-xs">
-            Mainan terapi berstatus perlu dicuci / sedang disanitasi
-          </CardContent>
-        </Card>
+        <Link href="/inventory" className="group block">
+          <Card className="h-full border-emerald-200/70 bg-gradient-to-br from-emerald-50/70 via-white to-white transition-all group-hover:-translate-y-0.5 group-hover:shadow-md dark:border-emerald-900/40 dark:from-emerald-950/30 dark:via-slate-900 dark:to-slate-900">
+            <CardHeader className="pb-2">
+              <CardDescription className="flex items-center justify-between font-medium text-emerald-900/80 dark:text-emerald-200">
+                <span>Perlu Dicuci / Dibersihkan</span>
+                <span className="flex size-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600 dark:bg-emerald-900/60 dark:text-emerald-300">
+                  <Sparkles className="size-4" />
+                </span>
+              </CardDescription>
+              <CardTitle className="text-3xl font-bold text-emerald-950 dark:text-emerald-100">
+                {metrics.needsSanitationCount}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-muted-foreground text-xs">
+              Mainan terapi yang perlu dicuci sebelum dipakai lagi
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Tiket & Arsip</span>
-              <ClipboardCheck className="text-muted-foreground size-4" />
-            </CardDescription>
-            <CardTitle className="text-2xl">{metrics.pendingRequests}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-xs">
-            Menunggu approval · {metrics.totalArchives} berkas di direktori arsip
-          </CardContent>
-        </Card>
+        <Link href="/requests" className="group block">
+          <Card className="h-full border-rose-200/70 bg-gradient-to-br from-rose-50/70 via-white to-white transition-all group-hover:-translate-y-0.5 group-hover:shadow-md dark:border-rose-900/40 dark:from-rose-950/30 dark:via-slate-900 dark:to-slate-900">
+            <CardHeader className="pb-2">
+              <CardDescription className="flex items-center justify-between font-medium text-rose-900/80 dark:text-rose-200">
+                <span>Pengajuan & Dokumen SOP</span>
+                <span className="flex size-8 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-900/60 dark:text-rose-300">
+                  <ClipboardCheck className="size-4" />
+                </span>
+              </CardDescription>
+              <CardTitle className="text-3xl font-bold text-rose-950 dark:text-rose-100">
+                {metrics.pendingRequests}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-muted-foreground text-xs">
+              Menunggu persetujuan · <strong>{metrics.totalArchives}</strong> dokumen di Lemari Arsip
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
+      {/* Operational Widgets */}
       <div className="grid gap-4 lg:grid-cols-2">
         {can(user.role, "vault.view_limited") && (
-          <Card>
+          <Card className="border-cyan-200/60 dark:border-cyan-900/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <KeyRound className="size-4" />
-                Pengingat Perpanjangan Subscription Vault (H-7)
+                <span className="flex size-7 items-center justify-center rounded-lg bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300">
+                  <KeyRound className="size-4" />
+                </span>
+                Pengingat Tagihan Langganan Digital (7 Hari ke Depan)
               </CardTitle>
               <CardDescription>
-                Akun digital operasional yang akan jatuh tempo dalam 7 hari ke depan.
+                Daftar akun aplikasi kantor yang masa berlakunya segera habis dalam 7 hari.
               </CardDescription>
             </CardHeader>
             <CardContent>
               {metrics.expiringSubscriptions.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
-                  Belum ada langganan yang jatuh tempo dalam 7 hari ke depan.
+                  Aman! Tidak ada langganan aplikasi yang jatuh tempo dalam 7 hari ke depan.
                 </p>
               ) : (
                 <ul className="space-y-2 text-sm">
@@ -298,7 +412,7 @@ export default async function DashboardPage() {
                     return (
                       <li
                         key={sub.id}
-                        className="flex items-center justify-between rounded-md border px-3 py-2"
+                        className="flex items-center justify-between rounded-xl border px-3 py-2"
                       >
                         <div>
                           <p className="font-medium">
@@ -310,7 +424,7 @@ export default async function DashboardPage() {
                           <p className="text-muted-foreground text-xs">{sub.login_email}</p>
                         </div>
                         <Badge variant={days !== null && days <= 1 ? "destructive" : "secondary"}>
-                          {days !== null && days <= 0 ? "Jatuh Tempo" : `H-${days}`}
+                          {days !== null && days <= 0 ? "Jatuh Tempo" : `${days} hari lagi`}
                         </Badge>
                       </li>
                     );
@@ -322,41 +436,43 @@ export default async function DashboardPage() {
         )}
 
         {can(user.role, "export.data") && (
-          <Card>
+          <Card className="border-indigo-200/60 dark:border-indigo-900/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <DatabaseBackup className="size-4" />
-                Rekonsiliasi & Siklus Backup ({period.periodLabel})
+                <span className="flex size-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                  <DatabaseBackup className="size-4" />
+                </span>
+                Pengecekan Akhir Bulan & Cadangan Data ({period.periodLabel})
               </CardTitle>
               <CardDescription>
-                Kode Periode <span className="font-mono">{period.periodCode}</span> · Mode pengkinian
-                otomatis aktif tiap tanggal 24 pukul 00:00 WIB.
+                Setiap tanggal 24 hingga akhir bulan, tim melakukan pengecekan kelengkapan barang di
+                seluruh ruangan.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Status Pengkinian Data</span>
+                <span className="text-muted-foreground">Status Jadwal Bulan Ini</span>
                 <Badge variant={period.active ? "default" : "outline"}>
-                  {period.active ? "Aktif (H-7 Akhir Bulan)" : `Jadwal Tanggal 24`}
+                  {period.active ? "Sedang Berjalan (Minggu Terakhir)" : "Dimulai Setiap Tanggal 24"}
                 </Badge>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Progres Stock Opname</span>
-                <span className="font-medium">
-                  {metrics.reconciliation?.opname_progress_pct ?? 0}%
+                <span className="text-muted-foreground">Kelengkapan Cek Ruangan</span>
+                <span className="font-semibold">
+                  {metrics.reconciliation?.opname_progress_pct ?? 0}% Ruangan Selesai
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Pre-Update Snapshot</span>
-                <span className="font-mono text-xs">
-                  {metrics.reconciliation?.pre_update_backup_id ? "Tersimpan" : "Belum dibuat"}
+                <span className="text-muted-foreground">Cadangan Data Awal</span>
+                <span className="text-xs font-medium">
+                  {metrics.reconciliation?.pre_update_backup_id ? "Sudah Tersimpan" : "Belum Dibuat"}
                 </span>
               </div>
               {can(user.role, "delivery.view") && (
                 <div className="flex items-center justify-between border-t pt-2">
                   <span className="text-muted-foreground flex items-center gap-1.5">
-                    <Truck className="size-3.5" />
-                    Pengiriman Berjalan
+                    <Truck className="size-3.5 text-orange-500" />
+                    Paket Pengiriman Sedang Jalan
                   </span>
                   <span className="font-medium">{metrics.activeDeliveries} paket</span>
                 </div>
@@ -366,41 +482,57 @@ export default async function DashboardPage() {
         )}
 
         {!can(user.role, "vault.view_limited") && (
-          <Card>
+          <Card className="border-emerald-200/60 dark:border-emerald-900/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <CalendarClock className="size-4" />
-                Akses Peran {ROLE_LABELS[user.role].title}
+                <span className="flex size-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                  <CalendarClock className="size-4" />
+                </span>
+                Hal Penting untuk {ROLE_LABELS[user.role].title} Hari Ini
               </CardTitle>
               <CardDescription>
-                Ringkasan hak akses operasional sesuai matriks RBAC StarOps.
+                Langkah praktis yang paling sering Anda gunakan sehari-hari:
               </CardDescription>
             </CardHeader>
-            <CardContent className="text-muted-foreground space-y-2 text-sm">
-              <p>• Scan barcode peminjaman & pengembalian mainan terapi maupun kit.</p>
-              <p>• Perbarui status sanitasi/kebersihan mainan dan kelengkapan kepingan.</p>
-              <p>• Akses SOP dan dokumen publik di Arsip Hibrida serta buat tiket permintaan.</p>
+            <CardContent className="space-y-2.5 text-sm">
+              <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50/60 p-2.5 dark:bg-emerald-950/30">
+                <ArrowLeftRight className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+                <p>
+                  <strong>Pinjam & Kembalikan Alat:</strong> Scan stiker barcode sebelum membawa
+                  mainan ke ruang terapi dan saat mengembalikannya ke rak.
+                </p>
+              </div>
+              <div className="flex items-start gap-2.5 rounded-xl bg-sky-50/60 p-2.5 dark:bg-sky-950/30">
+                <Boxes className="mt-0.5 size-4 shrink-0 text-sky-600" />
+                <p>
+                  <strong>Cek Kepingan & Kebersihan:</strong> Hitung jumlah kepingan mainan selesai
+                  sesi dan ubah statusnya menjadi <em>Perlu Dicuci</em> bila sudah dipakai.
+                </p>
+              </div>
             </CardContent>
           </Card>
         )}
       </div>
 
+      {/* Recent Activity */}
       {can(user.role, "audit.view") && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <History className="size-4" />
-              Aktivitas Terbaru (Audit Trail)
+              <span className="flex size-7 items-center justify-center rounded-lg bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                <History className="size-4" />
+              </span>
+              Kegiatan Terbaru Tim
             </CardTitle>
             <CardDescription>
-              Log perubahan data real-time dari trigger database Supabase.
+              Catatan otomatis setiap ada anggota tim yang menambah, meminjam, atau memperbarui data.
             </CardDescription>
           </CardHeader>
           <CardContent>
             {metrics.recentAudits.length === 0 ? (
               <div className="text-muted-foreground flex items-center gap-2 text-sm">
                 <Archive className="size-4" />
-                <span>Belum ada catatan aktivitas pada database.</span>
+                <span>Belum ada kegiatan yang tercatat hari ini.</span>
               </div>
             ) : (
               <ul className="divide-y text-sm">
@@ -412,9 +544,8 @@ export default async function DashboardPage() {
                     <div>
                       <p className="font-medium">{log.summary}</p>
                       <p className="text-muted-foreground text-xs">
-                        Oleh {log.actor_name || "Sistem"} ·{" "}
-                        <span className="font-mono">{log.action}</span>
-                        {log.entity_code ? ` · ${log.entity_code}` : ""}
+                        Oleh <strong>{log.actor_name || "Sistem Otomatis"}</strong>
+                        {log.entity_code ? ` · Kode: ${log.entity_code}` : ""}
                       </p>
                     </div>
                     <time className="text-muted-foreground shrink-0 text-xs">

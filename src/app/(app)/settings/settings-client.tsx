@@ -277,7 +277,7 @@ export function SettingsClient({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="profile-role">Peran RBAC</Label>
+              <Label htmlFor="profile-role">Jabatan / Peran</Label>
               <Input
                 id="profile-role"
                 value={`${ROLE_LABELS[ownProfile.role].title} — ${ROLE_LABELS[ownProfile.role].subtitle}`}
@@ -334,16 +334,16 @@ export function SettingsClient({
               <div>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Users className="size-4" />
-                  Manajemen Pengguna & Offboarding
+                  Daftar Anggota Tim & Hak Akses
                 </CardTitle>
                 <CardDescription>
-                  Tambah atau undang anggota tim, ubah peran RBAC, aktifkan/nonaktifkan
-                  akses, dan tandai offboarding untuk peringatan rotasi Subscription Vault.
+                  Tambah anggota tim baru, atur jabatan, aktifkan/nonaktifkan akun, dan tandai
+                  bila ada staf yang sudah keluar agar kata sandi akun kantor segera diganti.
                 </CardDescription>
               </div>
               <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
                 <UserPlus className="mr-1.5 size-4" />
-                Tambah / Undang Pengguna
+                Tambah Anggota Tim
               </Button>
             </div>
           </CardHeader>
@@ -351,12 +351,10 @@ export function SettingsClient({
             {!serviceRoleConfigured && (
               <Alert variant="warning">
                 <ShieldAlert className="size-4" />
-                <AlertTitle>SUPABASE_SERVICE_ROLE_KEY Belum Terpasang</AlertTitle>
+                <AlertTitle>Fitur Tambah Akun Baru Belum Aktif</AlertTitle>
                 <AlertDescription>
-                  Pembuatan akun baru atau pengiriman undangan email memerlukan{" "}
-                  <code>SUPABASE_SERVICE_ROLE_KEY</code> pada environment server (
-                  <code>.env.local</code>). Pengubahan peran, status aktif, dan
-                  offboarding pengguna yang sudah terdaftar tetap berfungsi normal.
+                  Server belum dilengkapi kunci admin untuk mendaftarkan email baru. Anda tetap
+                  bisa mengubah jabatan dan status aktif anggota tim yang sudah ada.
                 </AlertDescription>
               </Alert>
             )}
@@ -364,11 +362,11 @@ export function SettingsClient({
             {offboardVaultWarnings.length > 0 && (
               <Alert variant="warning">
                 <KeyRound className="size-4" />
-                <AlertTitle>Peringatan Offboarding Subscription Vault</AlertTitle>
+                <AlertTitle>Pengingat Ganti Kata Sandi Akun Kantor</AlertTitle>
                 <AlertDescription>
-                  Terdapat {offboardVaultWarnings.length} pengguna berstatus offboarded
-                  yang masih tercatat di slot langganan digital. Segera rotasi kata sandi
-                  di menu Subscription Vault.
+                  Ada {offboardVaultWarnings.length} staf yang sudah keluar tetapi namanya masih
+                  tercatat memakai akun di Brankas Akun Digital. Segera ganti kata sandi akun
+                  tersebut di menu Brankas Akun Digital.
                 </AlertDescription>
               </Alert>
             )}
@@ -379,9 +377,9 @@ export function SettingsClient({
                   <TableHead>Nama & Jabatan</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Peran</TableHead>
-                  <TableHead>Status Aktif</TableHead>
-                  <TableHead>Offboarding</TableHead>
-                  <TableHead className="text-right">Aksi Offboard</TableHead>
+                  <TableHead>Status Akun</TableHead>
+                  <TableHead>Status Kerja</TableHead>
+                  <TableHead className="text-right">Status Staf</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -449,17 +447,17 @@ export function SettingsClient({
                         {member.offboarded_at ? (
                           <div className="space-y-1">
                             <Badge variant="destructive">
-                              Offboarded · {formatDateWIB(member.offboarded_at)}
+                              Sudah Keluar · {formatDateWIB(member.offboarded_at)}
                             </Badge>
                             {assignedVaultCodes.length > 0 && (
                               <div className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                                Masih di Vault: {assignedVaultCodes.join(", ")}
+                                Masih terdaftar di Akun: {assignedVaultCodes.join(", ")}
                               </div>
                             )}
                           </div>
                         ) : (
                           <span className="text-muted-foreground text-xs">
-                            Aktif bekerja
+                            Masih aktif bekerja
                           </span>
                         )}
                       </TableCell>
@@ -480,7 +478,7 @@ export function SettingsClient({
                           ) : (
                             <>
                               <UserX className="mr-1 size-3.5" />
-                              Tandai Offboard
+                              Tandai Sudah Keluar
                             </>
                           )}
                         </Button>
@@ -500,21 +498,19 @@ export function SettingsClient({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserPlus className="size-4" />
-              Tambah / Undang Pengguna Baru
+              Tambah Anggota Tim Baru
             </DialogTitle>
             <DialogDescription>
-              Membuat akun Supabase Auth dan profil RBAC secara otomatis melalui{" "}
-              <code>createAdminClient()</code>.
+              Buat akun masuk baru untuk terapis, kepala terapis, atau admin operasional.
             </DialogDescription>
           </DialogHeader>
 
           {!serviceRoleConfigured && (
             <Alert variant="warning">
               <AlertTriangle className="size-4" />
-              <AlertTitle>Service Role Key Belum Dikonfigurasi</AlertTitle>
+              <AlertTitle>Kunci Admin Belum Aktif</AlertTitle>
               <AlertDescription>
-                Server membutuhkan <code>SUPABASE_SERVICE_ROLE_KEY</code> untuk membuat
-                atau mengundang pengguna baru.
+                Hubungi pengelola server untuk mengaktifkan kunci pendaftaran pengguna baru.
               </AlertDescription>
             </Alert>
           )}

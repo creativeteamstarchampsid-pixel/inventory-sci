@@ -2,6 +2,8 @@ import {
   Archive,
   ArrowLeftRight,
   Barcode,
+  BookOpen,
+  Boxes,
   ClipboardCheck,
   DatabaseBackup,
   History,
@@ -11,7 +13,6 @@ import {
   Settings,
   Trash2,
   Truck,
-  Boxes,
   type LucideIcon,
 } from "lucide-react";
 
@@ -23,6 +24,8 @@ export type NavItem = {
   description: string;
   href: string;
   icon: LucideIcon;
+  /** Soft colorful badge style for minimalist icon pill */
+  colorClass: string;
   roles: readonly Role[];
 };
 
@@ -36,67 +39,135 @@ function item(
   title: string,
   description: string,
   icon: LucideIcon,
+  colorClass: string,
 ): NavItem {
-  return { href, title, description, icon, roles: ROUTE_PERMISSIONS[href] };
+  return {
+    href,
+    title,
+    description,
+    icon,
+    colorClass,
+    roles: ROUTE_PERMISSIONS[href],
+  };
 }
 
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Utama",
     items: [
-      item("/dashboard", "Dashboard", "Ringkasan operasional Star Champs", LayoutDashboard),
+      item(
+        "/dashboard",
+        "Beranda",
+        "Ringkasan kegiatan operasional hari ini",
+        LayoutDashboard,
+        "bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300",
+      ),
+      item(
+        "/guide",
+        "Panduan Penggunaan",
+        "Cara pakai aplikasi untuk setiap peran",
+        BookOpen,
+        "bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-300",
+      ),
     ],
   },
   {
-    label: "Inventaris",
+    label: "Alat & Barang",
     items: [
       item(
         "/inventory",
-        "Inventaris & Alat Terapi",
-        "Alat terapi, aset kantor & barang habis pakai",
+        "Barang & Alat Terapi",
+        "Mainan terapi, perlengkapan kantor & stok habis pakai",
         Package,
+        "bg-sky-100 text-sky-600 dark:bg-sky-950/60 dark:text-sky-300",
       ),
-      item("/kits", "Kit", "Paket beberapa item untuk check-out 1 klik", Boxes),
+      item(
+        "/kits",
+        "Paket Alat (Kit)",
+        "Gabungan beberapa alat untuk dipinjam sekaligus",
+        Boxes,
+        "bg-violet-100 text-violet-600 dark:bg-violet-950/60 dark:text-violet-300",
+      ),
+      item(
+        "/scan",
+        "Pinjam & Kembalikan",
+        "Scan stiker barang untuk pinjam, kembalikan & cek ruangan",
+        ArrowLeftRight,
+        "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-300",
+      ),
       item(
         "/barcode-studio",
-        "Barcode Studio",
-        "Cetak label barcode & QR (thermal, A4, spine)",
+        "Cetak Stiker Barcode",
+        "Buat dan cetak label stiker untuk ditempel di barang",
         Barcode,
+        "bg-fuchsia-100 text-fuchsia-600 dark:bg-fuchsia-950/60 dark:text-fuchsia-300",
       ),
-      item("/scan", "Scan Pinjam/Kembali", "Scan barcode untuk pinjam & kembalikan", ArrowLeftRight),
     ],
   },
   {
-    label: "Operasional",
+    label: "Kegiatan Kantor",
     items: [
-      item(
-        "/vault",
-        "Subscription Vault",
-        "Langganan digital, kata sandi terenkripsi & tagihan",
-        KeyRound,
-      ),
-      item("/archives", "Arsip Hybrid", "Arsip fisik (lemari/laci) & file digital", Archive),
-      item("/deliveries", "Pengiriman", "Paket masuk/keluar, Surat Jalan & BAST", Truck),
       item(
         "/requests",
-        "Permintaan & Persetujuan",
-        "Tiket permintaan internal & e-approval",
+        "Pengajuan & Persetujuan",
+        "Ajukan beli barang, lapor rusak & persetujuan atasan",
         ClipboardCheck,
+        "bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-300",
+      ),
+      item(
+        "/archives",
+        "Lemari Arsip & SOP",
+        "Panduan SOP terapi, berkas di lemari & dokumen digital",
+        Archive,
+        "bg-teal-100 text-teal-600 dark:bg-teal-950/60 dark:text-teal-300",
+      ),
+      item(
+        "/deliveries",
+        "Paket & Pengiriman",
+        "Catat paket masuk/keluar & cetak surat jalan",
+        Truck,
+        "bg-orange-100 text-orange-600 dark:bg-orange-950/60 dark:text-orange-300",
+      ),
+      item(
+        "/vault",
+        "Brankas Akun Digital",
+        "Penyimpanan akun langganan, email & kata sandi kantor",
+        KeyRound,
+        "bg-cyan-100 text-cyan-600 dark:bg-cyan-950/60 dark:text-cyan-300",
       ),
     ],
   },
   {
-    label: "Manajemen",
+    label: "Laporan & Pengaturan",
     items: [
-      item("/audit-log", "Log Aktivitas", "Jejak audit seluruh aktivitas", History),
       item(
         "/backup",
-        "Ekspor & Backup",
-        "Ekspor CSV/XLSX/PDF, rekonsiliasi & backup bulanan",
+        "Laporan & Cadangan Data",
+        "Unduh laporan Excel/PDF & pengecekan akhir bulan",
         DatabaseBackup,
+        "bg-blue-100 text-blue-600 dark:bg-blue-950/60 dark:text-blue-300",
       ),
-      item("/recycle-bin", "Recycle Bin", "Data terhapus (dipulihkan ≤ 30 hari)", Trash2),
-      item("/settings", "Pengaturan", "Profil & pengaturan sistem", Settings),
+      item(
+        "/audit-log",
+        "Riwayat Aktivitas",
+        "Catatan siapa mengubah data dan kapan",
+        History,
+        "bg-purple-100 text-purple-600 dark:bg-purple-950/60 dark:text-purple-300",
+      ),
+      item(
+        "/recycle-bin",
+        "Tempat Sampah (30 Hari)",
+        "Kembalikan data yang tidak sengaja terhapus",
+        Trash2,
+        "bg-pink-100 text-pink-600 dark:bg-pink-950/60 dark:text-pink-300",
+      ),
+      item(
+        "/settings",
+        "Pengaturan & Tim",
+        "Ubah profil diri & kelola akun anggota tim",
+        Settings,
+        "bg-slate-200/80 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+      ),
     ],
   },
 ];

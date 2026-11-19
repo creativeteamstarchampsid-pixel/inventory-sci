@@ -19,6 +19,7 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 import { UserMenu } from "./user-menu";
 
 function isActivePath(pathname: string, href: string) {
@@ -42,11 +43,11 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild tooltip="StarOps">
               <Link href="/dashboard" onClick={closeOnMobile}>
-                <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                  <Star className="size-4" aria-hidden />
+                <div className="flex aspect-square size-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 via-sky-500 to-emerald-500 text-white shadow-sm">
+                  <Star className="size-4 fill-white/25" aria-hidden />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">StarOps</span>
+                  <span className="truncate font-semibold tracking-tight">StarOps</span>
                   <span className="text-muted-foreground truncate text-xs">
                     Star Champs Indonesia
                   </span>
@@ -60,22 +61,38 @@ export function AppSidebar() {
       <SidebarContent>
         {groups.map((group) => (
           <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-[11px] font-semibold tracking-wider uppercase opacity-70">
+              {group.label}
+            </SidebarGroupLabel>
             <SidebarMenu>
-              {group.items.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActivePath(pathname, item.href)}
-                    tooltip={item.title}
-                  >
-                    <Link href={item.href} onClick={closeOnMobile}>
-                      <item.icon aria-hidden />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {group.items.map((item) => {
+                const active = isActivePath(pathname, item.href);
+                return (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={active}
+                      tooltip={item.title}
+                      className={cn(
+                        "rounded-xl transition-all",
+                        active && "bg-indigo-50/90 font-semibold text-indigo-950 shadow-2xs dark:bg-indigo-950/50 dark:text-indigo-100",
+                      )}
+                    >
+                      <Link href={item.href} onClick={closeOnMobile}>
+                        <span
+                          className={cn(
+                            "flex size-6 shrink-0 items-center justify-center rounded-lg transition-transform",
+                            item.colorClass,
+                          )}
+                        >
+                          <item.icon className="size-3.5" aria-hidden />
+                        </span>
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroup>
         ))}

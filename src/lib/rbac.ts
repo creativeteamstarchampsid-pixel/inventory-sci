@@ -16,10 +16,10 @@ export function isRole(value: unknown): value is Role {
 }
 
 export const ROLE_LABELS: Record<Role, { title: string; subtitle: string }> = {
-  OWNER: { title: "Owner", subtitle: "Owner / Direktur" },
-  SUPER_ADMIN: { title: "Super Admin", subtitle: "Admin Ops" },
-  TEAM_LEADER: { title: "Team Leader", subtitle: "Kepala Terapis" },
-  STAFF: { title: "Staff", subtitle: "Terapis" },
+  OWNER: { title: "Owner", subtitle: "Pemilik / Direktur" },
+  SUPER_ADMIN: { title: "Admin Operasional", subtitle: "Pengelola Utama" },
+  TEAM_LEADER: { title: "Kepala Terapis", subtitle: "Koordinator Tim" },
+  STAFF: { title: "Terapis", subtitle: "Tim Terapis & Staf" },
 };
 
 const ALL: readonly Role[] = ROLES;
@@ -37,6 +37,8 @@ const ADMINS: readonly Role[] = ["OWNER", "SUPER_ADMIN"];
  */
 export const ROUTE_PERMISSIONS: Record<string, readonly Role[]> = {
   "/dashboard": ALL,
+  // User guide for every role.
+  "/guide": ALL,
   // Everyone sees inventory (STAFF: read + report missing parts / damage).
   "/inventory": ALL,
   // Kits: STAFF can view and check out kits; SUPER_ADMIN/OWNER manage them.

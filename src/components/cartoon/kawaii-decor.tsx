@@ -118,7 +118,15 @@ export function KawaiiPageHeader({
         }}
       />
 
-      {/* Decorative floating 2D cloud & sparkles */}
+      {/* Decorative floating 2D cloud, pastel music note & twinkling sparkles */}
+      <span
+        aria-hidden="true"
+        className="animate-kawaii-note pointer-events-none absolute top-2.5 right-44 hidden text-lg font-black opacity-75 select-none sm:block dark:opacity-45 print:hidden"
+        style={{ color: palette.sparkleColor }}
+      >
+        ♪
+      </span>
+
       <svg
         aria-hidden="true"
         viewBox="0 0 120 60"
@@ -129,6 +137,21 @@ export function KawaiiPageHeader({
           fill="#FFFDF7"
           stroke="#2C2623"
           strokeWidth="2.5"
+          strokeLinejoin="round"
+        />
+      </svg>
+
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="animate-twinkle-2d pointer-events-none absolute top-3.5 right-5 hidden size-4 opacity-75 sm:block print:hidden"
+        style={{ animationDelay: "1.1s" }}
+      >
+        <path
+          d="M12 2 L14.5 9.5 L22 12 L14.5 14.5 L12 22 L9.5 14.5 L2 12 L9.5 9.5 Z"
+          fill="#FDE68A"
+          stroke="#2C2623"
+          strokeWidth="1.8"
           strokeLinejoin="round"
         />
       </svg>
@@ -152,7 +175,7 @@ export function KawaiiPageHeader({
           {/* Mascot Sticker Badge */}
           <div
             className={cn(
-              "flex size-14 shrink-0 items-center justify-center rounded-2xl border-2 border-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] sm:size-16 dark:border-[#6D5D54] dark:shadow-[3px_3px_0px_0px_#0E0B0A] print:hidden",
+              "flex size-14 shrink-0 items-center justify-center rounded-2xl border-2 border-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:scale-105 hover:-rotate-3 sm:size-16 dark:border-[#6D5D54] dark:shadow-[3px_3px_0px_0px_#0E0B0A] print:hidden",
               palette.stickerBg,
             )}
           >
@@ -166,7 +189,7 @@ export function KawaiiPageHeader({
             {badge && (
               <span
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full border-[1.5px] border-[#2C2623] px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide uppercase shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:shadow-[2px_2px_0px_0px_#0E0B0A]",
+                  "animate-kawaii-pop inline-flex items-center gap-1 rounded-full border-[1.5px] border-[#2C2623] px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide uppercase shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:shadow-[2px_2px_0px_0px_#0E0B0A]",
                   palette.badgeBg,
                 )}
               >
@@ -213,14 +236,57 @@ export function KawaiiEmptyState({
         className,
       )}
     >
-      <div className="relative mb-3 flex size-20 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#FEF3C7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:bg-[#3A311E] dark:shadow-[3px_3px_0px_0px_#0E0B0A]">
-        <KawaiiMascotSvg type={mascot} className="animate-float-2d size-14" />
+      {/* Gentle floating pastel sparkles */}
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="animate-twinkle-2d pointer-events-none absolute top-4 left-6 size-4 opacity-70 print:hidden"
+        style={{ animationDelay: "0.7s" }}
+      >
+        <path
+          d="M12 2 L14.5 9.5 L22 12 L14.5 14.5 L12 22 L9.5 14.5 L2 12 L9.5 9.5 Z"
+          fill="#FDE68A"
+          stroke="#2C2623"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span
+        aria-hidden="true"
+        className="animate-kawaii-note pointer-events-none absolute top-5 right-7 text-sm font-black text-[#7CC4FA] opacity-75 select-none print:hidden"
+      >
+        ♪
+      </span>
+      <span
+        aria-hidden="true"
+        className="animate-twinkle-2d pointer-events-none absolute right-8 bottom-4 text-xs font-black text-[#FDA4AF] opacity-75 select-none print:hidden"
+        style={{ animationDelay: "1.4s" }}
+      >
+        ✦
+      </span>
+
+      <div className="relative mb-3.5 flex items-center justify-center">
+        {/* Soft breathing ring around the mascot emblem */}
         <span
           aria-hidden="true"
-          className="animate-twinkle-2d absolute -top-1 -right-1 flex size-6 items-center justify-center rounded-full border-[1.5px] border-[#2C2623] bg-[#FFE4EA] text-xs font-black text-[#2C2623]"
-        >
-          ✦
-        </span>
+          className="animate-kawaii-breathe pointer-events-none absolute -inset-2 rounded-full border-2 border-dashed border-[#F59E0B]/45 bg-[#FEF3C7]/35 dark:border-[#FDE68A]/30 dark:bg-[#3A311E]/25 print:hidden"
+        />
+        <div className="relative flex size-20 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#FEF3C7] shadow-[3px_3px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:scale-105 hover:-rotate-3 dark:border-[#6D5D54] dark:bg-[#3A311E] dark:shadow-[3px_3px_0px_0px_#0E0B0A]">
+          <KawaiiMascotSvg type={mascot} className="animate-float-2d size-14" />
+          <span
+            aria-hidden="true"
+            className="animate-twinkle-2d absolute -top-1 -right-1 flex size-6 items-center justify-center rounded-full border-[1.5px] border-[#2C2623] bg-[#FFE4EA] text-xs font-black text-[#2C2623] dark:border-[#6D5D54] print:hidden"
+          >
+            ✦
+          </span>
+          <span
+            aria-hidden="true"
+            className="animate-twinkle-2d absolute -bottom-1 -left-1.5 flex size-5 items-center justify-center rounded-full border-[1.5px] border-[#2C2623] bg-[#DFF2FE] text-[10px] font-black text-[#2C2623] dark:border-[#6D5D54] print:hidden"
+            style={{ animationDelay: "0.9s" }}
+          >
+            ★
+          </span>
+        </div>
       </div>
       <h3 className="text-base font-extrabold tracking-tight text-[#2C2623] dark:text-[#FDF8F0]">
         {title}
@@ -257,10 +323,10 @@ export function KawaiiStatCard({
   const cardBody = (
     <div
       className={cn(
-        "relative flex h-full flex-col justify-between gap-3 overflow-hidden rounded-2xl border-2 border-[#2C2623] p-4 shadow-[3px_3px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:shadow-[3px_3px_0px_0px_#0E0B0A] print:border print:border-neutral-300 print:bg-white print:shadow-none",
+        "group/stat relative flex h-full flex-col justify-between gap-3 overflow-hidden rounded-2xl border-2 border-[#2C2623] p-4 shadow-[3px_3px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-x-[1.5px] hover:-translate-y-[2px] hover:shadow-[5px_5px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:shadow-[3px_3px_0px_0px_#0E0B0A] dark:hover:shadow-[5px_5px_0px_0px_#0E0B0A] print:border print:border-neutral-300 print:bg-white print:shadow-none",
         palette.statBg,
         href &&
-          "transition-all duration-150 group-hover:-translate-x-[1.5px] group-hover:-translate-y-[1.5px] group-hover:shadow-[5px_5px_0px_0px_#2C2623] group-active:translate-x-[1px] group-active:translate-y-[1px] group-active:shadow-[1px_1px_0px_0px_#2C2623] dark:group-hover:shadow-[5px_5px_0px_0px_#0E0B0A]",
+          "group-hover:-translate-x-[1.5px] group-hover:-translate-y-[2px] group-hover:shadow-[5px_5px_0px_0px_#2C2623] group-active:translate-x-[1px] group-active:translate-y-[1px] group-active:shadow-[1px_1px_0px_0px_#2C2623] dark:group-hover:shadow-[5px_5px_0px_0px_#0E0B0A] dark:group-active:shadow-[1px_1px_0px_0px_#0E0B0A]",
         className,
       )}
     >
@@ -271,7 +337,7 @@ export function KawaiiStatCard({
         {icon && (
           <div
             className={cn(
-              "flex size-9 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:text-[#FDF8F0] dark:shadow-[2px_2px_0px_0px_#0E0B0A]",
+              "flex size-9 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/stat:scale-110 group-hover/stat:rotate-6 group-hover:scale-110 group-hover:rotate-6 dark:border-[#6D5D54] dark:text-[#FDF8F0] dark:shadow-[2px_2px_0px_0px_#0E0B0A]",
               palette.stickerBg,
             )}
           >

@@ -500,7 +500,40 @@ export default async function DashboardPage() {
       <section
         className={`relative overflow-hidden rounded-3xl border-2 border-[#2C2623] p-5 shadow-[4px_4px_0px_0px_#2C2623] sm:p-6 dark:border-stone-500 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)] ${roleTip.heroBg}`}
       >
-        {/* Hand-drawn doodle clouds & sparkles decoration */}
+        {/* Hand-drawn doodle clouds, floating pastel music note & twinkling sparkles decoration */}
+        <span
+          aria-hidden="true"
+          className="animate-kawaii-note pointer-events-none absolute top-3 right-52 hidden text-xl font-black text-[#2AB673]/80 select-none sm:block dark:text-emerald-300/60 print:hidden"
+        >
+          ♪
+        </span>
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 28 28"
+          className="animate-twinkle-2d pointer-events-none absolute right-48 bottom-3 hidden size-5 opacity-80 sm:block dark:opacity-50 print:hidden"
+        >
+          <path
+            d="M14 2 L16.8 11.2 L26 14 L16.8 16.8 L14 26 L11.2 16.8 L2 14 L11.2 11.2 Z"
+            fill="#FDE68A"
+            stroke="#2C2623"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          className="animate-twinkle-2d pointer-events-none absolute top-4 left-[48%] hidden size-4 opacity-70 lg:block dark:opacity-40 print:hidden"
+          style={{ animationDelay: "1.2s" }}
+        >
+          <path
+            d="M12 2 L14.4 9.6 L22 12 L14.4 14.4 L12 22 L9.6 14.4 L2 12 L9.6 9.6 Z"
+            fill="#FDA4AF"
+            stroke="#2C2623"
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+          />
+        </svg>
         <svg
           aria-hidden
           viewBox="0 0 220 90"
@@ -534,10 +567,10 @@ export default async function DashboardPage() {
           <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
             {/* Cute Mascot Sticker Frame */}
             <div className="relative shrink-0">
-              <div className="flex size-20 -rotate-2 items-center justify-center rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] p-2 shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:rotate-2 dark:border-stone-500 dark:bg-stone-900">
+              <div className="flex size-20 -rotate-2 items-center justify-center rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] p-2 shadow-[3px_3px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:scale-105 hover:rotate-3 dark:border-stone-500 dark:bg-stone-900">
                 <KawaiiMascotSvg type={roleTip.heroMascot} className="animate-float-2d-slow size-16" />
               </div>
-              <span className="absolute -right-2 -bottom-2 inline-flex items-center rounded-full border-2 border-[#2C2623] bg-[#FEF3C7] px-2 py-0.5 text-[10px] font-extrabold text-[#2C2623] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-500">
+              <span className="animate-kawaii-pop absolute -right-2 -bottom-2 inline-flex items-center rounded-full border-2 border-[#2C2623] bg-[#FEF3C7] px-2 py-0.5 text-[10px] font-extrabold text-[#2C2623] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-500">
                 Halo! ♪
               </span>
             </div>
@@ -545,7 +578,7 @@ export default async function DashboardPage() {
             <div className="space-y-1.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span
-                  className={`inline-flex items-center gap-1 rounded-full border-2 border-[#2C2623] px-3 py-0.5 text-xs font-extrabold shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 ${roleTip.pillBg}`}
+                  className={`animate-kawaii-pop inline-flex items-center gap-1 rounded-full border-2 border-[#2C2623] px-3 py-0.5 text-xs font-extrabold shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 ${roleTip.pillBg}`}
                 >
                   <Sparkles className="size-3.5" />
                   <span>{roleTip.cheerLabel}</span>
@@ -588,8 +621,8 @@ export default async function DashboardPage() {
       <div className="flex flex-col items-stretch gap-3 lg:flex-row lg:items-center">
         {/* Mini Buddy Avatar next to Speech Bubble */}
         <div className="hidden shrink-0 flex-col items-center gap-1 lg:flex">
-          <div className="flex size-16 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] p-2 shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900">
-            <KawaiiMascotSvg type={roleTip.bubbleMascot} className="size-12" />
+          <div className="flex size-16 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] p-2 shadow-[3px_3px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:scale-105 hover:-rotate-3 dark:border-stone-500 dark:bg-stone-900">
+            <KawaiiMascotSvg type={roleTip.bubbleMascot} className="animate-kawaii-wiggle size-12" />
           </div>
           <span className="rounded-full border border-[#2C2623] bg-[#FFE4E6] px-2 py-0.5 text-[10px] font-extrabold text-[#2C2623] dark:border-stone-500 dark:bg-rose-950/70 dark:text-rose-100">
             Tips!
@@ -640,7 +673,7 @@ export default async function DashboardPage() {
 
       {/* Role-Specific 4 Pastel Comic KPI Stat Cards */}
       {isStaff && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="kawaii-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KawaiiStatCard
             label="Pinjaman Aktif Anda"
             value={metrics.activeBorrowsCount}
@@ -677,7 +710,7 @@ export default async function DashboardPage() {
       )}
 
       {isTeamLeader && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="kawaii-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KawaiiStatCard
             label="Menunggu Persetujuan Anda"
             value={metrics.pendingLeaderRequests}
@@ -714,7 +747,7 @@ export default async function DashboardPage() {
       )}
 
       {isAdmin && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="kawaii-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {isOwner ? (
             <KawaiiStatCard
               label="Menunggu Pengesahan Owner"
@@ -812,14 +845,14 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+          <div className="kawaii-stagger grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {quickShortcuts.map((tile) => (
               <Link
                 key={tile.href}
                 href={tile.href}
-                className={`group flex flex-col items-center gap-2 rounded-2xl border-2 border-[#2C2623] p-3 text-center shadow-[3px_3px_0px_0px_#2C2623] transition-all hover:-translate-y-1 hover:shadow-[4px_5px_0px_0px_#2C2623] active:translate-y-0 dark:border-stone-500 dark:shadow-[3px_3px_0px_0px_rgba(0,0,0,0.45)] ${tile.tileBg}`}
+                className={`group flex flex-col items-center gap-2 rounded-2xl border-2 border-[#2C2623] p-3 text-center shadow-[3px_3px_0px_0px_#2C2623] transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:-translate-y-1.5 hover:scale-[1.02] hover:shadow-[4px_5px_0px_0px_#2C2623] active:translate-y-0 active:scale-[0.98] dark:border-stone-500 dark:shadow-[3px_3px_0px_0px_rgba(0,0,0,0.45)] ${tile.tileBg}`}
               >
-                <div className="flex size-12 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1.5 shadow-[2px_2px_0px_0px_#2C2623] transition-transform group-hover:scale-105 group-hover:-rotate-3 dark:border-stone-500 dark:bg-stone-900">
+                <div className="flex size-12 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1.5 shadow-[2px_2px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110 group-hover:-rotate-6 dark:border-stone-500 dark:bg-stone-900">
                   <KawaiiMascotSvg type={tile.mascot} className="size-9" />
                 </div>
                 <div className="min-w-0">
@@ -838,7 +871,7 @@ export default async function DashboardPage() {
 
       {/* Role-Specific Operational Widgets (Balanced 2-Column Grid) */}
       {isStaff && (
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="kawaii-stagger grid gap-5 lg:grid-cols-2">
           <Card className="gap-0 overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] py-0 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
             <CardHeader className="border-b-2 border-[#2C2623] bg-[#E0F2FE] px-5 py-4 dark:border-stone-500 dark:bg-sky-950/55">
               <div className="flex items-center justify-between gap-2">
@@ -969,7 +1002,7 @@ export default async function DashboardPage() {
       )}
 
       {isTeamLeader && (
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="kawaii-stagger grid gap-5 lg:grid-cols-2">
           <Card className="gap-0 overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] py-0 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
             <CardHeader className="border-b-2 border-[#2C2623] bg-[#EDE9FE] px-5 py-4 dark:border-stone-500 dark:bg-violet-950/55">
               <div className="flex items-center justify-between gap-2">
@@ -1013,7 +1046,7 @@ export default async function DashboardPage() {
                 </div>
                 <div className="h-3.5 w-full overflow-hidden rounded-full border-2 border-[#2C2623] bg-[#FEF3C7]/60 dark:border-stone-500 dark:bg-stone-900">
                   <div
-                    className="h-full rounded-full bg-[#2AB673] transition-all"
+                    className="animate-kawaii-shimmer relative h-full overflow-hidden rounded-full bg-[#2AB673] transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
                     style={{ width: `${opnameProgress}%` }}
                   />
                 </div>
@@ -1094,7 +1127,7 @@ export default async function DashboardPage() {
       )}
 
       {isAdmin && (
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="kawaii-stagger grid gap-5 lg:grid-cols-2">
           {can(user.role, "vault.view_limited") && (
             <Card className="gap-0 overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] py-0 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
               <CardHeader className="border-b-2 border-[#2C2623] bg-[#E0F2FE] px-5 py-4 dark:border-stone-500 dark:bg-sky-950/55">
@@ -1208,7 +1241,7 @@ export default async function DashboardPage() {
                   </div>
                   <div className="h-3 w-full overflow-hidden rounded-full border-2 border-[#2C2623] bg-[#FEF3C7]/60 dark:border-stone-500 dark:bg-stone-900">
                     <div
-                      className="h-full rounded-full bg-[#2AB673] transition-all"
+                      className="animate-kawaii-shimmer relative h-full overflow-hidden rounded-full bg-[#2AB673] transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
                       style={{ width: `${opnameProgress}%` }}
                     />
                   </div>

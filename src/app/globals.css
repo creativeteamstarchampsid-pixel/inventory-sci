@@ -350,20 +350,25 @@
 
 .animate-twinkle-2d {
   animation: twinkle2d 2.8s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 .animate-wave-2d {
   animation: waveHand2d 2.2s ease-in-out infinite;
+  transform-box: fill-box;
   transform-origin: bottom center;
 }
 
 .animate-blink-2d {
   animation: blinkEyes2d 4.5s ease-in-out infinite;
+  transform-box: fill-box;
   transform-origin: center;
 }
 
 .animate-scan-2d {
   animation: scanLaser2d 2.4s ease-in-out infinite;
+  transform-box: fill-box;
 }
 
 /* ==========================================================================
@@ -448,11 +453,13 @@
 
 .animate-kawaii-wiggle {
   animation: kawaiiWiggle 2.4s ease-in-out infinite;
+  transform-box: fill-box;
   transform-origin: center;
 }
 
 .animate-kawaii-bounce {
   animation: kawaiiBounce 1.8s ease-in-out infinite;
+  transform-box: fill-box;
   transform-origin: bottom center;
 }
 
@@ -462,6 +469,281 @@
 
 .animate-kawaii-rain {
   animation: kawaiiRain 1.4s linear infinite;
+}
+
+/* ==========================================================================
+   2D Japanese Cartoon Motion Engine (GPU-Accelerated: transform & opacity)
+   ========================================================================== */
+
+@keyframes kawaiiPageEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes kawaiiStaggerIn {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes kawaiiBreathe {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+  50% {
+    transform: scale(1.025, 0.975);
+  }
+}
+
+@keyframes kawaiiEar {
+  0%,
+  62%,
+  100% {
+    transform: rotate(0deg);
+  }
+  70% {
+    transform: rotate(-6deg);
+  }
+  78% {
+    transform: rotate(6deg);
+  }
+  86% {
+    transform: rotate(-3deg);
+  }
+  93% {
+    transform: rotate(2deg);
+  }
+}
+
+@keyframes kawaiiTail {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-10deg);
+  }
+  75% {
+    transform: rotate(10deg);
+  }
+}
+
+@keyframes kawaiiNote {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(-4deg);
+  }
+  50% {
+    transform: translateY(-7px) rotate(6deg);
+  }
+}
+
+@keyframes kawaiiSpinSlow {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes kawaiiShimmer {
+  0% {
+    transform: translateX(-110%);
+  }
+  65%,
+  100% {
+    transform: translateX(110%);
+  }
+}
+
+/* Page & Staggered Grid Entrances
+   Uses `backwards` fill-mode so pre-delay frames stay hidden while releasing
+   `transform` post-entrance (keeping :hover/:active transforms & fixed children intact). */
+.animate-kawaii-page-enter {
+  animation: kawaiiPageEnter 360ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.kawaii-stagger > * {
+  animation: kawaiiStaggerIn 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.kawaii-stagger > *:nth-child(1) {
+  animation-delay: 30ms;
+}
+.kawaii-stagger > *:nth-child(2) {
+  animation-delay: 75ms;
+}
+.kawaii-stagger > *:nth-child(3) {
+  animation-delay: 120ms;
+}
+.kawaii-stagger > *:nth-child(4) {
+  animation-delay: 165ms;
+}
+.kawaii-stagger > *:nth-child(5) {
+  animation-delay: 210ms;
+}
+.kawaii-stagger > *:nth-child(6) {
+  animation-delay: 255ms;
+}
+.kawaii-stagger > *:nth-child(7) {
+  animation-delay: 300ms;
+}
+.kawaii-stagger > *:nth-child(8) {
+  animation-delay: 345ms;
+}
+.kawaii-stagger > *:nth-child(9) {
+  animation-delay: 390ms;
+}
+.kawaii-stagger > *:nth-child(10) {
+  animation-delay: 435ms;
+}
+.kawaii-stagger > *:nth-child(11) {
+  animation-delay: 480ms;
+}
+.kawaii-stagger > *:nth-child(12) {
+  animation-delay: 525ms;
+}
+.kawaii-stagger > *:nth-child(n + 13) {
+  animation-delay: 560ms;
+}
+
+/* Living SVG Character Micro-Animations */
+.animate-kawaii-breathe {
+  animation: kawaiiBreathe 3.2s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: bottom center;
+}
+
+.animate-kawaii-ear {
+  animation: kawaiiEar 3.6s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: bottom center;
+}
+
+.animate-kawaii-tail {
+  animation: kawaiiTail 2.4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.animate-kawaii-note {
+  animation: kawaiiNote 4.6s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.animate-kawaii-spin-slow {
+  animation: kawaiiSpinSlow 12s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Tactile Cartoon Hover & Squish Micro-Interaction */
+.animate-kawaii-squish {
+  transition:
+    transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: center;
+}
+
+.animate-kawaii-squish:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.02);
+}
+
+.animate-kawaii-squish:active:not(:disabled) {
+  transform: translateY(1px) scale(0.97, 0.94);
+}
+
+/* Glossy Pastel Highlight Band for Progress Bars & Accent Stripes */
+@layer components {
+  .animate-kawaii-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+}
+
+.animate-kawaii-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 15%,
+    rgba(255, 253, 247, 0.48) 48%,
+    rgba(254, 243, 199, 0.34) 56%,
+    transparent 85%
+  );
+  animation: kawaiiShimmer 2.8s ease-in-out infinite;
+}
+
+.dark .animate-kawaii-shimmer::after {
+  background: linear-gradient(
+    110deg,
+    transparent 15%,
+    rgba(255, 253, 247, 0.28) 48%,
+    rgba(253, 230, 138, 0.2) 56%,
+    transparent 85%
+  );
+}
+
+/* ==========================================================================
+   Accessibility: Respect User Motion Preferences
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-float-2d,
+  .animate-float-2d-slow,
+  .animate-float-2d-reverse,
+  .animate-cloud-2d,
+  .animate-twinkle-2d,
+  .animate-wave-2d,
+  .animate-blink-2d,
+  .animate-scan-2d,
+  .animate-kawaii-pop,
+  .animate-kawaii-wiggle,
+  .animate-kawaii-bounce,
+  .animate-kawaii-zzz,
+  .animate-kawaii-rain,
+  .animate-kawaii-page-enter,
+  .kawaii-stagger > *,
+  .animate-kawaii-breathe,
+  .animate-kawaii-ear,
+  .animate-kawaii-tail,
+  .animate-kawaii-note,
+  .animate-kawaii-spin-slow,
+  .animate-kawaii-shimmer,
+  .animate-kawaii-shimmer::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .animate-kawaii-shimmer::after {
+    display: none !important;
+  }
+
+  .animate-kawaii-squish,
+  .kawaii-card-hover {
+    transition-duration: 0.01ms !important;
+  }
+
+  .animate-kawaii-squish:hover:not(:disabled),
+  .animate-kawaii-squish:active:not(:disabled) {
+    transform: none !important;
+  }
 }
 
 /* ==========================================================================
@@ -478,7 +760,8 @@
   .kawaii-shadow-sm,
   .kawaii-card,
   .kawaii-card-hover,
-  .kawaii-pill {
+  .kawaii-pill,
+  .animate-kawaii-squish {
     box-shadow: none !important;
     transform: none !important;
   }
@@ -501,7 +784,22 @@
   .animate-kawaii-wiggle,
   .animate-kawaii-bounce,
   .animate-kawaii-zzz,
-  .animate-kawaii-rain {
+  .animate-kawaii-rain,
+  .animate-kawaii-page-enter,
+  .kawaii-stagger > *,
+  .animate-kawaii-breathe,
+  .animate-kawaii-ear,
+  .animate-kawaii-tail,
+  .animate-kawaii-note,
+  .animate-kawaii-spin-slow,
+  .animate-kawaii-squish,
+  .animate-kawaii-shimmer,
+  .animate-kawaii-shimmer::after {
     animation: none !important;
+    transition: none !important;
+  }
+
+  .animate-kawaii-shimmer::after {
+    display: none !important;
   }
 }

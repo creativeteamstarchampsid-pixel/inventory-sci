@@ -1,13 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import {
-  AUTH_ONLY_ROUTES,
-  DEFAULT_AUTHENTICATED_ROUTE,
-  canAccessRoute,
-  isPublicRoute,
-  isRole,
-} from "@/lib/rbac";
+import { DEFAULT_AUTHENTICATED_ROUTE, isPublicRoute } from "@/lib/rbac";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import type { Database } from "@/types/database";
 
@@ -33,8 +27,14 @@ function redirectWithCookies(
 }
 
 /**
- * Refreshes the Supabase session and enforces authentication + role-based
- * route access. Called from `src/middleware.ts`.
+ * Refreshes the Supabase session and enforces basic authentication redirects.
+ * Called from `src/middleware.ts`.
+ *
+ * Role-based access and `is_active` profile checks are enforced authoritatively
+ * in `src/lib/auth.ts` (deduplicated per request via React `cache()`), every
+ * `(app)` layout/page (`requireUser` / `requireRouteAccess`), `/api/exports/[format]`,
+ * all Server Actions (`requireAction`), and Postgres RLS — avoiding duplicate
+ * `profiles` round-trips in middleware on every navigation.
  */
 export async function updateSession(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
@@ -64,20 +64,36 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // IMPORTANT: no code between createServerClient and getUser(); getUser()
-  // revalidates the JWT with Supabase Auth and refreshes expired sessions.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // IMPORTANT: no code between createServerClient and auth verification.
+  // `getClaims()` refreshes expiring sessions and verifies the JWT locally via
+  // edge-cached JWKS when asymmetric keys are active, falling back cleanly to
+  // `getUser()` for symmetric keys or unexpected verification errors.
+  let isAuthenticated = false;
+  try {
+    const { data, error } = await supabase.auth.getClaims();
+    if (data?.claims?.sub) {
+      isAuthenticated = true;
+    } else if (error) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      isAuthenticated = Boolean(user);
+    }
+  } catch {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    isAuthenticated = Boolean(user);
+  }
 
   if (isPublicRoute(pathname)) {
-    if (user && pathname === "/login") {
+    if (isAuthenticated && pathname === "/login") {
       return redirectWithCookies(request, supabaseResponse, DEFAULT_AUTHENTICATED_ROUTE);
     }
     return supabaseResponse;
   }
 
-  if (!user) {
+  if (!isAuthenticated) {
     const next = `${pathname}${search}`;
     return redirectWithCookies(
       request,
@@ -89,28 +105,6 @@ export async function updateSession(request: NextRequest) {
 
   if (pathname === "/") {
     return redirectWithCookies(request, supabaseResponse, DEFAULT_AUTHENTICATED_ROUTE);
-  }
-
-  if (AUTH_ONLY_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`))) {
-    return supabaseResponse;
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, is_active")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (!profile || !profile.is_active || !isRole(profile.role)) {
-    return redirectWithCookies(request, supabaseResponse, "/forbidden", {
-      reason: !profile ? "no-profile" : "inactive",
-    });
-  }
-
-  if (!canAccessRoute(profile.role, pathname)) {
-    return redirectWithCookies(request, supabaseResponse, "/forbidden", {
-      from: pathname,
-    });
   }
 
   return supabaseResponse;

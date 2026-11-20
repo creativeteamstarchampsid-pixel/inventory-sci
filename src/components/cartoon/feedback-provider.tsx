@@ -11,6 +11,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import { usePathname, useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 
@@ -44,8 +45,10 @@ export type RunWithFeedbackOptions<T = unknown> = {
 };
 
 export interface CartoonFeedbackContextValue {
+  isOpen: boolean;
+  activeMode: CartoonFeedbackMode | null;
   showWorking: (options?: FeedbackPopupOptions) => void;
-  showNavigating: (options?: FeedbackPopupOptions) => void;
+  showNavigating: (options?: string | FeedbackPopupOptions) => void;
   showBatch: (options?: FeedbackPopupOptions) => void;
   showSuccess: (options?: FeedbackPopupOptions) => void;
   showError: (options?: FeedbackPopupOptions) => void;
@@ -59,12 +62,17 @@ export interface CartoonFeedbackContextValue {
 
 const IDLE_TIMEOUT_MS = 120_000; // 2 minutes of inactivity
 const ACTIVITY_THROTTLE_MS = 1_000;
+const MIN_NAV_DISPLAY_MS = 700; // Minimum visible duration for navigating popup
 const NAV_GRACE_MS = 180;
+const EXIT_ANIMATION_MS = 180;
+const NAV_DEDUP_WINDOW_MS = 250;
 const NAV_SAFETY_TIMEOUT_MS = 12_000;
 const DEFAULT_SUCCESS_DURATION_MS = 2_400;
 const DEFAULT_ERROR_DURATION_MS = 5_500;
 
 const NOOP_CONTEXT: CartoonFeedbackContextValue = {
+  isOpen: false,
+  activeMode: null,
   showWorking: () => {},
   showNavigating: () => {},
   showBatch: () => {},
@@ -159,6 +167,26 @@ function extractLinkLabel(anchor: HTMLAnchorElement): string | undefined {
   return undefined;
 }
 
+function normalizeNavOptions(
+  options?: string | FeedbackPopupOptions
+): FeedbackPopupOptions | undefined {
+  if (typeof options === "string") {
+    const trimmed = options.trim();
+    if (!trimmed) return undefined;
+    if (
+      trimmed.endsWith("...") ||
+      trimmed.toLowerCase().startsWith("membuka ")
+    ) {
+      return { title: trimmed };
+    }
+    return {
+      title: `Membuka ${trimmed}...`,
+      subMessage: `Menuju: ${trimmed}`,
+    };
+  }
+  return options;
+}
+
 function NavigationWatcher({
   onRouteChange,
 }: {
@@ -178,9 +206,13 @@ function NavigationWatcher({
 
 export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
   const [popup, setPopup] = useState<ActivePopupState | null>(null);
+  const [isClosing, setIsClosing] = useState(false);
 
   const popupRef = useRef<ActivePopupState | null>(null);
+  const isClosingRef = useRef(false);
   const popupIdRef = useRef(0);
+  const navOpenedAtRef = useRef<number>(0);
+  const lastNavTriggerRef = useRef<{ dest: string; at: number } | null>(null);
   const modeCountersRef = useRef<Record<CartoonFeedbackMode, number>>({
     working: 0,
     navigating: 0,
@@ -193,6 +225,7 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
   const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef<number>(0);
   const lastRouteKeyRef = useRef<string | null>(null);
@@ -210,23 +243,59 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
       clearTimeout(navGraceTimerRef.current);
       navGraceTimerRef.current = null;
     }
+    if (exitTimerRef.current) {
+      clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = null;
+    }
   }, []);
 
   const scheduleIdleTimerRef = useRef<() => void>(() => {});
 
   const hide = useCallback(() => {
+    const active = popupRef.current;
+    if (!active) {
+      clearPopupTimers();
+      isClosingRef.current = false;
+      setIsClosing(false);
+      setPopup(null);
+      scheduleIdleTimerRef.current();
+      return;
+    }
+
+    // Already fading out — don't restart the exit timer
+    if (isClosingRef.current && exitTimerRef.current) {
+      return;
+    }
+
+    const closingId = active.id;
     clearPopupTimers();
-    popupRef.current = null;
-    setPopup(null);
-    scheduleIdleTimerRef.current();
+    isClosingRef.current = true;
+    setIsClosing(true);
+
+    exitTimerRef.current = setTimeout(() => {
+      exitTimerRef.current = null;
+      if (popupRef.current?.id === closingId) {
+        popupRef.current = null;
+        isClosingRef.current = false;
+        setPopup(null);
+        setIsClosing(false);
+        scheduleIdleTimerRef.current();
+      }
+    }, EXIT_ANIMATION_MS);
   }, [clearPopupTimers]);
 
   const openPopup = useCallback(
     (mode: CartoonFeedbackMode, options?: FeedbackPopupOptions) => {
       clearPopupTimers();
+      isClosingRef.current = false;
+      setIsClosing(false);
 
       const nextId = ++popupIdRef.current;
       const msgIdx = modeCountersRef.current[mode]++;
+
+      if (mode === "navigating") {
+        navOpenedAtRef.current = Date.now();
+      }
 
       const defaultDismissible =
         mode === "success" ||
@@ -285,12 +354,44 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
     [clearPopupTimers, hide]
   );
 
+  const openNavigatingSync = useCallback(
+    (options?: FeedbackPopupOptions) => {
+      let opened = false;
+      try {
+        flushSync(() => {
+          opened = true;
+          openPopup("navigating", options);
+        });
+      } catch {
+        if (!opened) {
+          openPopup("navigating", options);
+        }
+      }
+    },
+    [openPopup]
+  );
+
   const showWorking = useCallback(
     (options?: FeedbackPopupOptions) => openPopup("working", options),
     [openPopup]
   );
   const showNavigating = useCallback(
-    (options?: FeedbackPopupOptions) => openPopup("navigating", options),
+    (options?: string | FeedbackPopupOptions) => {
+      const now = Date.now();
+      const recent = lastNavTriggerRef.current;
+      // Deduplicate double-triggers (e.g. document capture click + AppSidebar onClick within 250ms)
+      if (
+        popupRef.current?.mode === "navigating" &&
+        !isClosingRef.current &&
+        recent &&
+        recent.dest !== "__manual__" &&
+        now - recent.at < NAV_DEDUP_WINDOW_MS
+      ) {
+        return;
+      }
+      lastNavTriggerRef.current = { dest: "__manual__", at: now };
+      openPopup("navigating", normalizeNavOptions(options));
+    },
     [openPopup]
   );
   const showBatch = useCallback(
@@ -331,16 +432,79 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
     scheduleIdleTimerRef.current = scheduleIdleTimer;
   }, [scheduleIdleTimer]);
 
-  // Preload all 6 animated GIFs quietly after mount so popups appear instantaneously
+  // Eagerly preload ONLY navigating animation immediately on mount, then gently
+  // stagger the remaining 5 animations during browser idle time (300ms apart)
   useEffect(() => {
-    const timer = setTimeout(() => {
-      const urls = Object.values(CARTOON_GIF_CONFIG).map((cfg) => cfg.gif);
-      for (const src of urls) {
-        const img = new window.Image();
-        img.src = src;
+    const preloaded: HTMLImageElement[] = [];
+
+    const navImg = new window.Image();
+    navImg.decoding = "async";
+    navImg.src = CARTOON_GIF_CONFIG.navigating.gif;
+    preloaded.push(navImg);
+
+    const remainingUrls = [
+      CARTOON_GIF_CONFIG.working.gif,
+      CARTOON_GIF_CONFIG.batch.gif,
+      CARTOON_GIF_CONFIG.success.gif,
+      CARTOON_GIF_CONFIG.idle.gif,
+      CARTOON_GIF_CONFIG.error.gif,
+    ];
+
+    let cancelled = false;
+    let idleHandle: number | null = null;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+    let staggerTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const loadNext = (index: number) => {
+      if (cancelled || index >= remainingUrls.length) return;
+
+      const img = new window.Image();
+      img.decoding = "async";
+      img.src = remainingUrls[index];
+      preloaded.push(img);
+
+      if (index + 1 < remainingUrls.length) {
+        staggerTimer = setTimeout(() => {
+          staggerTimer = null;
+          loadNext(index + 1);
+        }, 300);
       }
-    }, 600);
-    return () => clearTimeout(timer);
+    };
+
+    const startDeferredPreload = () => {
+      if (cancelled) return;
+      loadNext(0);
+    };
+
+    const win = window as Window & {
+      requestIdleCallback?: (
+        callback: IdleRequestCallback,
+        options?: IdleRequestOptions
+      ) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+    if (typeof win.requestIdleCallback === "function") {
+      idleHandle = win.requestIdleCallback(startDeferredPreload, {
+        timeout: 2_500,
+      });
+    } else {
+      fallbackTimer = setTimeout(startDeferredPreload, 2_500);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleHandle !== null && typeof win.cancelIdleCallback === "function") {
+        win.cancelIdleCallback(idleHandle);
+      }
+      if (fallbackTimer !== null) {
+        clearTimeout(fallbackTimer);
+      }
+      if (staggerTimer !== null) {
+        clearTimeout(staggerTimer);
+      }
+      preloaded.length = 0;
+    };
   }, []);
 
   // Cleanup all timers on unmount
@@ -410,7 +574,7 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
     };
   }, [scheduleIdleTimer]);
 
-  // Capturing click listener on <a> elements for automatic menu switching / navigation popup
+  // Capturing click listener on <a> elements + browser popstate listener for instant navigation popup
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
       if (event.defaultPrevented) return;
@@ -419,13 +583,19 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Do not interrupt active working/batch operations
+      // Do not interrupt active non-closing working/batch operations
       const currentMode = popupRef.current?.mode;
-      if (currentMode === "working" || currentMode === "batch") {
+      if (
+        !isClosingRef.current &&
+        (currentMode === "working" || currentMode === "batch")
+      ) {
         return;
       }
 
-      const targetEl = event.target as Element | null;
+      const targetEl =
+        event.target instanceof Element
+          ? event.target
+          : (event.target as Node | null)?.parentElement ?? null;
       const anchor = targetEl?.closest("a[href]") as HTMLAnchorElement | null;
       if (!anchor) return;
 
@@ -454,22 +624,78 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Only trigger when actually switching to a different pathname
-      if (destUrl.pathname === window.location.pathname) return;
+      const destKey = destUrl.pathname + destUrl.search;
+      const currentKey = window.location.pathname + window.location.search;
+      if (destKey === currentKey) return;
+
+      const now = Date.now();
+      const recent = lastNavTriggerRef.current;
+      if (
+        popupRef.current?.mode === "navigating" &&
+        !isClosingRef.current &&
+        recent &&
+        recent.dest === destKey &&
+        now - recent.at < NAV_DEDUP_WINDOW_MS
+      ) {
+        return;
+      }
+      lastNavTriggerRef.current = { dest: destKey, at: now };
 
       const linkLabel = extractLinkLabel(anchor);
-      openPopup("navigating", {
+      openNavigatingSync({
+        title: linkLabel ? `Membuka ${linkLabel}...` : undefined,
         subMessage: linkLabel ? `Menuju: ${linkLabel}` : undefined,
       });
     };
 
+    const handlePopState = () => {
+      // Do not interrupt active non-closing working/batch operations
+      const currentMode = popupRef.current?.mode;
+      if (
+        !isClosingRef.current &&
+        (currentMode === "working" || currentMode === "batch")
+      ) {
+        return;
+      }
+
+      const popSearch = new URLSearchParams(window.location.search).toString();
+      const popRouteKey = popSearch
+        ? `${window.location.pathname}?${popSearch}`
+        : window.location.pathname;
+
+      // Skip hash-only history changes on the same route
+      if (
+        lastRouteKeyRef.current !== null &&
+        popRouteKey === lastRouteKeyRef.current
+      ) {
+        return;
+      }
+
+      const now = Date.now();
+      const recent = lastNavTriggerRef.current;
+      if (
+        popupRef.current?.mode === "navigating" &&
+        !isClosingRef.current &&
+        recent &&
+        recent.dest === popRouteKey &&
+        now - recent.at < NAV_DEDUP_WINDOW_MS
+      ) {
+        return;
+      }
+      lastNavTriggerRef.current = { dest: popRouteKey, at: now };
+
+      openNavigatingSync();
+    };
+
     document.addEventListener("click", handleDocumentClick, true);
+    window.addEventListener("popstate", handlePopState);
     return () => {
       document.removeEventListener("click", handleDocumentClick, true);
+      window.removeEventListener("popstate", handlePopState);
     };
-  }, [openPopup]);
+  }, [openNavigatingSync]);
 
-  // Auto-hide navigating popup once Next.js route transition settles
+  // Auto-hide navigating popup once Next.js route transition settles (respecting MIN_NAV_DISPLAY_MS)
   const handleRouteChange = useCallback(
     (routeKey: string) => {
       if (lastRouteKeyRef.current === null) {
@@ -483,19 +709,23 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
       scheduleIdleTimer();
 
       const active = popupRef.current;
-      if (active && active.mode === "navigating") {
+      if (active && active.mode === "navigating" && !isClosingRef.current) {
         const expectedId = active.id;
+        const elapsed = Date.now() - navOpenedAtRef.current;
+        const waitMs = Math.max(NAV_GRACE_MS, MIN_NAV_DISPLAY_MS - elapsed);
+
         if (navGraceTimerRef.current) {
           clearTimeout(navGraceTimerRef.current);
         }
         navGraceTimerRef.current = setTimeout(() => {
+          navGraceTimerRef.current = null;
           if (
             popupRef.current?.id === expectedId &&
             popupRef.current.mode === "navigating"
           ) {
             hide();
           }
-        }, NAV_GRACE_MS);
+        }, waitMs);
       }
     },
     [hide, scheduleIdleTimer]
@@ -503,7 +733,7 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
 
   // Escape key closes dismissible popups (idle, error, success, navigating)
   useEffect(() => {
-    if (!popup || !popup.dismissible) return;
+    if (!popup || !popup.dismissible || isClosing) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -512,7 +742,7 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [popup, hide]);
+  }, [popup, isClosing, hide]);
 
   const runWithFeedback = useCallback(
     async <T,>(
@@ -595,8 +825,13 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
     [openPopup, hide]
   );
 
+  const isOpen = popup !== null;
+  const activeMode = popup?.mode ?? null;
+
   const contextValue = useMemo<CartoonFeedbackContextValue>(
     () => ({
+      isOpen,
+      activeMode,
       showWorking,
       showNavigating,
       showBatch,
@@ -607,6 +842,8 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
       runWithFeedback,
     }),
     [
+      isOpen,
+      activeMode,
       showWorking,
       showNavigating,
       showBatch,
@@ -619,6 +856,11 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
   );
 
   const activeConfig = popup ? CARTOON_GIF_CONFIG[popup.mode] : null;
+  const showTopProgressBar =
+    popup !== null &&
+    (popup.mode === "navigating" ||
+      popup.mode === "working" ||
+      popup.mode === "batch");
 
   return (
     <CartoonFeedbackContext.Provider value={contextValue}>
@@ -628,26 +870,58 @@ export function CartoonFeedbackProvider({ children }: { children: ReactNode }) {
 
       {children}
 
+      {/* Sleek animated kawaii pastel top progress bar for active loading transitions */}
+      {showTopProgressBar ? (
+        <div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none fixed inset-x-0 top-0 z-[110] h-1.5 overflow-hidden border-b border-[#2C2623]/20 bg-[#FFFDF7]/90 transition-opacity duration-150 dark:border-stone-500/30 dark:bg-stone-900/90 print:hidden",
+            isClosing ? "opacity-0" : "opacity-100"
+          )}
+        >
+          <div
+            className="animate-kawaii-shimmer animate-in slide-in-from-left h-full w-full duration-300"
+            style={{
+              backgroundImage:
+                "linear-gradient(90deg, #7CC4FA 0%, #2AB673 25%, #FDE68A 50%, #FDA4AF 75%, #C4B5FD 100%)",
+            }}
+          />
+        </div>
+      ) : null}
+
       {popup && activeConfig ? (
         <div
           role="dialog"
           aria-modal="true"
           aria-live={popup.mode === "error" ? "assertive" : "polite"}
           aria-label={popup.title ?? activeConfig.defaultTitle}
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 print:hidden"
+          className={cn(
+            "fixed inset-0 z-[100] flex items-center justify-center p-4 print:hidden",
+            isClosing && "pointer-events-none"
+          )}
         >
           {/* Soft cream/ink backdrop blur */}
           <div
             aria-hidden="true"
-            onClick={popup.dismissible ? hide : undefined}
+            onClick={popup.dismissible && !isClosing ? hide : undefined}
             className={cn(
-              "animate-in fade-in-0 fixed inset-0 bg-[#2C2623]/40 backdrop-blur-[3px] duration-200",
+              "fixed inset-0 bg-[#2C2623]/40 backdrop-blur-[3px] transition-opacity duration-150",
+              isClosing
+                ? "opacity-0"
+                : "animate-in fade-in-0 opacity-100 duration-150",
               popup.dismissible ? "cursor-pointer" : "cursor-wait"
             )}
           />
 
           {/* Centered cute 2D Japanese cartoon modal card */}
-          <div className="animate-in fade-in-0 zoom-in-95 relative z-10 w-full max-w-md duration-200">
+          <div
+            className={cn(
+              "relative z-10 w-full max-w-md transition-all duration-150",
+              isClosing
+                ? "scale-95 opacity-0"
+                : "animate-in fade-in-0 zoom-in-95 scale-100 opacity-100 duration-150"
+            )}
+          >
             <CartoonLoadingCard
               mode={popup.mode}
               title={popup.title}

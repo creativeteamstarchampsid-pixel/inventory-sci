@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import {
   AlertTriangle,
   Archive,
@@ -86,8 +87,20 @@ import {
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
-import { PrintableSheetDocument } from "./label-sticker";
 import "./print.css";
+
+const PrintableSheetDocument = dynamic(
+  () => import("./label-sticker").then((mod) => mod.PrintableSheetDocument),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex min-h-[120px] min-w-[180px] items-center justify-center rounded-xl border-2 border-dashed border-[#2C2623]/25 bg-white/80 px-4 py-6 text-xs font-bold text-[#574E49] print:hidden dark:border-stone-600 dark:bg-stone-900/60 dark:text-stone-300">
+        <Loader2 className="mr-2 size-4 animate-spin" />
+        Menyiapkan pratinjau stiker...
+      </div>
+    ),
+  },
+);
 
 type SourceTab = "ALL" | LabelSourceKind;
 type TypeFilter =
@@ -186,7 +199,7 @@ export function BarcodeStudioClient({
   >(() => {
     const init: Record<string, number> = {};
     for (const key of initialSelectedKeys) {
-      if (allRecords.some((r) => r.key === key)) {
+      if (recordByKey.has(key)) {
         init[key] = 1;
       }
     }
@@ -196,6 +209,7 @@ export function BarcodeStudioClient({
   // Filters
   const [sourceTab, setSourceTab] = React.useState<SourceTab>(initialSourceTab);
   const [searchQuery, setSearchQuery] = React.useState("");
+  const deferredSearchQuery = React.useDeferredValue(searchQuery);
   const [locationFilter, setLocationFilter] = React.useState<string>("ALL");
   const [categoryFilter, setCategoryFilter] = React.useState<string>("ALL");
   const [typeFilter, setTypeFilter] = React.useState<TypeFilter>("ALL");
@@ -254,7 +268,7 @@ export function BarcodeStudioClient({
 
   // Filtered records
   const filteredRecords = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = deferredSearchQuery.trim().toLowerCase();
     return allRecords.filter((rec) => {
       if (sourceTab !== "ALL" && rec.source !== sourceTab) return false;
       if (locationFilter !== "ALL" && rec.locationCode !== locationFilter) {
@@ -302,7 +316,7 @@ export function BarcodeStudioClient({
     locationFilter,
     categoryFilter,
     typeFilter,
-    searchQuery,
+    deferredSearchQuery,
   ]);
 
   // Ordered batch entries
@@ -336,6 +350,24 @@ export function BarcodeStudioClient({
     }
     return chunkIntoPages(expandedQueue, SPINE_LABEL_SPEC.a4PerPage, 1);
   }, [expandedQueue, template, spinePaperMode, a4StartSlot]);
+
+  // Keep the hidden multi-page native print DOM off the urgent UI path during
+  // rapid checkbox/quantity edits, while flushing immediately when printing.
+  const rawPrintConfig = React.useMemo(
+    () => ({
+      pages,
+      template,
+      thermalSize,
+      spinePaperMode,
+      symbology,
+      origin: qrOrigin,
+    }),
+    [pages, template, thermalSize, spinePaperMode, symbology, qrOrigin],
+  );
+  const deferredPrintConfig = React.useDeferredValue(rawPrintConfig);
+  const activePrintConfig = isPreparingPrint
+    ? rawPrintConfig
+    : deferredPrintConfig;
 
   // Clamp active preview page index when batch or template changes
   React.useEffect(() => {
@@ -1564,15 +1596,17 @@ export function BarcodeStudioClient({
 
       {/* Native Browser Print Surface (all pages at 1:1 mm scale) */}
       <div id="barcode-print-root" className="barcode-print-only">
-        <PrintableSheetDocument
-          pages={pages}
-          template={template}
-          thermalSize={thermalSize}
-          spinePaperMode={spinePaperMode}
-          symbology={symbology}
-          origin={qrOrigin}
-          mode="print"
-        />
+        {activePrintConfig.pages.length > 0 && (
+          <PrintableSheetDocument
+            pages={activePrintConfig.pages}
+            template={activePrintConfig.template}
+            thermalSize={activePrintConfig.thermalSize}
+            spinePaperMode={activePrintConfig.spinePaperMode}
+            symbology={activePrintConfig.symbology}
+            origin={activePrintConfig.origin}
+            mode="print"
+          />
+        )}
       </div>
     </>
   );

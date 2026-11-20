@@ -35,7 +35,7 @@ export interface CartoonModeConfig {
 export const CARTOON_GIF_CONFIG: Record<CartoonFeedbackMode, CartoonModeConfig> = {
   working: {
     mode: "working",
-    gif: "/gifs/work-office-joguman.gif",
+    gif: "/gifs/work-office-joguman.webp",
     alt: "Animasi Dino Joguman sedang semangat bekerja mengetik di meja",
     badge: "Sedang Dikerjakan",
     badgeIcon: "✦",
@@ -61,7 +61,7 @@ export const CARTOON_GIF_CONFIG: Record<CartoonFeedbackMode, CartoonModeConfig> 
   },
   navigating: {
     mode: "navigating",
-    gif: "/gifs/confused-thinking.gif",
+    gif: "/gifs/confused-thinking.webp",
     alt: "Animasi Dino Joguman sedang berpikir mencari halaman tujuan",
     badge: "Pindah Halaman",
     badgeIcon: "?",
@@ -87,7 +87,7 @@ export const CARTOON_GIF_CONFIG: Record<CartoonFeedbackMode, CartoonModeConfig> 
   },
   batch: {
     mode: "batch",
-    gif: "/gifs/work-office.gif",
+    gif: "/gifs/work-office.webp",
     alt: "Animasi tim mini kantor sedang lembur membereskan banyak tugas sekaligus",
     badge: "Tugas Banyak!",
     badgeIcon: "⚡",
@@ -113,7 +113,7 @@ export const CARTOON_GIF_CONFIG: Record<CartoonFeedbackMode, CartoonModeConfig> 
   },
   success: {
     mode: "success",
-    gif: "/gifs/chiikawa.gif",
+    gif: "/gifs/chiikawa.webp",
     alt: "Animasi Chiikawa merayakan keberhasilan dengan ceria",
     badge: "Berhasil!",
     badgeIcon: "♪",
@@ -139,7 +139,7 @@ export const CARTOON_GIF_CONFIG: Record<CartoonFeedbackMode, CartoonModeConfig> 
   },
   idle: {
     mode: "idle",
-    gif: "/gifs/sleepy-work.gif",
+    gif: "/gifs/sleepy-work.webp",
     alt: "Animasi Dino Joguman mengantuk karena layar lama tidak ada aktivitas",
     badge: "Mode Santai",
     badgeIcon: "💤",
@@ -165,7 +165,7 @@ export const CARTOON_GIF_CONFIG: Record<CartoonFeedbackMode, CartoonModeConfig> 
   },
   error: {
     mode: "error",
-    gif: "/gifs/cartoon-rain.gif",
+    gif: "/gifs/cartoon-rain.webp",
     alt: "Animasi hujan kartun menandakan proses gagal diperbarui",
     badge: "Yah, Gagal...",
     badgeIcon: "🌧",

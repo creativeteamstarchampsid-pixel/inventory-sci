@@ -39,29 +39,9 @@ function sanitizeLookupValuation(
   };
 }
 
-export default async function ScanPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ code?: string }>;
-}) {
-  const user = await requireRouteAccess("/scan");
-  const canViewValuation = can(user.role, "inventory.view_valuation");
-  const resolvedParams = await searchParams;
-  const initialCode = resolvedParams.code?.trim() ?? "";
-
-  let initialLookup: ScanLookupResult | null = null;
-  let initialError: string | null = null;
-
-  if (initialCode) {
-    const res = await lookupScanTargetAction(initialCode);
-    if (res.ok) {
-      initialLookup = sanitizeLookupValuation(res.data, canViewValuation);
-    } else {
-      initialError = res.error;
-    }
-  }
-
-  const supabase = await createClient();
+async function loadRecentScanFeed(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<RecentScanFeedRow[]> {
   const { data: recentBorrows } = await supabase
     .from("borrow_transactions")
     .select("*")
@@ -69,6 +49,8 @@ export default async function ScanPage({
     .limit(12);
 
   const borrows = recentBorrows ?? [];
+  if (borrows.length === 0) return [];
+
   const itemIds = Array.from(
     new Set(borrows.map((b) => b.item_id).filter((id): id is string => Boolean(id))),
   );
@@ -108,7 +90,7 @@ export default async function ScanPage({
     ]),
   );
 
-  const recentFeed: RecentScanFeedRow[] = borrows.map((row) => {
+  return borrows.map((row) => {
     const item = row.item_id ? itemMap.get(row.item_id) : undefined;
     const kit = row.kit_id ? kitMap.get(row.kit_id) : undefined;
     return {
@@ -120,6 +102,36 @@ export default async function ScanPage({
       target_name: item?.name ?? kit?.kit_name ?? "Item/Kit Terhapus",
     };
   });
+}
+
+export default async function ScanPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ code?: string }>;
+}) {
+  const [user, resolvedParams] = await Promise.all([
+    requireRouteAccess("/scan"),
+    searchParams,
+  ]);
+  const canViewValuation = can(user.role, "inventory.view_valuation");
+  const initialCode = resolvedParams.code?.trim() ?? "";
+
+  const supabase = await createClient();
+  const [lookupRes, recentFeed] = await Promise.all([
+    initialCode ? lookupScanTargetAction(initialCode) : Promise.resolve(null),
+    loadRecentScanFeed(supabase),
+  ]);
+
+  let initialLookup: ScanLookupResult | null = null;
+  let initialError: string | null = null;
+
+  if (lookupRes) {
+    if (lookupRes.ok) {
+      initialLookup = sanitizeLookupValuation(lookupRes.data, canViewValuation);
+    } else {
+      initialError = lookupRes.error;
+    }
+  }
 
   const todayWib = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Jakarta",

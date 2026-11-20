@@ -34,6 +34,7 @@ import { createClient } from "@/lib/supabase/server";
 import type {
   AuditLog,
   BorrowStatus,
+  ItemMaster,
   LocationCode,
   MonthlyReconciliation,
   SubscriptionDirectoryRow,
@@ -48,6 +49,35 @@ type ActiveBorrowPreview = {
   transaction_code: string;
   code: string;
   name: string;
+  room_code: LocationCode | null;
+  borrowed_at: string;
+  status: BorrowStatus;
+};
+
+type ExpiringSubscriptionRow = Pick<
+  SubscriptionDirectoryRow,
+  "id" | "sub_code" | "service_name" | "login_email" | "renewal_date"
+>;
+
+type DashboardReconciliationSummary = Pick<
+  MonthlyReconciliation,
+  "opname_progress_pct" | "pre_update_backup_id" | "approved_by_leader" | "locked_at"
+>;
+
+type DashboardItemRow = Pick<
+  ItemMaster,
+  "asset_type" | "condition" | "hygiene_status" | "stock_qty" | "min_stock_threshold"
+> & {
+  id?: string;
+  item_code?: string;
+  name?: string;
+};
+
+type StaffActiveBorrowRow = {
+  id: string;
+  transaction_code: string;
+  item_id: string | null;
+  kit_id: string | null;
   room_code: LocationCode | null;
   borrowed_at: string;
   status: BorrowStatus;
@@ -70,22 +100,29 @@ type DashboardMetrics = {
   pendingLeaderRequests: number;
   pendingAdminRequests: number;
   pendingOwnerRequests: number;
-  expiringSubscriptions: SubscriptionDirectoryRow[];
-  reconciliation: MonthlyReconciliation | null;
+  expiringSubscriptions: ExpiringSubscriptionRow[];
+  reconciliation: DashboardReconciliationSummary | null;
   recentAudits: Pick<
     AuditLog,
-    "id" | "actor_name" | "action" | "entity_type" | "entity_code" | "summary" | "created_at"
+    "id" | "actor_name" | "entity_code" | "summary" | "created_at"
   >[];
 };
 
-function daysUntilDate(dateStr: string | null): number | null {
-  if (!dateStr) return null;
-  const target = new Date(`${dateStr}T00:00:00+07:00`).getTime();
+function getJakartaTodayMs(): number {
   const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(
     new Date(),
   );
-  const today = new Date(`${todayStr}T00:00:00+07:00`).getTime();
-  return Math.round((target - today) / 86_400_000);
+  return new Date(`${todayStr}T00:00:00+07:00`).getTime();
+}
+
+function formatWibDateFromMs(ms: number): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date(ms));
+}
+
+function daysUntilDate(dateStr: string | null, todayMs: number): number | null {
+  if (!dateStr) return null;
+  const target = new Date(`${dateStr}T00:00:00+07:00`).getTime();
+  return Math.round((target - todayMs) / 86_400_000);
 }
 
 const ROLE_QUICK_TIPS: Record<
@@ -288,26 +325,75 @@ async function loadDashboardMetrics(
   userId: string,
   role: Role,
   periodCode: string,
+  todayMs: number,
 ): Promise<DashboardMetrics> {
   const supabase = await createClient();
   const isStaff = role === "STAFF";
+  const sevenDaysLaterWib = formatWibDateFromMs(todayMs + 7 * 86_400_000);
 
-  const itemsQuery = supabase
-    .from("items_master")
-    .select("id, asset_type, condition, hygiene_status, stock_qty, min_stock_threshold", {
-      count: "exact",
-    })
-    .is("deleted_at", null);
+  const itemsQuery = isStaff
+    ? supabase
+        .from("items_master")
+        .select(
+          "id, item_code, name, asset_type, condition, hygiene_status, stock_qty, min_stock_threshold",
+          { count: "exact" },
+        )
+        .is("deleted_at", null)
+        .then((res) => ({
+          data: (res.data ?? []) as DashboardItemRow[],
+          count: res.count,
+          error: res.error,
+        }))
+    : supabase
+        .from("items_master")
+        .select("asset_type, condition, hygiene_status, stock_qty, min_stock_threshold", {
+          count: "exact",
+        })
+        .is("deleted_at", null)
+        .then((res) => ({
+          data: (res.data ?? []) as DashboardItemRow[],
+          count: res.count,
+          error: res.error,
+        }));
 
-  const borrowsBase = supabase
-    .from("borrow_transactions")
-    .select("id, transaction_code, item_id, kit_id, room_code, borrowed_at, status", {
-      count: "exact",
-    })
-    .in("status", ["DIPINJAM", "TERLAMBAT"])
-    .order("borrowed_at", { ascending: false });
-
-  const borrowsQuery = isStaff ? borrowsBase.eq("borrower_id", userId).limit(5) : borrowsBase;
+  const borrowsQuery = isStaff
+    ? supabase
+        .from("borrow_transactions")
+        .select("id, transaction_code, item_id, kit_id, room_code, borrowed_at, status", {
+          count: "exact",
+        })
+        .in("status", ["DIPINJAM", "TERLAMBAT"])
+        .eq("borrower_id", userId)
+        .order("borrowed_at", { ascending: false })
+        .limit(5)
+        .then((res) => {
+          const rows = (res.data ?? []) as StaffActiveBorrowRow[];
+          let overdueCount = 0;
+          for (const b of rows) {
+            if (b.status === "TERLAMBAT") overdueCount += 1;
+          }
+          return {
+            staffRows: rows,
+            overdueCount,
+            totalCount: res.count ?? rows.length,
+          };
+        })
+    : supabase
+        .from("borrow_transactions")
+        .select("status", { count: "exact" })
+        .in("status", ["DIPINJAM", "TERLAMBAT"])
+        .then((res) => {
+          const rows = res.data ?? [];
+          let overdueCount = 0;
+          for (const b of rows) {
+            if (b.status === "TERLAMBAT") overdueCount += 1;
+          }
+          return {
+            staffRows: [] as StaffActiveBorrowRow[],
+            overdueCount,
+            totalCount: res.count ?? rows.length,
+          };
+        });
 
   const archivesQuery = supabase
     .from("archives_hybrid")
@@ -316,17 +402,60 @@ async function loadDashboardMetrics(
 
   const requestsBase = supabase
     .from("internal_requests")
-    .select("id, status")
+    .select("status")
     .is("deleted_at", null)
     .in("status", ["MENUNGGU_TEAM_LEADER", "MENUNGGU_ADMIN", "MENUNGGU_OWNER"]);
 
   const requestsQuery = isStaff ? requestsBase.eq("requested_by", userId) : requestsBase;
 
-  const [itemsRes, borrowsRes, archivesRes, requestsRes] = await Promise.all([
+  const [
+    itemsRes,
+    borrowsRes,
+    archivesRes,
+    requestsRes,
+    activeDeliveries,
+    expiringSubscriptions,
+    reconciliation,
+    recentAudits,
+  ] = await Promise.all([
     itemsQuery,
     borrowsQuery,
     archivesQuery,
     requestsQuery,
+    can(role, "delivery.view")
+      ? supabase
+          .from("deliveries_log")
+          .select("id", { count: "exact", head: true })
+          .is("deleted_at", null)
+          .in("status", ["DRAFT", "DIKEMAS", "DALAM_PERJALANAN"])
+          .then((res) => res.count ?? 0)
+      : Promise.resolve(0),
+    can(role, "vault.view_limited")
+      ? supabase
+          .from("subscriptions_vault_directory")
+          .select("id, sub_code, service_name, login_email, renewal_date")
+          .eq("is_active", true)
+          .not("renewal_date", "is", null)
+          .lte("renewal_date", sevenDaysLaterWib)
+          .order("renewal_date", { ascending: true })
+          .then((res) => (res.data ?? []) as ExpiringSubscriptionRow[])
+      : Promise.resolve([] as ExpiringSubscriptionRow[]),
+    can(role, "reconciliation.submit")
+      ? supabase
+          .from("monthly_reconciliations")
+          .select("opname_progress_pct, pre_update_backup_id, approved_by_leader, locked_at")
+          .eq("period_ym", periodCode)
+          .maybeSingle()
+          .then((res) => (res.data ?? null) as DashboardReconciliationSummary | null)
+      : Promise.resolve(null as DashboardReconciliationSummary | null),
+    can(role, "audit.view")
+      ? supabase
+          .from("audit_logs")
+          .select("id, actor_name, entity_code, summary, created_at")
+          .order("created_at", { ascending: false })
+          .limit(8)
+          .then((res) => res.data ?? [])
+      : Promise.resolve([] as DashboardMetrics["recentAudits"]),
   ]);
 
   if (itemsRes.error) {
@@ -353,48 +482,76 @@ async function loadDashboardMetrics(
     };
   }
 
-  const items = itemsRes.data ?? [];
-  const partKurangCount = items.filter((item) => item.condition === "PART_KURANG").length;
-  const damagedCount = items.filter(
-    (item) =>
-      item.condition === "PART_KURANG" ||
-      item.condition === "RUSAK_RINGAN" ||
-      item.condition === "RUSAK_BERAT",
-  ).length;
-  const needsSanitationCount = items.filter(
-    (item) => item.asset_type === "THERAPY_TOY" && item.hygiene_status !== "STERIL",
-  ).length;
-  const lowStockCount = items.filter(
-    (item) =>
+  const items = itemsRes.data;
+  let partKurangCount = 0;
+  let damagedCount = 0;
+  let needsSanitationCount = 0;
+  let lowStockCount = 0;
+
+  for (const item of items) {
+    if (item.condition === "PART_KURANG") {
+      partKurangCount += 1;
+      damagedCount += 1;
+    } else if (item.condition === "RUSAK_RINGAN" || item.condition === "RUSAK_BERAT") {
+      damagedCount += 1;
+    }
+    if (item.asset_type === "THERAPY_TOY" && item.hygiene_status !== "STERIL") {
+      needsSanitationCount += 1;
+    }
+    if (
       item.asset_type === "CONSUMABLE" &&
       item.min_stock_threshold > 0 &&
-      item.stock_qty <= item.min_stock_threshold,
-  ).length;
-
-  const activeBorrows = borrowsRes.data ?? [];
-  const overdueBorrowsCount = activeBorrows.filter((b) => b.status === "TERLAMBAT").length;
+      item.stock_qty <= item.min_stock_threshold
+    ) {
+      lowStockCount += 1;
+    }
+  }
 
   let myActiveBorrows: ActiveBorrowPreview[] = [];
-  if (isStaff && activeBorrows.length > 0) {
-    const itemIds = Array.from(
-      new Set(activeBorrows.map((b) => b.item_id).filter((id): id is string => Boolean(id))),
+  if (isStaff && borrowsRes.staffRows.length > 0) {
+    const neededItemIds = new Set(
+      borrowsRes.staffRows
+        .map((b) => b.item_id)
+        .filter((id): id is string => Boolean(id)),
     );
+    const itemMap = new Map<string, { item_code: string; name: string }>();
+    if (neededItemIds.size > 0) {
+      for (const item of items) {
+        if (item.id && neededItemIds.has(item.id) && item.item_code && item.name) {
+          itemMap.set(item.id, { item_code: item.item_code, name: item.name });
+        }
+      }
+    }
+
+    const missingItemIds = Array.from(neededItemIds).filter((id) => !itemMap.has(id));
     const kitIds = Array.from(
-      new Set(activeBorrows.map((b) => b.kit_id).filter((id): id is string => Boolean(id))),
+      new Set(
+        borrowsRes.staffRows
+          .map((b) => b.kit_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
     );
-    const [bItemsRes, bKitsRes] = await Promise.all([
-      itemIds.length > 0
-        ? supabase.from("items_master").select("id, item_code, name").in("id", itemIds)
-        : Promise.resolve({ data: [] }),
-      kitIds.length > 0
-        ? supabase.from("item_kits").select("id, kit_code, kit_name").in("id", kitIds)
-        : Promise.resolve({ data: [] }),
-    ]);
 
-    const itemMap = new Map((bItemsRes.data ?? []).map((i) => [i.id, i]));
-    const kitMap = new Map((bKitsRes.data ?? []).map((k) => [k.id, k]));
+    const kitMap = new Map<string, { kit_code: string; kit_name: string }>();
+    if (missingItemIds.length > 0 || kitIds.length > 0) {
+      const [bItemsRes, bKitsRes] = await Promise.all([
+        missingItemIds.length > 0
+          ? supabase.from("items_master").select("id, item_code, name").in("id", missingItemIds)
+          : Promise.resolve({ data: [] }),
+        kitIds.length > 0
+          ? supabase.from("item_kits").select("id, kit_code, kit_name").in("id", kitIds)
+          : Promise.resolve({ data: [] }),
+      ]);
 
-    myActiveBorrows = activeBorrows.map((b) => {
+      for (const i of bItemsRes.data ?? []) {
+        itemMap.set(i.id, { item_code: i.item_code, name: i.name });
+      }
+      for (const k of bKitsRes.data ?? []) {
+        kitMap.set(k.id, { kit_code: k.kit_code, kit_name: k.kit_name });
+      }
+    }
+
+    myActiveBorrows = borrowsRes.staffRows.map((b) => {
       const it = b.item_id ? itemMap.get(b.item_id) : undefined;
       const kt = b.kit_id ? kitMap.get(b.kit_id) : undefined;
       return {
@@ -410,51 +567,14 @@ async function loadDashboardMetrics(
   }
 
   const pendingReqRows = requestsRes.data ?? [];
-  const pendingLeaderRequests = pendingReqRows.filter(
-    (r) => r.status === "MENUNGGU_TEAM_LEADER",
-  ).length;
-  const pendingAdminRequests = pendingReqRows.filter((r) => r.status === "MENUNGGU_ADMIN").length;
-  const pendingOwnerRequests = pendingReqRows.filter((r) => r.status === "MENUNGGU_OWNER").length;
-
-  const [activeDeliveries, expiringSubscriptions, reconciliation, recentAudits] = await Promise.all([
-    can(role, "delivery.view")
-      ? supabase
-          .from("deliveries_log")
-          .select("id", { count: "exact", head: true })
-          .is("deleted_at", null)
-          .in("status", ["DRAFT", "DIKEMAS", "DALAM_PERJALANAN"])
-          .then((res) => res.count ?? 0)
-      : Promise.resolve(0),
-    can(role, "vault.view_limited")
-      ? supabase
-          .from("subscriptions_vault_directory")
-          .select("*")
-          .eq("is_active", true)
-          .order("renewal_date", { ascending: true })
-          .then((res) =>
-            (res.data ?? []).filter((sub) => {
-              const diff = daysUntilDate(sub.renewal_date);
-              return diff !== null && diff <= 7;
-            }),
-          )
-      : Promise.resolve([] as SubscriptionDirectoryRow[]),
-    can(role, "reconciliation.submit")
-      ? supabase
-          .from("monthly_reconciliations")
-          .select("*")
-          .eq("period_ym", periodCode)
-          .maybeSingle()
-          .then((res) => res.data ?? null)
-      : Promise.resolve(null as MonthlyReconciliation | null),
-    can(role, "audit.view")
-      ? supabase
-          .from("audit_logs")
-          .select("id, actor_name, action, entity_type, entity_code, summary, created_at")
-          .order("created_at", { ascending: false })
-          .limit(8)
-          .then((res) => res.data ?? [])
-      : Promise.resolve([] as DashboardMetrics["recentAudits"]),
-  ]);
+  let pendingLeaderRequests = 0;
+  let pendingAdminRequests = 0;
+  let pendingOwnerRequests = 0;
+  for (const r of pendingReqRows) {
+    if (r.status === "MENUNGGU_TEAM_LEADER") pendingLeaderRequests += 1;
+    else if (r.status === "MENUNGGU_ADMIN") pendingAdminRequests += 1;
+    else if (r.status === "MENUNGGU_OWNER") pendingOwnerRequests += 1;
+  }
 
   return {
     schemaReady: true,
@@ -463,8 +583,8 @@ async function loadDashboardMetrics(
     damagedCount,
     needsSanitationCount,
     lowStockCount,
-    activeBorrowsCount: borrowsRes.count ?? activeBorrows.length,
-    overdueBorrowsCount,
+    activeBorrowsCount: borrowsRes.totalCount,
+    overdueBorrowsCount: borrowsRes.overdueCount,
     myActiveBorrows,
     totalArchives: archivesRes.count ?? 0,
     activeDeliveries,
@@ -483,10 +603,16 @@ export default async function DashboardPage() {
   const period = getMonthlyUpdatePeriod();
   const greeting = getJakartaGreeting();
   const todayLabel = formatJakartaDate();
-  const metrics = await loadDashboardMetrics(user.id, user.role, period.periodCode);
+  const todayMs = getJakartaTodayMs();
+  const metrics = await loadDashboardMetrics(user.id, user.role, period.periodCode, todayMs);
   const roleTip = ROLE_QUICK_TIPS[user.role];
   const visibleActions = roleTip.actions.filter((act) => canAccessRoute(user.role, act.href));
   const quickShortcuts = getQuickShortcutTiles(user.role);
+  const auditTimeFormatter = new Intl.DateTimeFormat("id-ID", {
+    timeZone: "Asia/Jakarta",
+    dateStyle: "short",
+    timeStyle: "short",
+  });
 
   const isStaff = user.role === "STAFF";
   const isTeamLeader = user.role === "TEAM_LEADER";
@@ -1161,7 +1287,7 @@ export default async function DashboardPage() {
                 ) : (
                   <ul className="space-y-2.5 text-sm">
                     {metrics.expiringSubscriptions.map((sub) => {
-                      const days = daysUntilDate(sub.renewal_date);
+                      const days = daysUntilDate(sub.renewal_date, todayMs);
                       return (
                         <li
                           key={sub.id}
@@ -1354,12 +1480,7 @@ export default async function DashboardPage() {
                         </div>
                       </div>
                       <time className="shrink-0 self-start rounded-full border border-[#2C2623]/30 bg-[#FFFDF7] px-2.5 py-0.5 text-[11px] font-bold text-[#574E49] sm:self-center dark:border-stone-600 dark:bg-stone-900 dark:text-stone-300">
-                        {new Intl.DateTimeFormat("id-ID", {
-                          timeZone: "Asia/Jakarta",
-                          dateStyle: "short",
-                          timeStyle: "short",
-                        }).format(new Date(log.created_at))}{" "}
-                        WIB
+                        {auditTimeFormatter.format(new Date(log.created_at))} WIB
                       </time>
                     </li>
                   );

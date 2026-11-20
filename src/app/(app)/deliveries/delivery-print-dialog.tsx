@@ -2,8 +2,9 @@
 
 import "./print.css";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import dynamic from "next/dynamic";
 import {
   AlertTriangle,
   Download,
@@ -34,9 +35,23 @@ import {
   formatDateWIB,
 } from "@/lib/constants";
 import type { DeliveryLog } from "@/types/database";
-import { DeliveryBarcode } from "./delivery-barcode";
 import { parseDeliveryPayloadItems } from "./helpers";
 import type { BastExtraMeta, DeliveryDocType } from "./pdf-documents";
+
+type ParsedDeliveryItems = ReturnType<typeof parseDeliveryPayloadItems>;
+
+const DeliveryBarcode = dynamic(
+  () => import("./delivery-barcode").then((mod) => mod.DeliveryBarcode),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        aria-hidden="true"
+        className="h-7 w-36 animate-pulse rounded bg-slate-200/70"
+      />
+    ),
+  },
+);
 
 type DeliveryPrintDialogProps = {
   open: boolean;
@@ -49,12 +64,13 @@ function DocumentSheetContent({
   docType,
   delivery,
   bastMeta,
+  items,
 }: {
   docType: DeliveryDocType;
   delivery: DeliveryLog;
   bastMeta: BastExtraMeta;
+  items: ParsedDeliveryItems;
 }) {
-  const items = parseDeliveryPayloadItems(delivery.items_payload_json);
   const briefItems =
     items.length > 0
       ? items
@@ -519,6 +535,12 @@ export function DeliveryPrintDialog({
     }
   }, [open, initialTab, delivery]);
 
+  const itemsPayload = delivery?.items_payload_json;
+  const parsedItems = useMemo(
+    () => (itemsPayload !== undefined ? parseDeliveryPayloadItems(itemsPayload) : []),
+    [itemsPayload],
+  );
+
   if (!delivery) return null;
 
   const bastMeta: BastExtraMeta = {
@@ -700,6 +722,7 @@ export function DeliveryPrintDialog({
                 docType={activeTab}
                 delivery={delivery}
                 bastMeta={bastMeta}
+                items={parsedItems}
               />
             </div>
           </Tabs>
@@ -717,6 +740,7 @@ export function DeliveryPrintDialog({
               docType={activeTab}
               delivery={delivery}
               bastMeta={bastMeta}
+              items={parsedItems}
             />
           </div>,
           document.body,

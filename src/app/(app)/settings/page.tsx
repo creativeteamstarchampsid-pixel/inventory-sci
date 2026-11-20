@@ -52,25 +52,7 @@ export default async function SettingsPage() {
   const supabase = await createClient();
   const canManageUsers = can(user.role, "users.manage");
 
-  const ownProfileRes = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-
-  const ownProfile: Profile = ownProfileRes.data ?? {
-    id: user.id,
-    full_name: user.fullName,
-    email: user.email,
-    role: user.role,
-    is_active: user.isActive,
-    phone: null,
-    job_title: null,
-    offboarded_at: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-
+  let ownProfileData: Profile | null = null;
   let users: Profile[] = [];
   let offboardVaultWarnings: OffboardVaultWarning[] = [];
   const serviceRoleConfigured = canManageUsers
@@ -81,7 +63,8 @@ export default async function SettingsPage() {
     : false;
 
   if (canManageUsers) {
-    const [usersRes, subsRes] = await Promise.all([
+    const [ownProfileRes, usersRes, subsRes] = await Promise.all([
+      supabase.from("profiles").select("*").eq("id", user.id).single(),
       supabase
         .from("profiles")
         .select("*")
@@ -93,6 +76,8 @@ export default async function SettingsPage() {
     ]);
 
     users = (usersRes.data ?? []) as Profile[];
+    ownProfileData =
+      ownProfileRes.data ?? users.find((u) => u.id === user.id) ?? null;
     const activeSubs = subsRes.data ?? [];
 
     offboardVaultWarnings = users
@@ -107,7 +92,27 @@ export default async function SettingsPage() {
         };
       })
       .filter((w) => w.subscriptionCodes.length > 0);
+  } else {
+    const ownProfileRes = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .single();
+    ownProfileData = ownProfileRes.data ?? null;
   }
+
+  const ownProfile: Profile = ownProfileData ?? {
+    id: user.id,
+    full_name: user.fullName,
+    email: user.email,
+    role: user.role,
+    is_active: user.isActive,
+    phone: null,
+    job_title: null,
+    offboarded_at: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
 
   return (
     <SettingsClient

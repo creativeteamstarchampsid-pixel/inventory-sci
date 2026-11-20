@@ -1,8 +1,10 @@
 "use client";
 
+import type { MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
 import { KawaiiMascotSvg, KawaiiNavIcon } from "@/components/cartoon/kawaii-icons";
 import { useRole } from "@/components/rbac/role-provider";
 import {
@@ -54,10 +56,36 @@ export function AppSidebar() {
   const pathname = usePathname();
   const { role } = useRole();
   const { isMobile, setOpenMobile } = useSidebar();
+  const { showNavigating } = useCartoonFeedback();
   const groups = getNavGroupsForRole(role);
 
   const closeOnMobile = () => {
     if (isMobile) setOpenMobile(false);
+  };
+
+  const handleNavClick = (
+    event: MouseEvent<HTMLAnchorElement>,
+    href: string,
+    title: string,
+    shouldNavigate: boolean,
+  ) => {
+    closeOnMobile();
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    if (shouldNavigate || pathname !== href) {
+      showNavigating({
+        title: `Membuka ${title}...`,
+        subMessage: `Menuju: ${title}`,
+      });
+    }
   };
 
   return (
@@ -74,7 +102,13 @@ export function AppSidebar() {
               tooltip="StarOps — Star Champs Indonesia"
               className="group/brand rounded-2xl border-2 border-[#2C2623] bg-[linear-gradient(135deg,#D8F8E7_0%,#FFFDF7_55%,#FEF3C7_100%)] text-[#2C2623] shadow-[2.5px_2.5px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#C6F6DC_0%,#FFFDF7_55%,#FDE68A_100%)] hover:shadow-[3.5px_3.5px_0px_0px_#2C2623] active:translate-x-[1px] active:translate-y-[1px] active:scale-[0.98] active:shadow-none group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:shadow-none dark:border-[#6D5D54] dark:bg-[linear-gradient(135deg,#1D352B_0%,#28221F_55%,#3A311E_100%)] dark:text-[#FDF8F0] dark:shadow-[2.5px_2.5px_0px_0px_#0E0B0A] dark:hover:shadow-[3.5px_3.5px_0px_0px_#0E0B0A]"
             >
-              <Link href="/dashboard" onClick={closeOnMobile} aria-label="Beranda StarOps">
+              <Link
+                href="/dashboard"
+                onClick={(e) =>
+                  handleNavClick(e, "/dashboard", "Beranda", pathname !== "/dashboard")
+                }
+                aria-label="Beranda StarOps"
+              >
                 <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/brand:scale-110 group-hover/brand:-rotate-6 dark:border-[#6D5D54] dark:bg-[#2C2522] dark:shadow-[1.5px_1.5px_0px_0px_#0E0B0A]">
                   <KawaiiMascotSvg type="dino" className="size-6.5" />
                 </div>
@@ -132,7 +166,12 @@ export function AppSidebar() {
                           : "border-transparent text-[#3D3430] hover:-translate-y-0.5 hover:border-[#2C2623]/45 hover:bg-[#FFF4D6]/85 hover:text-[#2C2623] hover:shadow-[2px_2px_0px_0px_#2C2623]/30 dark:text-[#E5D8CE] dark:hover:border-[#6D5D54]/65 dark:hover:bg-[#332B27] dark:hover:text-[#FDF8F0] dark:hover:shadow-[2px_2px_0px_0px_#0E0B0A]/50",
                       )}
                     >
-                      <Link href={item.href} onClick={closeOnMobile}>
+                      <Link
+                        href={item.href}
+                        onClick={(e) =>
+                          handleNavClick(e, item.href, item.title, !active)
+                        }
+                      >
                         <span
                           className={cn(
                             "flex size-7 shrink-0 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] transition-transform duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/nav:scale-110 group-hover/nav:-rotate-6 group-active/nav:scale-95 dark:border-[#6D5D54]",

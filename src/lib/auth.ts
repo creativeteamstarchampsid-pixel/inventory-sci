@@ -73,8 +73,8 @@ export async function requireUser(): Promise<CurrentUser> {
 }
 
 /**
- * Server-side route guard (defence in depth behind the middleware) for pages
- * and server actions: requires an active user allowed on `pathname`.
+ * Authoritative server-side route guard for pages and server actions:
+ * requires an active user with a valid profile allowed on `pathname`.
  */
 export async function requireRouteAccess(pathname: string): Promise<CurrentUser> {
   const user = await requireUser();

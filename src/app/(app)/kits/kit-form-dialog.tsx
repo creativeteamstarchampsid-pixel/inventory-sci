@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Search, Sparkles } from "lucide-react";
 
+import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ export function KitFormDialog({
   availableItems,
   onSaved,
 }: KitFormDialogProps) {
+  const { runWithFeedback } = useCartoonFeedback();
   const isEditing = Boolean(editingKit);
 
   const [kitName, setKitName] = useState(editingKit?.kit_name ?? "");
@@ -114,17 +116,36 @@ export function KitFormDialog({
         ...(isEditing ? { status } : {}),
       };
 
-      const res = editingKit
-        ? await updateKitAction(editingKit.id, payload)
-        : await createKitAction(payload);
+      try {
+        const res = await runWithFeedback(
+          {
+            mode: "working",
+            workingTitle: isEditing ? "Menyimpan Perubahan Kit..." : "Merangkai Paket Kit Baru...",
+            workingMessage: isEditing
+              ? `Dino Joguman lagi memperbarui komposisi ${editingKit?.kit_code ?? "kit"} (${selectedIds.length} item) nih~`
+              : `Dino Joguman lagi membungkus ${selectedIds.length} item jadi paket kit terapi baru~`,
+            successTitle: isEditing ? "Paket Kit Diperbarui! ✨" : "Kit Baru Siap Dipakai! 🎉",
+            successMessage: (result) =>
+              result.ok
+                ? result.message ??
+                  (isEditing ? "Data kit berhasil diperbarui!" : "Kit baru berhasil dibuat!")
+                : "",
+            errorTitle: isEditing ? "Gagal Memperbarui Kit..." : "Gagal Membuat Kit...",
+            isResultError: (result) => (!result.ok ? result.error : null),
+          },
+          () => (editingKit ? updateKitAction(editingKit.id, payload) : createKitAction(payload)),
+        );
 
-      if (!res.ok) {
-        setError(res.error);
-        return;
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+
+        onOpenChange(false);
+        onSaved?.(res.data, res.message);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Terjadi kesalahan saat menyimpan kit.");
       }
-
-      onOpenChange(false);
-      onSaved?.(res.data, res.message);
     });
   };
 
@@ -132,7 +153,16 @@ export function KitFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className="rounded-full border-[1.5px] border-[#2C2623] bg-[#EDE9FE] px-2.5 py-0.5 text-[11px] font-extrabold text-[#4C1D95] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-violet-950/70 dark:text-violet-200"
+            >
+              <Sparkles className="size-3" />
+              {isEditing ? editingKit?.kit_code : "Paket Kit Baru"}
+            </Badge>
+          </div>
+          <DialogTitle className="text-xl font-extrabold">
             {isEditing ? `Edit Kit (${editingKit?.kit_code})` : "Buat Kit Baru"}
           </DialogTitle>
           <DialogDescription>
@@ -144,14 +174,19 @@ export function KitFormDialog({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+            <Alert
+              variant="destructive"
+              className="rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] text-[#881337] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-rose-950/60 dark:text-rose-100"
+            >
+              <AlertDescription className="font-semibold">{error}</AlertDescription>
             </Alert>
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="kit-name">Nama Paket Kit *</Label>
+              <Label htmlFor="kit-name" className="font-bold">
+                Nama Paket Kit *
+              </Label>
               <Input
                 id="kit-name"
                 value={kitName}
@@ -159,17 +194,20 @@ export function KitFormDialog({
                 placeholder="Contoh: Kit Terapi Sensori Pagi R01"
                 required
                 disabled={isPending}
+                className="bg-white dark:bg-stone-900"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="kit-room">Ruangan Penempatan</Label>
+              <Label htmlFor="kit-room" className="font-bold">
+                Ruangan Penempatan
+              </Label>
               <Select
                 value={assignedRoom}
                 onValueChange={setAssignedRoom}
                 disabled={isPending}
               >
-                <SelectTrigger id="kit-room" className="w-full">
+                <SelectTrigger id="kit-room" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -185,13 +223,15 @@ export function KitFormDialog({
 
             {isEditing && (
               <div className="space-y-2">
-                <Label htmlFor="kit-status">Status Kit</Label>
+                <Label htmlFor="kit-status" className="font-bold">
+                  Status Kit
+                </Label>
                 <Select
                   value={status}
                   onValueChange={(v) => setStatus(v as KitStatus)}
                   disabled={isPending}
                 >
-                  <SelectTrigger id="kit-status" className="w-full">
+                  <SelectTrigger id="kit-status" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -206,7 +246,9 @@ export function KitFormDialog({
             )}
 
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="kit-desc">Deskripsi Paket</Label>
+              <Label htmlFor="kit-desc" className="font-bold">
+                Deskripsi Paket
+              </Label>
               <Textarea
                 id="kit-desc"
                 rows={2}
@@ -214,13 +256,14 @@ export function KitFormDialog({
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Catatan penggunaan kit atau sesi terapi…"
                 disabled={isPending}
+                className="rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900"
               />
             </div>
           </div>
 
-          <div className="space-y-2 rounded-lg border p-3">
+          <div className="space-y-2.5 rounded-2xl border-2 border-[#2C2623] bg-[#EDE9FE]/40 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-violet-950/25">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label className="text-sm font-medium">
+              <Label className="text-sm font-extrabold">
                 Pilih Item dalam Kit ({selectedIds.length} dipilih) *
               </Label>
               <div className="relative w-full sm:w-64">
@@ -229,14 +272,14 @@ export function KitFormDialog({
                   value={itemSearch}
                   onChange={(e) => setItemSearch(e.target.value)}
                   placeholder="Cari item…"
-                  className="h-8 pl-8 text-xs"
+                  className="h-8 bg-white pl-8 text-xs dark:bg-stone-900"
                 />
               </div>
             </div>
 
-            <div className="max-h-56 divide-y overflow-y-auto rounded-md border">
+            <div className="max-h-56 divide-y divide-[#2C2623]/10 overflow-y-auto rounded-xl border-2 border-[#2C2623]/25 bg-white dark:divide-stone-800 dark:border-stone-600 dark:bg-stone-900">
               {filteredItems.length === 0 ? (
-                <p className="text-muted-foreground p-4 text-center text-xs">
+                <p className="text-muted-foreground p-4 text-center text-xs font-medium">
                   Tidak ada item inventaris yang cocok.
                 </p>
               ) : (
@@ -245,7 +288,11 @@ export function KitFormDialog({
                   return (
                     <label
                       key={item.id}
-                      className="hover:bg-muted/50 flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-sm"
+                      className={`flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-sm transition-colors ${
+                        checked
+                          ? "bg-[#D1FAE5]/55 dark:bg-emerald-950/35"
+                          : "hover:bg-[#FEF3C7]/35 dark:hover:bg-stone-800/50"
+                      }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <Checkbox
@@ -254,14 +301,17 @@ export function KitFormDialog({
                           disabled={isPending}
                         />
                         <div>
-                          <p className="font-medium leading-tight">{item.name}</p>
+                          <p className="font-bold leading-tight">{item.name}</p>
                           <p className="text-muted-foreground font-mono text-xs">
                             {item.item_code} · {item.room_code}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <Badge variant="outline" className="font-mono text-[11px]">
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-[1.5px] border-[#2C2623] bg-[#FFFDF7] font-mono text-[11px] font-bold dark:border-stone-400 dark:bg-stone-900"
+                        >
                           {item.current_parts}/{item.total_parts} {item.unit_label}
                         </Badge>
                       </div>

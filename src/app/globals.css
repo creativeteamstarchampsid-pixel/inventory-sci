@@ -6,8 +6,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-cartoon), ui-rounded, "Hiragino Maru Gothic ProN", system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -37,6 +37,12 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-kawaii-ink: var(--kawaii-ink);
+  --color-kawaii-mint: var(--kawaii-mint);
+  --color-kawaii-sky: var(--kawaii-sky);
+  --color-kawaii-pink: var(--kawaii-pink);
+  --color-kawaii-butter: var(--kawaii-butter);
+  --color-kawaii-kraft: var(--kawaii-kraft);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -44,67 +50,92 @@
 }
 
 :root {
-  --radius: 0.75rem;
-  --background: oklch(0.988 0.005 250);
-  --foreground: oklch(0.18 0.03 258);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.03 258);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.03 258);
-  --primary: oklch(0.55 0.19 258);
-  --primary-foreground: oklch(0.99 0.002 247);
-  --secondary: oklch(0.955 0.02 252);
-  --secondary-foreground: oklch(0.32 0.08 258);
-  --muted: oklch(0.962 0.01 250);
-  --muted-foreground: oklch(0.48 0.03 256);
-  --accent: oklch(0.945 0.028 252);
-  --accent-foreground: oklch(0.3 0.08 258);
-  --destructive: oklch(0.58 0.22 25);
-  --border: oklch(0.915 0.014 252);
-  --input: oklch(0.91 0.014 252);
-  --ring: oklch(0.58 0.18 258);
-  --chart-1: oklch(0.58 0.19 258);
-  --chart-2: oklch(0.66 0.16 170);
-  --chart-3: oklch(0.74 0.16 75);
-  --chart-4: oklch(0.62 0.19 305);
-  --chart-5: oklch(0.65 0.2 20);
-  --sidebar: oklch(0.995 0.003 250);
-  --sidebar-foreground: oklch(0.24 0.035 256);
-  --sidebar-primary: oklch(0.55 0.19 258);
-  --sidebar-primary-foreground: oklch(0.99 0.002 247);
-  --sidebar-accent: oklch(0.95 0.022 254);
-  --sidebar-accent-foreground: oklch(0.28 0.08 258);
-  --sidebar-border: oklch(0.92 0.012 252);
-  --sidebar-ring: oklch(0.58 0.18 258);
+  --radius: 1rem;
+  /* Joguman Studio + Chiikawa 2D Sketchbook Palette */
+  --kawaii-ink: #2c2623;
+  --kawaii-mint: #2ab673;
+  --kawaii-sky: #7cc4fa;
+  --kawaii-pink: #fda4af;
+  --kawaii-butter: #fde68a;
+  --kawaii-kraft: #f5e9d6;
+
+  --background: #fffdf7;
+  --foreground: #2c2623;
+  --card: #ffffff;
+  --card-foreground: #2c2623;
+  --popover: #fffdf7;
+  --popover-foreground: #2c2623;
+  --primary: #2ab673;
+  --primary-foreground: #ffffff;
+  --secondary: #fde68a;
+  --secondary-foreground: #2c2623;
+  --muted: #f5e9d6;
+  --muted-foreground: #6b5e57;
+  --accent: #e0f2fe;
+  --accent-foreground: #2c2623;
+  --destructive: #ef5366;
+  --border: #e5d7c3;
+  --input: #d9c8b2;
+  --ring: #2ab673;
+
+  --chart-1: #2ab673;
+  --chart-2: #7cc4fa;
+  --chart-3: #fda4af;
+  --chart-4: #fde68a;
+  --chart-5: #c4b5fd;
+
+  --sidebar: #fff9ec;
+  --sidebar-foreground: #2c2623;
+  --sidebar-primary: #2ab673;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #fef3c7;
+  --sidebar-accent-foreground: #2c2623;
+  --sidebar-border: #e5d7c3;
+  --sidebar-ring: #2ab673;
 }
 
 .dark {
-  --background: oklch(0.15 0.022 258);
-  --foreground: oklch(0.97 0.006 248);
-  --card: oklch(0.195 0.025 258);
-  --card-foreground: oklch(0.97 0.006 248);
-  --popover: oklch(0.195 0.025 258);
-  --popover-foreground: oklch(0.97 0.006 248);
-  --primary: oklch(0.68 0.16 254);
-  --primary-foreground: oklch(0.15 0.025 258);
-  --secondary: oklch(0.25 0.03 258);
-  --secondary-foreground: oklch(0.97 0.006 248);
-  --muted: oklch(0.24 0.024 258);
-  --muted-foreground: oklch(0.72 0.02 250);
-  --accent: oklch(0.27 0.035 256);
-  --accent-foreground: oklch(0.97 0.006 248);
-  --destructive: oklch(0.7 0.19 22);
-  --border: oklch(1 0 0 / 11%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.65 0.15 254);
-  --sidebar: oklch(0.175 0.024 258);
-  --sidebar-foreground: oklch(0.95 0.006 248);
-  --sidebar-primary: oklch(0.68 0.16 254);
-  --sidebar-primary-foreground: oklch(0.15 0.025 258);
-  --sidebar-accent: oklch(0.24 0.032 258);
-  --sidebar-accent-foreground: oklch(0.97 0.006 248);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.65 0.15 254);
+  /* Cozy Warm Dark Sketchbook Theme */
+  --kawaii-ink: #6d5d54;
+  --kawaii-mint: #4ade9b;
+  --kawaii-sky: #7cc4fa;
+  --kawaii-pink: #fda4af;
+  --kawaii-butter: #fde68a;
+  --kawaii-kraft: #332b27;
+
+  --background: #1e1a18;
+  --foreground: #fdf8f0;
+  --card: #28221f;
+  --card-foreground: #fdf8f0;
+  --popover: #2c2522;
+  --popover-foreground: #fdf8f0;
+  --primary: #4ade9b;
+  --primary-foreground: #1b1715;
+  --secondary: #433728;
+  --secondary-foreground: #fde68a;
+  --muted: #332b27;
+  --muted-foreground: #c8b9ae;
+  --accent: #362e2a;
+  --accent-foreground: #fdf8f0;
+  --destructive: #fb7185;
+  --border: #524640;
+  --input: #5a4d46;
+  --ring: #4ade9b;
+
+  --chart-1: #4ade9b;
+  --chart-2: #7cc4fa;
+  --chart-3: #fda4af;
+  --chart-4: #fde68a;
+  --chart-5: #c4b5fd;
+
+  --sidebar: #231e1b;
+  --sidebar-foreground: #fdf8f0;
+  --sidebar-primary: #4ade9b;
+  --sidebar-primary-foreground: #1b1715;
+  --sidebar-accent: #352d28;
+  --sidebar-accent-foreground: #fdf8f0;
+  --sidebar-border: #524640;
+  --sidebar-ring: #4ade9b;
 }
 
 @layer base {
@@ -115,6 +146,113 @@
     @apply bg-background text-foreground font-sans;
   }
 }
+
+/* ==========================================================================
+   2D Japanese Cartoon Reusable Surfaces & Comic Shadows (Joguman + Chiikawa)
+   ========================================================================== */
+
+.kawaii-shadow {
+  box-shadow: 4px 4px 0px 0px #2c2623;
+}
+
+.dark .kawaii-shadow {
+  box-shadow: 4px 4px 0px 0px #0e0b0a;
+}
+
+.kawaii-shadow-sm {
+  box-shadow: 2.5px 2.5px 0px 0px #2c2623;
+}
+
+.dark .kawaii-shadow-sm {
+  box-shadow: 2.5px 2.5px 0px 0px #0e0b0a;
+}
+
+.kawaii-card {
+  border-radius: 1.25rem;
+  border: 2px solid #2c2623;
+  background-color: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 3px 3px 0px 0px #2c2623;
+}
+
+.dark .kawaii-card {
+  border-color: #5e5048;
+  box-shadow: 3px 3px 0px 0px #0e0b0a;
+}
+
+.kawaii-card-hover {
+  transition:
+    transform 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 150ms ease;
+}
+
+.kawaii-card-hover:hover {
+  transform: translate(-1.5px, -1.5px);
+  box-shadow: 5px 5px 0px 0px #2c2623;
+}
+
+.dark .kawaii-card-hover:hover {
+  box-shadow: 5px 5px 0px 0px #0e0b0a;
+}
+
+.kawaii-card-hover:active {
+  transform: translate(1.5px, 1.5px);
+  box-shadow: 1px 1px 0px 0px #2c2623;
+}
+
+.dark .kawaii-card-hover:active {
+  box-shadow: 1px 1px 0px 0px #0e0b0a;
+}
+
+.kawaii-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 9999px;
+  border: 1.5px solid #2c2623;
+  box-shadow: 2px 2px 0px 0px #2c2623;
+  font-weight: 800;
+}
+
+.dark .kawaii-pill {
+  border-color: #6d5d54;
+  box-shadow: 2px 2px 0px 0px #0e0b0a;
+}
+
+.kawaii-paper-bg {
+  background-color: #fffdf7;
+  background-image:
+    radial-gradient(circle at 12% 10%, rgba(124, 196, 250, 0.14), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(253, 230, 138, 0.18), transparent 34%),
+    radial-gradient(circle at 85% 88%, rgba(42, 182, 115, 0.11), transparent 36%),
+    radial-gradient(circle at 10% 90%, rgba(253, 164, 175, 0.13), transparent 34%),
+    radial-gradient(rgba(168, 146, 124, 0.24) 1.25px, transparent 1.25px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    24px 24px;
+}
+
+.dark .kawaii-paper-bg {
+  background-color: #1e1a18;
+  background-image:
+    radial-gradient(circle at 12% 10%, rgba(124, 196, 250, 0.06), transparent 36%),
+    radial-gradient(circle at 88% 12%, rgba(253, 230, 138, 0.06), transparent 36%),
+    radial-gradient(circle at 85% 88%, rgba(74, 222, 155, 0.06), transparent 38%),
+    radial-gradient(rgba(214, 196, 180, 0.09) 1.2px, transparent 1.2px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    24px 24px;
+}
+
+/* ==========================================================================
+   Existing Login 2D Animations (Kept 100% Intact)
+   ========================================================================== */
 
 @keyframes float2d {
   0%,
@@ -226,4 +364,144 @@
 
 .animate-scan-2d {
   animation: scanLaser2d 2.4s ease-in-out infinite;
+}
+
+/* ==========================================================================
+   New Kawaii Cartoon Micro-Animations
+   ========================================================================== */
+
+@keyframes kawaiiPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.88) translateY(8px);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.03) translateY(-2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0px);
+  }
+}
+
+@keyframes kawaiiWiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-5deg);
+  }
+  75% {
+    transform: rotate(5deg);
+  }
+}
+
+@keyframes kawaiiBounce {
+  0%,
+  100% {
+    transform: translateY(0px) scale(1, 1);
+  }
+  30% {
+    transform: translateY(-7px) scale(0.96, 1.05);
+  }
+  60% {
+    transform: translateY(0px) scale(1.04, 0.96);
+  }
+}
+
+@keyframes kawaiiZzz {
+  0% {
+    opacity: 0;
+    transform: translate(0px, 4px) scale(0.75) rotate(-8deg);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(12px, -22px) scale(1.18) rotate(10deg);
+  }
+}
+
+@keyframes kawaiiRain {
+  0% {
+    opacity: 0;
+    transform: translate(0px, -10px);
+  }
+  25% {
+    opacity: 0.95;
+  }
+  85% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-6px, 22px);
+  }
+}
+
+.animate-kawaii-pop {
+  animation: kawaiiPop 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-kawaii-wiggle {
+  animation: kawaiiWiggle 2.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.animate-kawaii-bounce {
+  animation: kawaiiBounce 1.8s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+.animate-kawaii-zzz {
+  animation: kawaiiZzz 2.6s ease-in-out infinite;
+}
+
+.animate-kawaii-rain {
+  animation: kawaiiRain 1.4s linear infinite;
+}
+
+/* ==========================================================================
+   Clean Print Mode (Disable cartoon shadows, paper dots & animations)
+   ========================================================================== */
+
+@media print {
+  .kawaii-paper-bg {
+    background: #ffffff !important;
+    background-image: none !important;
+  }
+
+  .kawaii-shadow,
+  .kawaii-shadow-sm,
+  .kawaii-card,
+  .kawaii-card-hover,
+  .kawaii-pill {
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  .kawaii-card {
+    border-width: 1px !important;
+    border-color: #d4d4d4 !important;
+    background-color: #ffffff !important;
+  }
+
+  .animate-float-2d,
+  .animate-float-2d-slow,
+  .animate-float-2d-reverse,
+  .animate-cloud-2d,
+  .animate-twinkle-2d,
+  .animate-wave-2d,
+  .animate-blink-2d,
+  .animate-scan-2d,
+  .animate-kawaii-pop,
+  .animate-kawaii-wiggle,
+  .animate-kawaii-bounce,
+  .animate-kawaii-zzz,
+  .animate-kawaii-rain {
+    animation: none !important;
+  }
 }

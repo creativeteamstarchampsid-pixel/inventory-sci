@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowDownToLine,
@@ -11,11 +12,19 @@ import {
   FileText,
   GitCompare,
   Lock,
+  PackageCheck,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 
+import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
+import {
+  KawaiiEmptyState,
+  KawaiiPageHeader,
+  KawaiiStatCard,
+} from "@/components/cartoon/kawaii-decor";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -149,6 +158,35 @@ function formatDeltaBadge(delta: number, isCurrency = false) {
   );
 }
 
+async function downloadFromEndpoint(url: string, fallbackFilename: string) {
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (!response.ok) {
+    let message = `Gagal mengunduh file (HTTP ${response.status}).`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      // Ignore non-JSON error body
+    }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const match = /filename="?([^";]+)"?/i.exec(disposition);
+  const filename = match?.[1] || fallbackFilename;
+
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
+  return filename;
+}
+
 export function BackupClient({
   period,
   reconciliation: initialReconciliation,
@@ -156,6 +194,8 @@ export function BackupClient({
   roomStats,
   backups,
 }: BackupClientProps) {
+  const router = useRouter();
+  const { runWithFeedback } = useCartoonFeedback();
   const { user, role, can } = useRole();
   const canExportFinancial = can("export.financial");
   const canSubmitOpname = can("reconciliation.submit");
@@ -197,14 +237,89 @@ export function BackupClient({
     return m;
   }, [roomStats]);
 
+  const checkedRoomCount = useMemo(
+    () => OPNAME_ROOM_CODES.filter((code) => checklist[code]?.checked).length,
+    [checklist],
+  );
+
+  const totalItemsAcrossRooms = useMemo(
+    () => roomStats.reduce((sum, s) => sum + s.totalItems, 0),
+    [roomStats],
+  );
+
+  const totalAnomaliesAcrossRooms = useMemo(
+    () => roomStats.reduce((sum, s) => sum + s.anomalyCount, 0),
+    [roomStats],
+  );
+
+  const handleDirectExport = (
+    format: "csv" | "xlsx" | "pdf",
+    url: string,
+    fallbackFilename: string,
+    label: string,
+  ) => {
+    setFeedback(null);
+    startTransition(async () => {
+      try {
+        const filename = await runWithFeedback(
+          {
+            mode: "batch",
+            workingTitle: `Menyiapkan Ekspor ${label}... 📦`,
+            workingMessage: `Tim mini lagi merangkai laporan ${label} periode ${period.periodLabel} biar lengkap dan rapi. Tunggu sebentar ya~`,
+            successTitle: `Ekspor ${label} Siap! ♪`,
+            successMessage: (name) =>
+              `Yeay! Berkas ${name} sudah selesai diunduh ke perangkatmu~`,
+            errorTitle: `Yah, Ekspor ${label} Gagal...`,
+            errorMessage: (err) =>
+              err instanceof Error
+                ? err.message
+                : `Gagal mengunduh laporan ${label}. Coba lagi ya!`,
+          },
+          () => downloadFromEndpoint(url, fallbackFilename),
+        );
+        setFeedback({
+          type: "success",
+          message: `Berkas ${filename} berhasil diunduh.`,
+        });
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          message:
+            err instanceof Error
+              ? err.message
+              : `Gagal mengunduh laporan ${format.toUpperCase()}.`,
+        });
+      }
+    });
+  };
+
   const handleToggleRoom = (roomCode: LocationCode, checked: boolean) => {
     setFeedback(null);
     startTransition(async () => {
-      const res = await toggleOpnameRoomChecklist({
-        periodYm: period.periodCode,
-        roomCode,
-        checked,
-      });
+      const res = await runWithFeedback(
+        {
+          mode: "working",
+          workingTitle: checked
+            ? `Menandai Opname ${roomCode}... ✅`
+            : `Membuka Checklist ${roomCode}... ✏️`,
+          workingMessage: `Dino Joguman lagi mencatat status cek ruangan ${LOCATION_LABELS[roomCode]} biar progres bulan ini makin rapi~`,
+          successTitle: checked
+            ? `Ruang ${roomCode} Beres Dicek! ✨`
+            : `Checklist ${roomCode} Diperbarui`,
+          successMessage: (result) =>
+            result.ok
+              ? (result.message ?? `Opname ${roomCode} berhasil diperbarui.`)
+              : "",
+          errorTitle: `Gagal Memperbarui ${roomCode}`,
+          isResultError: (result) => (!result.ok ? result.error : null),
+        },
+        () =>
+          toggleOpnameRoomChecklist({
+            periodYm: period.periodCode,
+            roomCode,
+            checked,
+          }),
+      );
       if (!res.ok) {
         setFeedback({ type: "error", message: res.error });
         return;
@@ -222,12 +337,36 @@ export function BackupClient({
     notes?: string,
   ) => {
     setFeedback(null);
+    const isFinalLock = stage === "owner";
     startTransition(async () => {
-      const res = await approveReconciliationStage({
-        periodYm: period.periodCode,
-        stage,
-        notes,
-      });
+      const res = await runWithFeedback(
+        {
+          mode: isFinalLock ? "batch" : "working",
+          workingTitle: isFinalLock
+            ? "Mengesahkan & Mengunci Periode! 🔒"
+            : stage === "leader"
+              ? "Mencatat Persetujuan Kepala Terapis..."
+              : "Mencatat Verifikasi Admin...",
+          workingMessage: isFinalLock
+            ? `Tim mini lagi menyelesaikan pengesahan akhir Owner dan mengunci rekonsiliasi periode ${period.periodLabel} dengan aman~`
+            : `Dino Joguman lagi membubuhkan stempel persetujuan bulanan periode ${period.periodLabel} nih~`,
+          successTitle: isFinalLock
+            ? "Periode Resmi Disahkan & Dikunci! 🎉"
+            : "Persetujuan Tercatat! ♪",
+          successMessage: (result) =>
+            result.ok
+              ? (result.message ?? "Persetujuan berhasil dicatat.")
+              : "",
+          errorTitle: "Gagal Mencatat Persetujuan",
+          isResultError: (result) => (!result.ok ? result.error : null),
+        },
+        () =>
+          approveReconciliationStage({
+            periodYm: period.periodCode,
+            stage,
+            notes,
+          }),
+      );
       if (!res.ok) {
         setFeedback({ type: "error", message: res.error });
         return;
@@ -240,11 +379,13 @@ export function BackupClient({
       } else {
         setApprovers((prev) => ({ ...prev, ownerName: user.fullName }));
         setOwnerLockDialogOpen(false);
+        setOwnerNotes("");
       }
       setFeedback({
         type: "success",
         message: res.message ?? "Persetujuan berhasil dicatat.",
       });
+      router.refresh();
     });
   };
 
@@ -253,12 +394,33 @@ export function BackupClient({
     notes?: string,
   ) => {
     setFeedback(null);
+    const labelMap = {
+      PRE_UPDATE: "Pre-Update Snapshot",
+      MONTHLY_CUTOFF: "Cut-Off Bulanan",
+      MANUAL: "Backup Manual",
+    } as const;
     startTransition(async () => {
-      const res = await createBackupSnapshotAction({
-        backupType,
-        periodYm: period.periodCode,
-        notes,
-      });
+      const res = await runWithFeedback(
+        {
+          mode: "batch",
+          workingTitle: `Membuat ${labelMap[backupType]}... 🚀`,
+          workingMessage:
+            "Tim mini lagi lembur menyusun bundel JSON, Excel, CSV, PDF & menghitung diff perubahan sekaligus. Santai dulu ya~",
+          successTitle: "Snapshot Backup Tersimpan! ✨",
+          successMessage: (result) =>
+            result.ok
+              ? (result.message ?? "Backup lengkap berhasil diamankan di brankas!")
+              : "",
+          errorTitle: "Yah, Backup Gagal Dibuat...",
+          isResultError: (result) => (!result.ok ? result.error : null),
+        },
+        () =>
+          createBackupSnapshotAction({
+            backupType,
+            periodYm: period.periodCode,
+            notes,
+          }),
+      );
       if (!res.ok) {
         setFeedback({ type: "error", message: res.error });
         return;
@@ -273,6 +435,7 @@ export function BackupClient({
         type: "success",
         message: `${res.message ?? "Backup berhasil dibuat."}${warnSuffix}`,
       });
+      router.refresh();
     });
   };
 
@@ -281,8 +444,20 @@ export function BackupClient({
     fileType: "json" | "xlsx" | "csv" | "pdf",
   ) => {
     setFeedback(null);
+    const extUpper = fileType.toUpperCase();
     startTransition(async () => {
-      const res = await getBackupDownloadUrlAction({ backupId, fileType });
+      const res = await runWithFeedback(
+        {
+          mode: "batch",
+          workingTitle: `Menyiapkan Bundel .${extUpper}... 📦`,
+          workingMessage: `Tim mini lagi mengambil berkas .${extUpper} dari brankas backup buat kamu unduh nih~`,
+          successTitle: `Unduhan .${extUpper} Siap! ♪`,
+          successMessage: `Tautan unduhan bundel .${extUpper} sudah dibuka di tab baru!`,
+          errorTitle: `Gagal Mengunduh .${extUpper}`,
+          isResultError: (result) => (!result.ok ? result.error : null),
+        },
+        () => getBackupDownloadUrlAction({ backupId, fileType }),
+      );
       if (!res.ok) {
         setFeedback({ type: "error", message: res.error });
         return;
@@ -293,12 +468,28 @@ export function BackupClient({
 
   const handleConfirmRestore = () => {
     if (!restoreBackup) return;
+    const targetCode = restoreBackup.backup_code;
     setFeedback(null);
     startTransition(async () => {
-      const res = await restoreBackupPointInTimeAction({
-        backupId: restoreBackup.id,
-        confirmCode: restoreConfirmCode,
-      });
+      const res = await runWithFeedback(
+        {
+          mode: "batch",
+          workingTitle: "Menjalankan Point-in-Time Restore! 🔄",
+          workingMessage: `Tim mini lagi bikin Pre-Restore Safety Backup dulu lalu memulihkan data ke snapshot ${targetCode}. Tunggu sampai beres ya~`,
+          successTitle: "Pemulihan Data Selesai! 🎉",
+          successMessage: (result) =>
+            result.ok
+              ? (result.message ?? "Point-in-Time Restore berhasil diselesaikan!")
+              : "",
+          errorTitle: "Yah, Restore Gagal...",
+          isResultError: (result) => (!result.ok ? result.error : null),
+        },
+        () =>
+          restoreBackupPointInTimeAction({
+            backupId: restoreBackup.id,
+            confirmCode: restoreConfirmCode,
+          }),
+      );
       if (!res.ok) {
         setFeedback({ type: "error", message: res.error });
         return;
@@ -313,6 +504,7 @@ export function BackupClient({
         type: "success",
         message: `${res.message ?? "Point-in-Time Restore selesai."}${warnText}`,
       });
+      router.refresh();
     });
   };
 
@@ -320,46 +512,112 @@ export function BackupClient({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {canViewBackups
-              ? "Ekspor, Rekonsiliasi & Backup Center"
-              : "Cek Ruangan & Ekspor Operasional"}
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            {canViewBackups
-              ? canRestoreBackup
-                ? "Pusat ekspor multi-format (.CSV / .XLSX / .PDF), siklus pengkinian data akhir bulan, cadangan data, dan Point-in-Time Restore."
-                : "Pusat ekspor multi-format (.CSV / .XLSX / .PDF), siklus pengkinian data akhir bulan, dan cadangan data (backup)."
-              : "Ekspor laporan operasional ruangan & alat terapi (tanpa data harga) serta checklist pengecekan ruangan bulanan."}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={period.active ? "default" : "outline"}>
-            <CalendarClock className="mr-1 size-3.5" />
-            {period.active
-              ? `Pengkinian Aktif (${period.daysUntilCutoff} hari ke cut-off)`
-              : `Periode ${period.periodLabel}`}
-          </Badge>
-          {isLocked && (
-            <Badge variant="secondary">
-              <Lock className="mr-1 size-3.5" />
-              Dikunci Owner
+      <KawaiiPageHeader
+        accent="sky"
+        mascot="backup"
+        badge={canViewBackups ? "Pusat Ekspor & Cadangan" : "Opname & Ekspor"}
+        title={
+          canViewBackups
+            ? "Ekspor, Rekonsiliasi & Backup Center"
+            : "Cek Ruangan & Ekspor Operasional"
+        }
+        description={
+          canViewBackups
+            ? canRestoreBackup
+              ? "Pusat ekspor multi-format (.CSV / .XLSX / .PDF), siklus pengkinian data akhir bulan, cadangan data, dan Point-in-Time Restore."
+              : "Pusat ekspor multi-format (.CSV / .XLSX / .PDF), siklus pengkinian data akhir bulan, dan cadangan data (backup)."
+            : "Ekspor laporan operasional ruangan & alat terapi (tanpa data harga) serta checklist pengecekan ruangan bulanan."
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              variant={period.active ? "default" : "outline"}
+              className="border-2 border-[#2C2623] bg-[#FFFBE6] px-3 py-1 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40 dark:bg-amber-950/60 dark:text-amber-100"
+            >
+              <CalendarClock className="mr-1.5 size-3.5" />
+              {period.active
+                ? `Pengkinian Aktif (${period.daysUntilCutoff} hari ke cut-off)`
+                : `Periode ${period.periodLabel}`}
             </Badge>
-          )}
-        </div>
+            {isLocked && (
+              <Badge
+                variant="secondary"
+                className="border-2 border-[#2C2623] bg-[#E8FBF1] px-3 py-1 text-xs font-extrabold text-[#14532D] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40 dark:bg-emerald-950/60 dark:text-emerald-200"
+              >
+                <Lock className="mr-1.5 size-3.5" />
+                Dikunci Owner
+              </Badge>
+            )}
+          </div>
+        }
+      />
+
+      {/* Quick Pastel Overview Stats */}
+      <div
+        className={`grid gap-4 sm:grid-cols-2 ${canViewBackups ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}
+      >
+        <KawaiiStatCard
+          label="Progres Opname Ruangan"
+          value={`${checkedRoomCount} / ${OPNAME_ROOM_CODES.length}`}
+          hint={`${progressPct}% ruangan sudah diverifikasi`}
+          accent="mint"
+          icon={<CheckCircle2 className="size-4" />}
+        />
+        <KawaiiStatCard
+          label="Total Aset & Item Aktif"
+          value={totalItemsAcrossRooms}
+          hint={
+            totalAnomaliesAcrossRooms > 0
+              ? `${totalAnomaliesAcrossRooms} item anomali perlu dicek`
+              : "Semua ruangan bebas anomali!"
+          }
+          accent={totalAnomaliesAcrossRooms > 0 ? "peach" : "butter"}
+          icon={
+            totalAnomaliesAcrossRooms > 0 ? (
+              <AlertTriangle className="size-4" />
+            ) : (
+              <Sparkles className="size-4" />
+            )
+          }
+        />
+        <KawaiiStatCard
+          label="Status Periode"
+          value={isLocked ? "Terkunci" : period.active ? "Aktif" : "Persiapan"}
+          hint={`Periode ${period.periodLabel} (${period.periodCode})`}
+          accent="sky"
+          icon={isLocked ? <Lock className="size-4" /> : <CalendarClock className="size-4" />}
+        />
+        {canViewBackups && (
+          <KawaiiStatCard
+            label="Arsip Snapshot Vault"
+            value={backups.length}
+            hint={
+              backups[0]
+                ? `Terbaru: ${backups[0].backup_code}`
+                : "Belum ada snapshot tersimpan"
+            }
+            accent="lavender"
+            icon={<DatabaseBackup className="size-4" />}
+          />
+        )}
       </div>
 
       {feedback && (
-        <Alert variant={feedback.type === "error" ? "destructive" : "default"}>
+        <Alert
+          variant={feedback.type === "error" ? "destructive" : "default"}
+          className={
+            feedback.type === "error"
+              ? "rounded-2xl border-2 border-[#2C2623] bg-[#FFF0F5] shadow-[3px_3px_0px_0px_#2C2623] dark:bg-rose-950/40"
+              : "rounded-2xl border-2 border-[#2C2623] bg-[#E8FBF1] shadow-[3px_3px_0px_0px_#2C2623] dark:bg-emerald-950/40"
+          }
+        >
           {feedback.type === "error" ? (
             <AlertTriangle className="size-4" />
           ) : (
             <CheckCircle2 className="size-4 text-emerald-600" />
           )}
-          <AlertTitle>
-            {feedback.type === "error" ? "Operasi Gagal" : "Berhasil"}
+          <AlertTitle className="font-extrabold">
+            {feedback.type === "error" ? "Operasi Gagal" : "Berhasil! ♪"}
           </AlertTitle>
           <AlertDescription>{feedback.message}</AlertDescription>
         </Alert>
@@ -367,10 +625,12 @@ export function BackupClient({
 
       {/* 1. Multi-Format Export Engine */}
       <Can action="export.data">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ArrowDownToLine className="size-4" />
+        <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40">
+          <CardHeader className="border-b-2 border-dashed border-[#2C2623]/20 bg-[#E8F6FF]/65 dark:bg-sky-950/25">
+            <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+              <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#7CC4FA] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                <ArrowDownToLine className="size-4" />
+              </span>
               {canExportFinancial
                 ? "Mesin Ekspor Multi-Format"
                 : "Ekspor Data Operasional"}
@@ -381,21 +641,30 @@ export function BackupClient({
                 : `Unduh laporan operasional barang, anomali, dan arsip (tanpa data harga, pengiriman, brankas akun, atau audit) untuk peran ${ROLE_LABELS[role].title}.`}
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-3">
-            <div className="flex flex-col justify-between gap-3 rounded-lg border p-4">
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">Ekspor .CSV</span>
-                  <Badge variant="outline">PapaParse UTF-8</Badge>
+          <CardContent className="grid gap-4 pt-5 md:grid-cols-3">
+            {/* CSV Card */}
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border-2 border-[#2C2623] bg-[#E8FBF1]/85 p-4 shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/35 dark:bg-emerald-950/30">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-extrabold">Ekspor .CSV</span>
+                  <Badge
+                    variant="outline"
+                    className="border-[#2C2623] bg-[#FFFDF7] text-[11px] font-bold text-[#2C2623] dark:bg-emerald-900/50 dark:text-emerald-100"
+                  >
+                    PapaParse UTF-8
+                  </Badge>
                 </div>
-                <p className="text-muted-foreground text-xs">
+                <p className="text-muted-foreground text-xs leading-relaxed">
                   Format tabular ringan dengan UTF-8 BOM untuk Microsoft Excel &amp;
                   analisis data.
                 </p>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <Select value={csvScope} onValueChange={setCsvScope}>
-                  <SelectTrigger className="w-full" size="sm">
+                  <SelectTrigger
+                    className="w-full rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] font-medium dark:bg-background"
+                    size="sm"
+                  >
                     <SelectValue placeholder="Pilih cakupan CSV" />
                   </SelectTrigger>
                   <SelectContent>
@@ -422,57 +691,96 @@ export function BackupClient({
                     )}
                   </SelectContent>
                 </Select>
-                <Button asChild size="sm" variant="outline" className="w-full">
-                  <a
-                    href={`/api/exports/csv?scope=${encodeURIComponent(csvScope)}`}
-                    download
-                  >
-                    <ArrowDownToLine className="mr-1.5 size-3.5" />
-                    Unduh .CSV
-                  </a>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full bg-[#FFFDF7] font-bold dark:bg-background"
+                  disabled={isPending}
+                  onClick={() =>
+                    handleDirectExport(
+                      "csv",
+                      `/api/exports/csv?scope=${encodeURIComponent(csvScope)}`,
+                      `starops-${csvScope}-${period.periodCode}.csv`,
+                      ".CSV",
+                    )
+                  }
+                >
+                  <ArrowDownToLine className="mr-1.5 size-3.5" />
+                  Unduh .CSV
                 </Button>
               </div>
             </div>
 
-            <div className="flex flex-col justify-between gap-3 rounded-lg border p-4">
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">Workbook .XLSX</span>
-                  <Badge variant="outline">
+            {/* XLSX Card */}
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border-2 border-[#2C2623] bg-[#FFFBE6]/90 p-4 shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/35 dark:bg-amber-950/30">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-extrabold">Workbook .XLSX</span>
+                  <Badge
+                    variant="outline"
+                    className="border-[#2C2623] bg-[#FFFDF7] text-[11px] font-bold text-[#2C2623] dark:bg-amber-900/50 dark:text-amber-100"
+                  >
                     {canExportFinancial ? "ExcelJS 5 Tab" : "ExcelJS Operasional"}
                   </Badge>
                 </div>
-                <p className="text-muted-foreground text-xs">
+                <p className="text-muted-foreground text-xs leading-relaxed">
                   {canExportFinancial
                     ? "Tab: Ringkasan, Inventaris & Part Mainan, Brankas Akun Digital (masked), Arsip Berkas, dan Log Pengiriman."
                     : "Tab operasional: Ringkasan (termasuk anomali), Barang & Alat Terapi (tanpa harga), dan Arsip Berkas."}
                 </p>
               </div>
-              <Button asChild size="sm" variant="outline" className="w-full">
-                <a href="/api/exports/xlsx" download>
-                  <FileSpreadsheet className="mr-1.5 size-3.5" />
-                  Unduh Laporan .XLSX
-                </a>
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full bg-[#FFFDF7] font-bold dark:bg-background"
+                disabled={isPending}
+                onClick={() =>
+                  handleDirectExport(
+                    "xlsx",
+                    "/api/exports/xlsx",
+                    `starops-laporan-${period.periodCode}.xlsx`,
+                    "Excel .XLSX",
+                  )
+                }
+              >
+                <FileSpreadsheet className="mr-1.5 size-3.5" />
+                Unduh Laporan .XLSX
               </Button>
             </div>
 
-            <div className="flex flex-col justify-between gap-3 rounded-lg border p-4">
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">Laporan Resmi .PDF</span>
-                  <Badge variant="outline">Star Champs Official</Badge>
+            {/* PDF Card */}
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border-2 border-[#2C2623] bg-[#FFF0F5]/90 p-4 shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/35 dark:bg-pink-950/30">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-extrabold">Laporan Resmi .PDF</span>
+                  <Badge
+                    variant="outline"
+                    className="border-[#2C2623] bg-[#FFFDF7] text-[11px] font-bold text-[#2C2623] dark:bg-pink-900/50 dark:text-pink-100"
+                  >
+                    Star Champs Official
+                  </Badge>
                 </div>
-                <p className="text-muted-foreground text-xs">
+                <p className="text-muted-foreground text-xs leading-relaxed">
                   {canExportFinancial
                     ? "Header resmi Star Champs, statistik eksekutif, tabel anomali stok, dan blok tanda tangan 3 kolom."
                     : "Header resmi Star Champs, ringkasan operasional ruangan, tabel anomali alat terapi, dan blok tanda tangan."}
                 </p>
               </div>
-              <Button asChild size="sm" className="w-full">
-                <a href="/api/exports/pdf" download>
-                  <FileText className="mr-1.5 size-3.5" />
-                  Unduh Laporan .PDF
-                </a>
+              <Button
+                size="sm"
+                className="w-full font-bold"
+                disabled={isPending}
+                onClick={() =>
+                  handleDirectExport(
+                    "pdf",
+                    "/api/exports/pdf",
+                    `starops-laporan-bulanan-${period.periodCode}.pdf`,
+                    "Laporan .PDF",
+                  )
+                }
+              >
+                <FileText className="mr-1.5 size-3.5" />
+                Unduh Laporan .PDF
               </Button>
             </div>
           </CardContent>
@@ -480,31 +788,42 @@ export function BackupClient({
       </Can>
 
       {/* 2. Siklus Pengkinian Data Minggu Terakhir */}
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+      <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40">
+        <CardHeader className="border-b-2 border-dashed border-[#2C2623]/20 bg-[#FFFBE6]/70 dark:bg-amber-950/25">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ShieldCheck className="size-4" />
-                Siklus Pengkinian Data Minggu Terakhir — {period.periodLabel} (
-                <span className="font-mono">{period.periodCode}</span>)
+              <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+                <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDE68A] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                  <ShieldCheck className="size-4" />
+                </span>
+                <span>
+                  Siklus Pengkinian Data Minggu Terakhir — {period.periodLabel} (
+                  <span className="font-mono">{period.periodCode}</span>)
+                </span>
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="mt-1">
                 Berjalan mulai tanggal 24 tiap bulan hingga cut-off pukul 23:59 WIB di
                 akhir bulan.
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold">{progressPct}% Opname</span>
+            <div className="inline-flex items-center gap-2 rounded-full border-2 border-[#2C2623] bg-[#E8FBF1] px-3.5 py-1 text-sm font-extrabold text-[#14532D] shadow-[2px_2px_0px_0px_#2C2623] dark:bg-emerald-950/60 dark:text-emerald-200">
+              <PackageCheck className="size-4" />
+              {progressPct}% Opname
             </div>
           </div>
         </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Progress Bar */}
-          <div className="space-y-1.5">
-            <div className="bg-muted h-2.5 w-full overflow-hidden rounded-full">
+        <CardContent className="space-y-6 pt-5">
+          {/* Chunky Comic Progress Bar */}
+          <div className="space-y-2 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-4 shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5E9D6]/30 dark:bg-card">
+            <div className="flex items-center justify-between text-xs font-bold">
+              <span>Progres Checklist Ruangan</span>
+              <span className="font-mono">
+                {checkedRoomCount} dari {OPNAME_ROOM_CODES.length} ruang
+              </span>
+            </div>
+            <div className="h-4 w-full overflow-hidden rounded-full border-2 border-[#2C2623] bg-[#F5E9D6]/60 dark:bg-muted">
               <div
-                className="bg-primary h-full transition-all duration-300"
+                className="h-full rounded-full bg-gradient-to-r from-[#34D399] via-[#2AB673] to-[#7CC4FA] transition-all duration-300"
                 style={{ width: `${Math.min(100, Math.max(0, progressPct))}%` }}
               />
             </div>
@@ -517,9 +836,19 @@ export function BackupClient({
 
           {/* Stage 1: Room-by-Room Opname Checklist */}
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold">
-              Tahap 1 — Checklist Stock Opname Per Ruangan (R01–R06, ADM, GDG)
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="flex items-center gap-2 text-sm font-extrabold">
+                <span className="inline-flex size-6 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#A7F3D0] text-xs font-black text-[#2C2623]">
+                  1
+                </span>
+                Tahap 1 — Checklist Stock Opname Per Ruangan (R01–R06, ADM, GDG)
+              </h3>
+              {!canSubmitOpname && (
+                <Badge variant="outline" className="text-[11px]">
+                  Mode Baca Saja
+                </Badge>
+              )}
+            </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {OPNAME_ROOM_CODES.map((roomCode) => {
                 const entry = checklist[roomCode];
@@ -530,11 +859,11 @@ export function BackupClient({
                 return (
                   <label
                     key={roomCode}
-                    className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                    className={`flex cursor-pointer items-start gap-3 rounded-2xl border-2 border-[#2C2623] p-3.5 transition-all dark:border-[#F5E9D6]/35 ${
                       checked
-                        ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/20"
-                        : "hover:bg-muted/40"
-                    } ${!canToggle ? "cursor-not-allowed opacity-85" : ""}`}
+                        ? "bg-[#E8FBF1] shadow-[3px_3px_0px_0px_#2C2623] dark:bg-emerald-950/35"
+                        : "bg-[#FFFDF7] shadow-[2px_2px_0px_0px_#2C2623] hover:-translate-y-0.5 hover:bg-[#FFFBE6]/70 dark:bg-card dark:hover:bg-muted/40"
+                    } ${!canToggle ? "cursor-not-allowed opacity-85 hover:translate-y-0" : ""}`}
                   >
                     <Checkbox
                       checked={checked}
@@ -542,25 +871,32 @@ export function BackupClient({
                       onCheckedChange={(val) =>
                         handleToggleRoom(roomCode, val === true)
                       }
-                      className="mt-0.5"
+                      className="mt-0.5 border-2 border-[#2C2623]"
                     />
                     <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="font-mono text-xs font-semibold">
+                      <div className="flex flex-wrap items-center justify-between gap-1">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[#2C2623] bg-[#FFFDF7] px-2 py-0.5 font-mono text-[11px] font-extrabold text-[#2C2623] dark:bg-background dark:text-foreground">
                           {roomCode}
                         </span>
+                        {checked && (
+                          <span className="rounded-full bg-[#2AB673] px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                            ✓ Beres
+                          </span>
+                        )}
+                      </div>
+                      <p className="truncate text-xs font-extrabold">
+                        {LOCATION_LABELS[roomCode]}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-muted-foreground text-[11px] font-medium">
+                          {stat?.totalItems ?? 0} item aktif
+                        </span>
                         {(stat?.anomalyCount ?? 0) > 0 && (
-                          <Badge variant="destructive" className="text-[10px]">
+                          <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
                             {stat?.anomalyCount} anomali
                           </Badge>
                         )}
                       </div>
-                      <p className="truncate text-xs font-medium">
-                        {LOCATION_LABELS[roomCode]}
-                      </p>
-                      <p className="text-muted-foreground text-[11px]">
-                        {stat?.totalItems ?? 0} item aktif
-                      </p>
                       {entry?.checked_at && (
                         <p className="text-muted-foreground truncate text-[10px]">
                           {checked ? "Dicek" : "Diubah"} oleh{" "}
@@ -576,137 +912,161 @@ export function BackupClient({
           </div>
 
           {/* Stage Approvals (no disabled cross-role buttons) */}
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="flex flex-col justify-between gap-3 rounded-lg border p-4">
-              <div>
-                <p className="text-muted-foreground text-xs font-medium uppercase">
-                  Pemeriksaan {ROLE_LABELS.TEAM_LEADER.title}
-                </p>
-                <p className="mt-1 font-medium">
-                  {reconciliation?.approved_by_leader
-                    ? approvers.leaderName ?? ROLE_LABELS.TEAM_LEADER.title
-                    : "Belum disetujui"}
-                </p>
-                <p className="text-muted-foreground text-xs">
-                  {reconciliation?.approved_by_leader_at
-                    ? formatDateWIB(reconciliation.approved_by_leader_at, true)
-                    : `Menunggu konfirmasi opname ${ROLE_LABELS.TEAM_LEADER.title}`}
-                </p>
+          <div className="space-y-3">
+            <h3 className="flex items-center gap-2 text-sm font-extrabold">
+              <span className="inline-flex size-6 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#7CC4FA] text-xs font-black text-[#2C2623]">
+                2
+              </span>
+              Alur Persetujuan &amp; Pengesahan Bulanan (3 Tahap)
+            </h3>
+            <div className="grid gap-4 md:grid-cols-3">
+              {/* Approval 1: Team Leader */}
+              <div className="flex flex-col justify-between gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#E8F6FF]/85 p-4 shadow-[3px_3px_0px_0px_#2C2623] dark:border-[#F5E9D6]/35 dark:bg-sky-950/30">
+                <div>
+                  <p className="text-muted-foreground text-[11px] font-extrabold tracking-wide uppercase">
+                    1 · Pemeriksaan {ROLE_LABELS.TEAM_LEADER.title}
+                  </p>
+                  <p className="mt-1.5 text-sm font-extrabold">
+                    {reconciliation?.approved_by_leader
+                      ? approvers.leaderName ?? ROLE_LABELS.TEAM_LEADER.title
+                      : "Belum disetujui"}
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    {reconciliation?.approved_by_leader_at
+                      ? formatDateWIB(reconciliation.approved_by_leader_at, true)
+                      : `Menunggu konfirmasi opname ${ROLE_LABELS.TEAM_LEADER.title}`}
+                  </p>
+                </div>
+                {reconciliation?.approved_by_leader ? (
+                  <Badge
+                    variant="secondary"
+                    className="w-fit border-[#2C2623] bg-[#E8FBF1] text-[#14532D] dark:bg-emerald-950/60 dark:text-emerald-200"
+                  >
+                    <CheckCircle2 className="mr-1 size-3.5 text-emerald-600" />
+                    Sudah Disetujui
+                  </Badge>
+                ) : (role === "TEAM_LEADER" || role === "OWNER") && !isLocked ? (
+                  <Button
+                    size="sm"
+                    disabled={isPending}
+                    onClick={() => handleApproveStage("leader")}
+                  >
+                    Setujui ({ROLE_LABELS[role].title})
+                  </Button>
+                ) : (
+                  <Badge variant="outline" className="w-fit bg-[#FFFDF7] dark:bg-background">
+                    {isLocked
+                      ? "Periode Terkunci"
+                      : `Menunggu ${ROLE_LABELS.TEAM_LEADER.title}`}
+                  </Badge>
+                )}
               </div>
-              {reconciliation?.approved_by_leader ? (
-                <Badge variant="secondary" className="w-fit">
-                  <CheckCircle2 className="mr-1 size-3.5 text-emerald-600" />
-                  Sudah Disetujui
-                </Badge>
-              ) : (role === "TEAM_LEADER" || role === "OWNER") && !isLocked ? (
-                <Button
-                  size="sm"
-                  disabled={isPending}
-                  onClick={() => handleApproveStage("leader")}
-                >
-                  Setujui ({ROLE_LABELS[role].title})
-                </Button>
-              ) : (
-                <Badge variant="outline" className="w-fit">
-                  {isLocked
-                    ? "Periode Terkunci"
-                    : `Menunggu ${ROLE_LABELS.TEAM_LEADER.title}`}
-                </Badge>
-              )}
-            </div>
 
-            <div className="flex flex-col justify-between gap-3 rounded-lg border p-4">
-              <div>
-                <p className="text-muted-foreground text-xs font-medium uppercase">
-                  Verifikasi {ROLE_LABELS.SUPER_ADMIN.title}
-                </p>
-                <p className="mt-1 font-medium">
-                  {reconciliation?.verified_by_admin
-                    ? approvers.adminName ?? ROLE_LABELS.SUPER_ADMIN.title
-                    : "Belum diverifikasi"}
-                </p>
-                <p className="text-muted-foreground text-xs">
-                  {reconciliation?.verified_by_admin_at
-                    ? formatDateWIB(reconciliation.verified_by_admin_at, true)
-                    : `Menunggu verifikasi data ${ROLE_LABELS.SUPER_ADMIN.title}`}
-                </p>
+              {/* Approval 2: Super Admin */}
+              <div className="flex flex-col justify-between gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#F3EEFF]/85 p-4 shadow-[3px_3px_0px_0px_#2C2623] dark:border-[#F5E9D6]/35 dark:bg-violet-950/30">
+                <div>
+                  <p className="text-muted-foreground text-[11px] font-extrabold tracking-wide uppercase">
+                    2 · Verifikasi {ROLE_LABELS.SUPER_ADMIN.title}
+                  </p>
+                  <p className="mt-1.5 text-sm font-extrabold">
+                    {reconciliation?.verified_by_admin
+                      ? approvers.adminName ?? ROLE_LABELS.SUPER_ADMIN.title
+                      : "Belum diverifikasi"}
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    {reconciliation?.verified_by_admin_at
+                      ? formatDateWIB(reconciliation.verified_by_admin_at, true)
+                      : `Menunggu verifikasi data ${ROLE_LABELS.SUPER_ADMIN.title}`}
+                  </p>
+                </div>
+                {reconciliation?.verified_by_admin ? (
+                  <Badge
+                    variant="secondary"
+                    className="w-fit border-[#2C2623] bg-[#E8FBF1] text-[#14532D] dark:bg-emerald-950/60 dark:text-emerald-200"
+                  >
+                    <CheckCircle2 className="mr-1 size-3.5 text-emerald-600" />
+                    Sudah Diverifikasi
+                  </Badge>
+                ) : canVerifyAdmin && !isLocked ? (
+                  <Button
+                    size="sm"
+                    disabled={isPending}
+                    onClick={() => handleApproveStage("admin")}
+                  >
+                    Verifikasi ({ROLE_LABELS[role].title})
+                  </Button>
+                ) : (
+                  <Badge variant="outline" className="w-fit bg-[#FFFDF7] dark:bg-background">
+                    {isLocked
+                      ? "Periode Terkunci"
+                      : `Menunggu ${ROLE_LABELS.SUPER_ADMIN.title}`}
+                  </Badge>
+                )}
               </div>
-              {reconciliation?.verified_by_admin ? (
-                <Badge variant="secondary" className="w-fit">
-                  <CheckCircle2 className="mr-1 size-3.5 text-emerald-600" />
-                  Sudah Diverifikasi
-                </Badge>
-              ) : canVerifyAdmin && !isLocked ? (
-                <Button
-                  size="sm"
-                  disabled={isPending}
-                  onClick={() => handleApproveStage("admin")}
-                >
-                  Verifikasi ({ROLE_LABELS[role].title})
-                </Button>
-              ) : (
-                <Badge variant="outline" className="w-fit">
-                  {isLocked
-                    ? "Periode Terkunci"
-                    : `Menunggu ${ROLE_LABELS.SUPER_ADMIN.title}`}
-                </Badge>
-              )}
-            </div>
 
-            <div className="flex flex-col justify-between gap-3 rounded-lg border p-4">
-              <div>
-                <p className="text-muted-foreground text-xs font-medium uppercase">
-                  Pengesahan Akhir &amp; Kunci
-                </p>
-                <p className="mt-1 font-medium">
-                  {reconciliation?.approved_by_owner
-                    ? approvers.ownerName ?? ROLE_LABELS.OWNER.title
-                    : "Menunggu Pengesahan"}
-                </p>
-                <p className="text-muted-foreground text-xs">
-                  {reconciliation?.locked_at
-                    ? `Dikunci: ${formatDateWIB(reconciliation.locked_at, true)}`
-                    : `Mengunci periode rekonsiliasi bulan ini`}
-                </p>
+              {/* Approval 3: Owner Lock */}
+              <div className="flex flex-col justify-between gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#FFF3E8]/90 p-4 shadow-[3px_3px_0px_0px_#2C2623] dark:border-[#F5E9D6]/35 dark:bg-orange-950/30">
+                <div>
+                  <p className="text-muted-foreground text-[11px] font-extrabold tracking-wide uppercase">
+                    3 · Pengesahan Akhir &amp; Kunci
+                  </p>
+                  <p className="mt-1.5 text-sm font-extrabold">
+                    {reconciliation?.approved_by_owner
+                      ? approvers.ownerName ?? ROLE_LABELS.OWNER.title
+                      : "Menunggu Pengesahan"}
+                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    {reconciliation?.locked_at
+                      ? `Dikunci: ${formatDateWIB(reconciliation.locked_at, true)}`
+                      : "Mengunci periode rekonsiliasi bulan ini"}
+                  </p>
+                </div>
+                {isLocked ? (
+                  <Badge
+                    variant="secondary"
+                    className="w-fit border-[#2C2623] bg-[#FFFBE6] text-[#2C2623] dark:bg-amber-950/60 dark:text-amber-200"
+                  >
+                    <Lock className="mr-1 size-3.5" />
+                    Periode Terkunci
+                  </Badge>
+                ) : canApproveFinal ? (
+                  <Button
+                    size="sm"
+                    disabled={isPending}
+                    onClick={() => setOwnerLockDialogOpen(true)}
+                  >
+                    <Lock className="mr-1.5 size-3.5" />
+                    Sahkan &amp; Kunci ({ROLE_LABELS.OWNER.title})
+                  </Button>
+                ) : (
+                  <Badge variant="outline" className="w-fit bg-[#FFFDF7] dark:bg-background">
+                    Menunggu Pengesahan {ROLE_LABELS.OWNER.title}
+                  </Badge>
+                )}
               </div>
-              {isLocked ? (
-                <Badge variant="secondary" className="w-fit">
-                  <Lock className="mr-1 size-3.5" />
-                  Periode Terkunci
-                </Badge>
-              ) : canApproveFinal ? (
-                <Button
-                  size="sm"
-                  disabled={isPending}
-                  onClick={() => setOwnerLockDialogOpen(true)}
-                >
-                  <Lock className="mr-1.5 size-3.5" />
-                  Sahkan &amp; Kunci ({ROLE_LABELS.OWNER.title})
-                </Button>
-              ) : (
-                <Badge variant="outline" className="w-fit">
-                  Menunggu Pengesahan {ROLE_LABELS.OWNER.title}
-                </Badge>
-              )}
             </div>
           </div>
 
           {/* Stage 2 & Stage 3 Backup Snapshot Controls (OWNER & Admin Operasional) */}
           <Can action="backup.run_manual">
-            <div className="bg-muted/30 flex flex-col justify-between gap-3 rounded-lg border p-4 sm:flex-row sm:items-center">
-              <div className="space-y-0.5">
-                <p className="text-sm font-semibold">
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border-2 border-dashed border-[#2C2623] bg-[#F3EEFF]/80 p-4 shadow-[3px_3px_0px_0px_#2C2623] sm:flex-row sm:items-center dark:border-[#F5E9D6]/40 dark:bg-violet-950/25">
+              <div className="space-y-1">
+                <p className="text-sm font-extrabold">
                   Tahap 2 &amp; 3 — Snapshot Cadangan &amp; Cut-Off Bulanan
                 </p>
-                <p className="text-muted-foreground text-xs">
+                <p className="text-muted-foreground text-xs leading-relaxed">
                   Membuat bundel JSON + .XLSX + .CSV + .PDF ke bucket privat{" "}
-                  <code>backups</code> beserta perhitungan diff otomatis.
+                  <code className="rounded bg-[#FFFDF7] px-1.5 py-0.5 font-mono font-bold dark:bg-background">
+                    backups
+                  </code>{" "}
+                  beserta perhitungan diff otomatis.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
                   variant="outline"
+                  className="bg-[#FFFDF7] font-bold dark:bg-background"
                   disabled={isPending}
                   onClick={() =>
                     handleCreateBackup(
@@ -721,6 +1081,7 @@ export function BackupClient({
                 <Button
                   size="sm"
                   variant="outline"
+                  className="bg-[#FFFDF7] font-bold dark:bg-background"
                   disabled={isPending}
                   onClick={() =>
                     handleCreateBackup(
@@ -734,6 +1095,7 @@ export function BackupClient({
                 </Button>
                 <Button
                   size="sm"
+                  className="font-bold"
                   disabled={isPending}
                   onClick={() => setManualDialogOpen(true)}
                 >
@@ -748,11 +1110,15 @@ export function BackupClient({
 
       {/* 3. Backup Vault List (OWNER & Admin Operasional) */}
       <Can action="backup.view">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <DatabaseBackup className="size-4" />
-              Backup Vault (<code>system_backups</code>)
+        <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40">
+          <CardHeader className="border-b-2 border-dashed border-[#2C2623]/20 bg-[#E8FBF1]/60 dark:bg-emerald-950/25">
+            <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+              <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#A7F3D0] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                <DatabaseBackup className="size-4" />
+              </span>
+              <span>
+                Backup Vault (<code className="font-mono text-sm">system_backups</code>)
+              </span>
             </CardTitle>
             <CardDescription>
               {canRestoreBackup
@@ -760,97 +1126,115 @@ export function BackupClient({
                 : "Riwayat seluruh snapshot cadangan data, bundel laporan, dan perbandingan perubahan (Diff Viewer)."}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-5">
             {backups.length === 0 ? (
-              <p className="text-muted-foreground py-6 text-center text-sm">
-                Belum ada snapshot backup tersimpan. Gunakan tombol Pre-Update atau
-                Backup Manual di atas untuk membuat cadangan data.
-              </p>
+              <KawaiiEmptyState
+                mascot="backup"
+                title="Brankas Snapshot Masih Kosong"
+                description="Belum ada snapshot backup tersimpan. Gunakan tombol Pre-Update atau Backup Manual di atas untuk membuat cadangan data pertama."
+                action={
+                  canRunBackup ? (
+                    <Button size="sm" onClick={() => setManualDialogOpen(true)}>
+                      <DatabaseBackup className="mr-1.5 size-3.5" />
+                      Buat Backup Manual
+                    </Button>
+                  ) : undefined
+                }
+              />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Kode Backup</TableHead>
-                    <TableHead>Jenis</TableHead>
-                    <TableHead>Periode</TableHead>
-                    <TableHead>Waktu Dibuat</TableHead>
-                    <TableHead>Ringkasan Baris</TableHead>
-                    <TableHead>Unduhan Bundel</TableHead>
-                    <TableHead className="text-right">Aksi</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {backups.map((bkp) => {
-                    const counts = parseRowCounts(bkp.row_counts_json);
-                    return (
-                      <TableRow key={bkp.id}>
-                        <TableCell className="font-mono text-xs font-semibold">
-                          {bkp.backup_code}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {BACKUP_TYPE_LABELS[bkp.backup_type]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {bkp.period_ym}
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {formatDateWIB(bkp.created_at, true)}
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {counts.items_master ?? 0} item ·{" "}
-                          {counts.subscriptions_vault ?? 0} vault ·{" "}
-                          {counts.archives_hybrid ?? 0} arsip
-                        </TableCell>
-                        <TableCell>
-                          <Can action="backup.download">
-                            <div className="flex flex-wrap gap-1">
-                              {(["xlsx", "csv", "pdf", "json"] as const).map((ext) => (
-                                <Button
-                                  key={ext}
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 px-2 font-mono text-xs uppercase"
-                                  disabled={isPending}
-                                  onClick={() => handleDownloadBackup(bkp.id, ext)}
-                                >
-                                  .{ext}
-                                </Button>
-                              ))}
-                            </div>
-                          </Can>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1.5">
-                            <Button
-                              size="sm"
+              <div className="overflow-x-auto rounded-2xl border-2 border-[#2C2623] dark:border-[#F5E9D6]/35">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Kode Backup</TableHead>
+                      <TableHead>Jenis</TableHead>
+                      <TableHead>Periode</TableHead>
+                      <TableHead>Waktu Dibuat</TableHead>
+                      <TableHead>Ringkasan Baris</TableHead>
+                      <TableHead>Unduhan Bundel</TableHead>
+                      <TableHead className="text-right">Aksi</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {backups.map((bkp) => {
+                      const counts = parseRowCounts(bkp.row_counts_json);
+                      return (
+                        <TableRow key={bkp.id}>
+                          <TableCell className="font-mono text-xs font-extrabold">
+                            {bkp.backup_code}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
                               variant="outline"
-                              onClick={() => setDiffBackup(bkp)}
+                              className="bg-[#FFFBE6] text-[#2C2623] dark:bg-amber-950/50 dark:text-amber-100"
                             >
-                              <GitCompare className="mr-1 size-3.5" />
-                              Diff
-                            </Button>
-                            <Can action="backup.restore">
+                              {BACKUP_TYPE_LABELS[bkp.backup_type]}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs font-semibold">
+                            {bkp.period_ym}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {formatDateWIB(bkp.created_at, true)}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <span className="font-semibold">{counts.items_master ?? 0}</span> item ·{" "}
+                            <span className="font-semibold">
+                              {counts.subscriptions_vault ?? 0}
+                            </span>{" "}
+                            vault ·{" "}
+                            <span className="font-semibold">{counts.archives_hybrid ?? 0}</span>{" "}
+                            arsip
+                          </TableCell>
+                          <TableCell>
+                            <Can action="backup.download">
+                              <div className="flex flex-wrap gap-1">
+                                {(["xlsx", "csv", "pdf", "json"] as const).map((ext) => (
+                                  <Button
+                                    key={ext}
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 rounded-lg bg-[#FFFDF7] px-2 font-mono text-[11px] font-bold uppercase dark:bg-background"
+                                    disabled={isPending}
+                                    onClick={() => handleDownloadBackup(bkp.id, ext)}
+                                  >
+                                    .{ext}
+                                  </Button>
+                                ))}
+                              </div>
+                            </Can>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1.5">
                               <Button
                                 size="sm"
-                                variant="destructive"
-                                onClick={() => {
-                                  setRestoreBackup(bkp);
-                                  setRestoreConfirmCode("");
-                                }}
+                                variant="outline"
+                                onClick={() => setDiffBackup(bkp)}
                               >
-                                <RotateCcw className="mr-1 size-3.5" />
-                                Restore
+                                <GitCompare className="mr-1 size-3.5" />
+                                Diff
                               </Button>
-                            </Can>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                              <Can action="backup.restore">
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => {
+                                    setRestoreBackup(bkp);
+                                    setRestoreConfirmCode("");
+                                  }}
+                                >
+                                  <RotateCcw className="mr-1 size-3.5" />
+                                  Restore
+                                </Button>
+                              </Can>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -864,7 +1248,7 @@ export function BackupClient({
         >
           <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+              <DialogTitle className="flex items-center gap-2 font-extrabold">
                 <GitCompare className="size-4" />
                 Snapshot Diff Viewer —{" "}
                 <span className="font-mono">{diffBackup?.backup_code}</span>
@@ -879,21 +1263,23 @@ export function BackupClient({
             {selectedDiff ? (
               <div className="space-y-4 text-sm">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-lg border p-3">
-                    <p className="text-muted-foreground text-xs">Item Baru Ditambahkan</p>
-                    <p className="text-lg font-semibold">
+                  <div className="rounded-2xl border-2 border-[#2C2623] bg-[#E8FBF1]/80 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:bg-emerald-950/30">
+                    <p className="text-muted-foreground text-xs font-bold">
+                      Item Baru Ditambahkan
+                    </p>
+                    <p className="text-lg font-extrabold">
                       {selectedDiff.new_items_count} item
                     </p>
                     <p className="text-muted-foreground text-xs">
                       Item dihapus/keluar: {selectedDiff.removed_items_count}
                     </p>
                   </div>
-                  <div className="rounded-lg border p-3">
-                    <p className="text-muted-foreground text-xs">
+                  <div className="rounded-2xl border-2 border-[#2C2623] bg-[#FFF0F5]/85 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:bg-pink-950/30">
+                    <p className="text-muted-foreground text-xs font-bold">
                       Anomali Part Kurang (PART_KURANG)
                     </p>
                     <div className="flex items-center gap-2">
-                      <span className="text-lg font-semibold">
+                      <span className="text-lg font-extrabold">
                         {selectedDiff.part_kurang_count} item
                       </span>
                       {formatDeltaBadge(selectedDiff.part_kurang_delta)}
@@ -905,18 +1291,18 @@ export function BackupClient({
                   </div>
                 </div>
 
-                <div className="rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
+                <div className="rounded-2xl border-2 border-[#2C2623] bg-[#FFFBE6]/90 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:bg-amber-950/30">
+                  <div className="flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-muted-foreground text-xs">
+                      <p className="text-muted-foreground text-xs font-bold">
                         Estimasi Biaya Langganan Brankas Digital / Bulan
                       </p>
-                      <p className="text-base font-semibold">
+                      <p className="text-base font-extrabold">
                         {formatRupiah(selectedDiff.subscription_monthly_cost_current)}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-muted-foreground text-xs">Delta Biaya</p>
+                      <p className="text-muted-foreground text-xs font-bold">Delta Biaya</p>
                       {formatDeltaBadge(selectedDiff.subscription_cost_delta, true)}
                     </div>
                   </div>
@@ -924,17 +1310,17 @@ export function BackupClient({
 
                 {selectedDiff.new_items.length > 0 && (
                   <div className="space-y-1.5">
-                    <p className="text-xs font-semibold uppercase">
+                    <p className="text-xs font-extrabold uppercase">
                       Daftar Item Baru (maks. 50)
                     </p>
-                    <div className="max-h-36 overflow-y-auto rounded-md border p-2 text-xs">
+                    <div className="max-h-36 overflow-y-auto rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-2.5 text-xs dark:bg-card">
                       {selectedDiff.new_items.map((item) => (
                         <div
                           key={item.id}
                           className="flex items-center justify-between py-1"
                         >
                           <span>
-                            <span className="font-mono">{item.item_code}</span> —{" "}
+                            <span className="font-mono font-bold">{item.item_code}</span> —{" "}
                             {item.name}
                           </span>
                           <Badge variant="outline">{item.room_code}</Badge>
@@ -946,17 +1332,17 @@ export function BackupClient({
 
                 {selectedDiff.part_kurang_items.length > 0 && (
                   <div className="space-y-1.5">
-                    <p className="text-xs font-semibold uppercase">
+                    <p className="text-xs font-extrabold uppercase">
                       Item Berstatus PART_KURANG
                     </p>
-                    <div className="max-h-36 overflow-y-auto rounded-md border p-2 text-xs">
+                    <div className="max-h-36 overflow-y-auto rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-2.5 text-xs dark:bg-card">
                       {selectedDiff.part_kurang_items.map((item) => (
                         <div
                           key={item.id}
                           className="flex items-center justify-between py-1"
                         >
                           <span>
-                            <span className="font-mono">{item.item_code}</span> —{" "}
+                            <span className="font-mono font-bold">{item.item_code}</span> —{" "}
                             {item.name} ({item.room_code})
                           </span>
                           <Badge variant="destructive">
@@ -969,15 +1355,15 @@ export function BackupClient({
                 )}
 
                 <div className="space-y-1.5">
-                  <p className="text-xs font-semibold uppercase">Perubahan Jumlah Baris</p>
+                  <p className="text-xs font-extrabold uppercase">Perubahan Jumlah Baris</p>
                   <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
                     {Object.entries(selectedDiff.row_deltas).map(([table, info]) => (
                       <div
                         key={table}
-                        className="flex items-center justify-between rounded border px-2.5 py-1.5"
+                        className="flex items-center justify-between rounded-xl border-2 border-[#2C2623]/70 bg-[#FFFDF7] px-2.5 py-1.5 dark:bg-card"
                       >
                         <span className="truncate font-mono">{table}</span>
-                        <span className="font-semibold">
+                        <span className="font-extrabold">
                           {info.current} ({info.delta >= 0 ? `+${info.delta}` : info.delta})
                         </span>
                       </div>
@@ -986,9 +1372,11 @@ export function BackupClient({
                 </div>
               </div>
             ) : (
-              <p className="text-muted-foreground text-sm">
-                Data ringkasan diff belum tersedia untuk snapshot ini.
-              </p>
+              <KawaiiEmptyState
+                mascot="backup"
+                title="Data Diff Belum Tersedia"
+                description="Data ringkasan diff belum tersedia untuk snapshot ini."
+              />
             )}
           </DialogContent>
         </Dialog>
@@ -1002,7 +1390,7 @@ export function BackupClient({
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-destructive">
+              <DialogTitle className="text-destructive flex items-center gap-2 font-extrabold">
                 <RotateCcw className="size-4" />
                 Point-in-Time Restore (Khusus Owner)
               </DialogTitle>
@@ -1015,10 +1403,12 @@ export function BackupClient({
             </DialogHeader>
 
             <div className="space-y-2">
-              <Label htmlFor="confirm-restore-code">
+              <Label htmlFor="confirm-restore-code" className="font-bold">
                 Ketik ulang kode backup{" "}
-                <code className="font-semibold">{restoreBackup?.backup_code}</code> untuk
-                konfirmasi:
+                <code className="rounded bg-[#FFF0F5] px-1.5 py-0.5 font-mono font-bold text-[#881337] dark:bg-rose-950/60 dark:text-rose-200">
+                  {restoreBackup?.backup_code}
+                </code>{" "}
+                untuk konfirmasi:
               </Label>
               <Input
                 id="confirm-restore-code"
@@ -1058,19 +1448,24 @@ export function BackupClient({
         <Dialog open={manualDialogOpen} onOpenChange={setManualDialogOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Buat Backup Manual Sekarang</DialogTitle>
+              <DialogTitle className="font-extrabold">
+                Buat Backup Manual Sekarang
+              </DialogTitle>
               <DialogDescription>
                 Menyimpan dump JSON lengkap (tanpa secret plaintext/encrypted) beserta
                 bundel .XLSX, .CSV, dan .PDF ke storage privat <code>backups</code>.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2">
-              <Label htmlFor="manual-backup-notes">Catatan Backup (Opsional)</Label>
+              <Label htmlFor="manual-backup-notes" className="font-bold">
+                Catatan Backup (Opsional)
+              </Label>
               <Textarea
                 id="manual-backup-notes"
                 value={manualNotes}
                 onChange={(e) => setManualNotes(e.target.value)}
                 placeholder="Contoh: Snapshot sebelum audit eksternal / migrasi rak"
+                className="rounded-xl border-2 border-[#2C2623] dark:border-[#F5E9D6]/40"
               />
             </div>
             <DialogFooter>
@@ -1097,19 +1492,24 @@ export function BackupClient({
         <Dialog open={ownerLockDialogOpen} onOpenChange={setOwnerLockDialogOpen}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Pengesahan Akhir &amp; Kunci Periode ({period.periodCode})</DialogTitle>
+              <DialogTitle className="font-extrabold">
+                Pengesahan Akhir &amp; Kunci Periode ({period.periodCode})
+              </DialogTitle>
               <DialogDescription>
                 Setelah dikunci oleh Owner, daftar opname dan persetujuan periode{" "}
                 <strong>{period.periodLabel}</strong> tidak dapat diubah lagi.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2">
-              <Label htmlFor="owner-lock-notes">Catatan Pengesahan Owner (Opsional)</Label>
+              <Label htmlFor="owner-lock-notes" className="font-bold">
+                Catatan Pengesahan Owner (Opsional)
+              </Label>
               <Textarea
                 id="owner-lock-notes"
                 value={ownerNotes}
                 onChange={(e) => setOwnerNotes(e.target.value)}
                 placeholder="Contoh: Disetujui sesuai hasil opname akhir bulan."
+                className="rounded-xl border-2 border-[#2C2623] dark:border-[#F5E9D6]/40"
               />
             </div>
             <DialogFooter>

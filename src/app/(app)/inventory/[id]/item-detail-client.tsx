@@ -8,7 +8,10 @@ import {
   ArrowLeft,
   Boxes,
   CheckCircle2,
+  Coins,
   History,
+  Image as ImageIcon,
+  Layers,
   Loader2,
   Pencil,
   Plus,
@@ -17,6 +20,8 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
+import { KawaiiEmptyState, KawaiiPageHeader } from "@/components/cartoon/kawaii-decor";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -97,6 +102,7 @@ export function ItemDetailClient({
 }: ItemDetailClientProps) {
   const router = useRouter();
   const { can } = useRole();
+  const { runWithFeedback } = useCartoonFeedback();
   const canViewValuation = can("inventory.view_valuation");
   const canApproveWriteoff = can("writeoff.approve");
   const canCreateItem = can("inventory.create");
@@ -126,149 +132,276 @@ export function ItemDetailClient({
   const handleHygieneUpdate = (status: HygieneStatus) => {
     setFeedback(null);
     startTransition(async () => {
-      const res = await updateItemHygieneAction(item.id, status);
-      if (!res.ok) {
-        setFeedback({ type: "error", text: res.error });
-        return;
+      try {
+        const res = await runWithFeedback(
+          {
+            mode: "working",
+            workingTitle: "Memperbarui Status Sanitasi...",
+            workingMessage: `Dino Joguman lagi mencatat status sanitasi ${item.item_code} menjadi "${HYGIENE_LABELS[status]}"~`,
+            successTitle: "Sanitasi Diperbarui! ✨",
+            successMessage: (r) =>
+              r.ok ? r.message ?? "Status sanitasi berhasil diperbarui!" : "",
+            errorTitle: "Gagal Update Sanitasi...",
+            isResultError: (r) => (!r.ok ? r.error : null),
+          },
+          () => updateItemHygieneAction(item.id, status),
+        );
+        if (!res.ok) {
+          setFeedback({ type: "error", text: res.error });
+          return;
+        }
+        setFeedback({ type: "success", text: res.message ?? "Status sanitasi diperbarui." });
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          text: err instanceof Error ? err.message : "Gagal memperbarui status sanitasi.",
+        });
       }
-      setFeedback({ type: "success", text: res.message ?? "Status sanitasi diperbarui." });
     });
   };
 
   const handlePartsSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+    const nextParts = Math.trunc(Number(partsValue));
     setFeedback(null);
     startTransition(async () => {
-      const res = await updateItemPartsAction(item.id, Math.trunc(Number(partsValue)));
-      if (!res.ok) {
-        setFeedback({ type: "error", text: res.error });
-        return;
+      try {
+        const res = await runWithFeedback(
+          {
+            mode: "working",
+            workingTitle: "Menyimpan Jumlah Kepingan...",
+            workingMessage: `Dino Joguman lagi menghitung ulang part ${item.item_code} (${nextParts}/${item.total_parts} ${item.unit_label})~`,
+            successTitle: "Kepingan Diperbarui! 🧩",
+            successMessage: (r) =>
+              r.ok ? r.message ?? "Jumlah kepingan berhasil diperbarui!" : "",
+            errorTitle: "Gagal Update Kepingan...",
+            isResultError: (r) => (!r.ok ? r.error : null),
+          },
+          () => updateItemPartsAction(item.id, nextParts),
+        );
+        if (!res.ok) {
+          setFeedback({ type: "error", text: res.error });
+          return;
+        }
+        setFeedback({ type: "success", text: res.message ?? "Jumlah kepingan diperbarui." });
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          text: err instanceof Error ? err.message : "Gagal memperbarui jumlah kepingan.",
+        });
       }
-      setFeedback({ type: "success", text: res.message ?? "Jumlah kepingan diperbarui." });
     });
   };
 
   const handleConditionChange = (nextCondition: ItemCondition) => {
     setFeedback(null);
     startTransition(async () => {
-      const res = await updateItemConditionAction(item.id, nextCondition);
-      if (!res.ok) {
-        setFeedback({ type: "error", text: res.error });
-        return;
+      try {
+        const res = await runWithFeedback(
+          {
+            mode: "working",
+            workingTitle: "Memperbarui Kondisi Barang...",
+            workingMessage: `Sedang mencatat perubahan kondisi ${item.item_code} ke "${CONDITION_LABELS[nextCondition]}" nih~`,
+            successTitle: "Kondisi Barang Diperbarui! ✨",
+            successMessage: (r) => (r.ok ? r.message ?? "Kondisi berhasil diperbarui!" : ""),
+            errorTitle: "Gagal Mengubah Kondisi...",
+            isResultError: (r) => (!r.ok ? r.error : null),
+          },
+          () => updateItemConditionAction(item.id, nextCondition),
+        );
+        if (!res.ok) {
+          setFeedback({ type: "error", text: res.error });
+          return;
+        }
+        setFeedback({ type: "success", text: res.message ?? "Kondisi diperbarui." });
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          text: err instanceof Error ? err.message : "Gagal memperbarui kondisi barang.",
+        });
       }
-      setFeedback({ type: "success", text: res.message ?? "Kondisi diperbarui." });
     });
   };
 
   const handleStockSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+    const nextStock = Math.trunc(Number(stockValue));
     setFeedback(null);
     startTransition(async () => {
-      const res = await updateConsumableStockAction(item.id, Math.trunc(Number(stockValue)));
-      if (!res.ok) {
-        setFeedback({ type: "error", text: res.error });
-        return;
+      try {
+        const res = await runWithFeedback(
+          {
+            mode: "working",
+            workingTitle: "Menyesuaikan Stok Fisik...",
+            workingMessage: `Dino Joguman lagi memperbarui stok ${item.item_code} menjadi ${nextStock} ${item.unit_label}~`,
+            successTitle: "Stok Diperbarui! 📦",
+            successMessage: (r) => (r.ok ? r.message ?? "Stok berhasil diperbarui!" : ""),
+            errorTitle: "Gagal Update Stok...",
+            isResultError: (r) => (!r.ok ? r.error : null),
+          },
+          () => updateConsumableStockAction(item.id, nextStock),
+        );
+        if (!res.ok) {
+          setFeedback({ type: "error", text: res.error });
+          return;
+        }
+        setFeedback({ type: "success", text: res.message ?? "Stok diperbarui." });
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          text: err instanceof Error ? err.message : "Gagal memperbarui stok.",
+        });
       }
-      setFeedback({ type: "success", text: res.message ?? "Stok diperbarui." });
     });
   };
 
   const handleConfirmDelete = () => {
     setFeedback(null);
     startTransition(async () => {
-      const res = await softDeleteItemAction(item.id);
-      if (!res.ok) {
-        setFeedback({ type: "error", text: res.error });
-        return;
+      try {
+        const res = await runWithFeedback(
+          {
+            mode: "working",
+            workingTitle: "Memindahkan ke Recycle Bin...",
+            workingMessage: `Sedang merapikan & memindahkan ${item.item_code} (${item.name}) ke Recycle Bin ya~`,
+            successTitle: "Item Dipindahkan! 🗑️",
+            successMessage: (r) =>
+              r.ok ? r.message ?? "Item berhasil dipindahkan ke Recycle Bin." : "",
+            errorTitle: "Gagal Menghapus Item...",
+            isResultError: (r) => (!r.ok ? r.error : null),
+          },
+          () => softDeleteItemAction(item.id),
+        );
+        if (!res.ok) {
+          setFeedback({ type: "error", text: res.error });
+          return;
+        }
+        setDeleteOpen(false);
+        router.push("/inventory");
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          text: err instanceof Error ? err.message : "Gagal menghapus item.",
+        });
       }
-      setDeleteOpen(false);
-      router.push("/inventory");
     });
   };
 
+  const headerAccent =
+    item.asset_type === "THERAPY_TOY"
+      ? "mint"
+      : item.asset_type === "FIXED_ASSET"
+        ? "lavender"
+        : "peach";
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
-        <div className="space-y-1.5">
-          <Button variant="ghost" size="sm" asChild className="-ml-2">
-            <Link href="/inventory">
-              <ArrowLeft className="size-4" />
-              Kembali ke Daftar Inventaris
-            </Link>
-          </Button>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="font-mono text-sm">
-              {item.item_code}
-            </Badge>
-            <AssetTypeBadge assetType={item.asset_type} />
-            <ConditionBadge condition={item.condition} />
-            <HygieneBadge
-              status={item.hygiene_status}
-              assetType={item.asset_type}
-              nextDue={item.next_sanitization_due}
-              todayWib={todayWib}
-            />
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">{item.name}</h1>
-          <p className="text-muted-foreground text-sm">
-            {CATEGORY_PREFIX_LABELS[item.category_prefix]} · {item.category} ·{" "}
-            {item.room_code} ({LOCATION_LABELS[item.room_code]})
-            {item.rack_location ? ` · ${item.rack_location}` : ""}
-          </p>
-          {parentItem && (
-            <p className="text-muted-foreground text-xs">
-              Sub-komponen dari:{" "}
-              <Link
-                href={`/inventory/${parentItem.id}`}
-                className="text-primary font-mono hover:underline"
-              >
-                {parentItem.item_code} — {parentItem.name}
-              </Link>
-            </p>
-          )}
-        </div>
+      <div>
+        <Button
+          variant="outline"
+          size="sm"
+          asChild
+          className="rounded-full bg-[#FFFDF7] font-bold dark:bg-stone-900"
+        >
+          <Link href="/inventory">
+            <ArrowLeft className="size-4" />
+            Kembali ke Daftar Inventaris
+          </Link>
+        </Button>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" asChild>
-            <Link href={`/scan?code=${encodeURIComponent(item.item_code)}`}>
-              <QrCode className="size-4" />
-              Pinjam / Kembalikan
-            </Link>
-          </Button>
-          <Can action="inventory.update">
-            <Button variant="outline" onClick={() => setEditOpen(true)}>
-              <Pencil className="size-4" />
-              Edit
+      <KawaiiPageHeader
+        badge={item.item_code}
+        title={item.name}
+        description={`${CATEGORY_PREFIX_LABELS[item.category_prefix]} · ${item.category} · ${item.room_code} (${LOCATION_LABELS[item.room_code]})${item.rack_location ? ` · ${item.rack_location}` : ""}`}
+        accent={headerAccent}
+        mascot="box"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" asChild className="bg-[#FFFDF7] dark:bg-stone-900">
+              <Link href={`/scan?code=${encodeURIComponent(item.item_code)}`}>
+                <QrCode className="size-4" />
+                Pinjam / Kembalikan
+              </Link>
             </Button>
-          </Can>
-          <Can action="inventory.delete">
-            <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
-              <Trash2 className="size-4" />
-              Hapus
-            </Button>
-          </Can>
-        </div>
+            <Can action="inventory.update">
+              <Button
+                variant="outline"
+                onClick={() => setEditOpen(true)}
+                className="bg-[#FEF3C7] text-[#2C2623] hover:bg-[#FDE68A] dark:bg-amber-950/60 dark:text-amber-100"
+              >
+                <Pencil className="size-4" />
+                Edit
+              </Button>
+            </Can>
+            <Can action="inventory.delete">
+              <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
+                <Trash2 className="size-4" />
+                Hapus
+              </Button>
+            </Can>
+          </div>
+        }
+      />
+
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] px-4 py-3 shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
+        <Badge
+          variant="outline"
+          className="rounded-full border-[1.5px] border-[#2C2623] bg-white font-mono text-xs font-extrabold shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900"
+        >
+          {item.item_code}
+        </Badge>
+        <AssetTypeBadge assetType={item.asset_type} />
+        <ConditionBadge condition={item.condition} />
+        <HygieneBadge
+          status={item.hygiene_status}
+          assetType={item.asset_type}
+          nextDue={item.next_sanitization_due}
+          todayWib={todayWib}
+        />
+        {parentItem && (
+          <Link
+            href={`/inventory/${parentItem.id}`}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-full border-[1.5px] border-[#2C2623] bg-[#EDE9FE] px-3 py-0.5 text-xs font-bold text-[#4C1D95] shadow-[1.5px_1.5px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-stone-400 dark:bg-violet-950/70 dark:text-violet-200"
+          >
+            <span>Induk:</span>
+            <span className="font-mono">{parentItem.item_code}</span>
+            <span>— {parentItem.name}</span>
+          </Link>
+        )}
       </div>
 
       {feedback && (
-        <Alert variant={feedback.type === "error" ? "destructive" : "default"}>
+        <Alert
+          variant={feedback.type === "error" ? "destructive" : "default"}
+          className={
+            feedback.type === "success"
+              ? "rounded-2xl border-2 border-[#2C2623] bg-[#D1FAE5] text-[#14532D] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-emerald-950/60 dark:text-emerald-100"
+              : "rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] text-[#881337] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-rose-950/60 dark:text-rose-100"
+          }
+        >
           {feedback.type === "success" ? (
-            <CheckCircle2 className="size-4 text-emerald-600" />
+            <CheckCircle2 className="size-4" />
           ) : (
             <AlertTriangle className="size-4" />
           )}
-          <AlertDescription>{feedback.text}</AlertDescription>
+          <AlertDescription className="font-semibold">{feedback.text}</AlertDescription>
         </Alert>
       )}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-base">Foto & Identitas Barang</CardTitle>
+        <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] lg:col-span-1 dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
+          <CardHeader className="border-b-2 border-[#2C2623]/15 bg-[#FFE4E6]/45 dark:border-stone-700 dark:bg-rose-950/20">
+            <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+              <span className="inline-flex size-7 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900">
+                <ImageIcon className="size-3.5 text-rose-600 dark:text-rose-300" />
+              </span>
+              Foto & Identitas Barang
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 pt-4">
             {signedPhotoUrl ? (
-              <div className="aspect-video w-full overflow-hidden rounded-lg border">
+              <div className="aspect-video w-full overflow-hidden rounded-2xl border-2 border-[#2C2623] bg-white shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={signedPhotoUrl}
@@ -277,34 +410,37 @@ export function ItemDetailClient({
                 />
               </div>
             ) : (
-              <div className="bg-muted text-muted-foreground flex aspect-video w-full items-center justify-center rounded-lg border text-sm">
-                Belum ada foto barang
+              <div className="flex aspect-video w-full flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-[#2C2623]/35 bg-[#FEF3C7]/45 text-sm font-bold text-muted-foreground dark:border-stone-500 dark:bg-amber-950/20">
+                <ImageIcon className="size-7 opacity-50" />
+                <span>Belum ada foto barang</span>
               </div>
             )}
 
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              <dt className="text-muted-foreground">Kode Item</dt>
-              <dd className="font-mono font-medium">{item.item_code}</dd>
-              <dt className="text-muted-foreground">Format Barcode</dt>
-              <dd>{BARCODE_FORMAT_LABELS[item.barcode_format]}</dd>
-              <dt className="text-muted-foreground">Ruangan</dt>
-              <dd>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-2xl border-2 border-[#2C2623]/15 bg-white/80 p-3.5 text-sm dark:border-stone-700 dark:bg-stone-900/50">
+              <dt className="text-muted-foreground font-semibold">Kode Item</dt>
+              <dd className="font-mono font-bold">{item.item_code}</dd>
+              <dt className="text-muted-foreground font-semibold">Format Barcode</dt>
+              <dd className="font-semibold">{BARCODE_FORMAT_LABELS[item.barcode_format]}</dd>
+              <dt className="text-muted-foreground font-semibold">Ruangan</dt>
+              <dd className="font-semibold">
                 {item.room_code} — {LOCATION_LABELS[item.room_code]}
               </dd>
-              <dt className="text-muted-foreground">Rak / Lemari</dt>
-              <dd>{item.rack_location || "-"}</dd>
-              <dt className="text-muted-foreground">PIC</dt>
-              <dd>{item.pic_name || "-"}</dd>
-              <dt className="text-muted-foreground">Stok</dt>
-              <dd className="font-mono">
+              <dt className="text-muted-foreground font-semibold">Rak / Lemari</dt>
+              <dd className="font-semibold">{item.rack_location || "-"}</dd>
+              <dt className="text-muted-foreground font-semibold">PIC</dt>
+              <dd className="font-semibold">{item.pic_name || "-"}</dd>
+              <dt className="text-muted-foreground font-semibold">Stok</dt>
+              <dd className="font-mono font-bold">
                 {item.stock_qty} {item.unit_label}
               </dd>
             </dl>
 
             {item.description && (
-              <div className="border-t pt-3 text-sm">
-                <p className="text-muted-foreground mb-1 text-xs font-medium">Deskripsi</p>
-                <p className="whitespace-pre-line">{item.description}</p>
+              <div className="rounded-2xl border-2 border-[#2C2623]/15 bg-[#FEF3C7]/40 p-3.5 text-sm dark:border-stone-700 dark:bg-amber-950/20">
+                <p className="text-muted-foreground mb-1 text-xs font-extrabold uppercase tracking-wide">
+                  Deskripsi
+                </p>
+                <p className="whitespace-pre-line font-medium">{item.description}</p>
               </div>
             )}
           </CardContent>
@@ -312,18 +448,20 @@ export function ItemDetailClient({
 
         <div className="space-y-4 lg:col-span-2">
           <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Sparkles className="size-4" />
+            <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
+              <CardHeader className="border-b-2 border-[#2C2623]/15 bg-[#E0F2FE]/55 dark:border-stone-700 dark:bg-sky-950/25">
+                <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+                  <span className="inline-flex size-7 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900">
+                    <Sparkles className="size-3.5 text-sky-600 dark:text-sky-300" />
+                  </span>
                   Kontrol Sanitasi & Kebersihan
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="font-medium">
                   Terakhir disterilkan:{" "}
                   {item.last_sanitized_at ? formatDateWIB(item.last_sanitized_at, true) : "-"}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-3 pt-4">
                 <HygieneBadge
                   status={item.hygiene_status}
                   assetType={item.asset_type}
@@ -331,7 +469,7 @@ export function ItemDetailClient({
                   todayWib={todayWib}
                 />
                 {item.next_sanitization_due && (
-                  <p className="text-muted-foreground text-xs">
+                  <p className="rounded-xl border border-[#2C2623]/15 bg-white px-3 py-2 text-xs text-muted-foreground dark:border-stone-700 dark:bg-stone-900/60">
                     Jadwal sanitasi berikutnya:{" "}
                     <strong className="text-foreground">
                       {formatDateWIB(item.next_sanitization_due)}
@@ -348,6 +486,7 @@ export function ItemDetailClient({
                         variant={item.hygiene_status === status ? "default" : "outline"}
                         onClick={() => handleHygieneUpdate(status)}
                         disabled={isPending}
+                        className="rounded-full"
                       >
                         {HYGIENE_LABELS[status]}
                       </Button>
@@ -357,17 +496,19 @@ export function ItemDetailClient({
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Boxes className="size-4" />
+            <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
+              <CardHeader className="border-b-2 border-[#2C2623]/15 bg-[#FEF3C7]/60 dark:border-stone-700 dark:bg-amber-950/25">
+                <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+                  <span className="inline-flex size-7 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900">
+                    <Boxes className="size-3.5 text-amber-600 dark:text-amber-300" />
+                  </span>
                   Kelengkapan Part & Kondisi
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="font-medium">
                   Pemantauan kepingan mainan atau kelengkapan unit.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-4 pt-4">
                 <PartProgressIndicator
                   currentParts={item.current_parts}
                   totalParts={item.total_parts}
@@ -377,7 +518,7 @@ export function ItemDetailClient({
                 {can("inventory.report_issue") && (
                   <form onSubmit={handlePartsSubmit} className="flex items-end gap-2">
                     <div className="flex-1 space-y-1">
-                      <Label htmlFor="detail-parts-input" className="text-xs">
+                      <Label htmlFor="detail-parts-input" className="text-xs font-bold">
                         Update Part ({item.unit_label})
                       </Label>
                       <Input
@@ -388,6 +529,7 @@ export function ItemDetailClient({
                         value={partsValue}
                         onChange={(e) => setPartsValue(e.target.value)}
                         disabled={isPending}
+                        className="bg-white font-mono font-bold dark:bg-stone-900"
                       />
                     </div>
                     <Button type="submit" size="sm" disabled={isPending}>
@@ -399,13 +541,13 @@ export function ItemDetailClient({
 
                 {can("inventory.report_issue") && (
                   <div className="space-y-1">
-                    <Label className="text-xs">Ubah Status Kondisi</Label>
+                    <Label className="text-xs font-bold">Ubah Status Kondisi</Label>
                     <Select
                       value={item.condition}
                       onValueChange={(v) => handleConditionChange(v as ItemCondition)}
                       disabled={isPending || lockedWrittenOff}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-stone-500 dark:bg-stone-900">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -433,10 +575,10 @@ export function ItemDetailClient({
                 {item.asset_type === "CONSUMABLE" && can("inventory.update") && (
                   <form
                     onSubmit={handleStockSubmit}
-                    className="flex items-end gap-2 border-t pt-3"
+                    className="flex items-end gap-2 border-t-2 border-dashed border-[#2C2623]/15 pt-3 dark:border-stone-700"
                   >
                     <div className="flex-1 space-y-1">
-                      <Label htmlFor="detail-stock-input" className="text-xs">
+                      <Label htmlFor="detail-stock-input" className="text-xs font-bold">
                         Stok Fisik ({item.unit_label}, Min: {item.min_stock_threshold})
                       </Label>
                       <Input
@@ -446,6 +588,7 @@ export function ItemDetailClient({
                         value={stockValue}
                         onChange={(e) => setStockValue(e.target.value)}
                         disabled={isPending}
+                        className="bg-white font-mono font-bold dark:bg-stone-900"
                       />
                     </div>
                     <Button type="submit" size="sm" variant="secondary" disabled={isPending}>
@@ -458,55 +601,68 @@ export function ItemDetailClient({
           </div>
 
           {canViewValuation && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Nilai Aset & Penyusutan Garis Lurus</CardTitle>
-                <CardDescription>
+            <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
+              <CardHeader className="border-b-2 border-[#2C2623]/15 bg-[#D1FAE5]/45 dark:border-stone-700 dark:bg-emerald-950/25">
+                <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+                  <span className="inline-flex size-7 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900">
+                    <Coins className="size-3.5 text-emerald-700 dark:text-emerald-300" />
+                  </span>
+                  Nilai Aset & Penyusutan Garis Lurus
+                </CardTitle>
+                <CardDescription className="font-medium">
                   Perhitungan otomatis berdasarkan harga beli, tanggal perolehan, umur manfaat, dan
                   nilai residu.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                  <div>
-                    <p className="text-muted-foreground text-xs">Tanggal Perolehan</p>
-                    <p className="text-sm font-medium">{formatDateWIB(item.acquisition_date)}</p>
+              <CardContent className="pt-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  <div className="rounded-2xl border-[1.5px] border-[#2C2623]/25 bg-white p-3 dark:border-stone-600 dark:bg-stone-900/60">
+                    <p className="text-muted-foreground text-xs font-semibold">Tanggal Perolehan</p>
+                    <p className="mt-1 text-sm font-bold">{formatDateWIB(item.acquisition_date)}</p>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Harga Beli</p>
-                    <p className="text-sm font-medium">{formatRupiah(item.purchase_price)}</p>
+                  <div className="rounded-2xl border-[1.5px] border-[#2C2623]/25 bg-white p-3 dark:border-stone-600 dark:bg-stone-900/60">
+                    <p className="text-muted-foreground text-xs font-semibold">Harga Beli</p>
+                    <p className="mt-1 text-sm font-bold">{formatRupiah(item.purchase_price)}</p>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Umur Manfaat</p>
-                    <p className="text-sm font-medium">
+                  <div className="rounded-2xl border-[1.5px] border-[#2C2623]/25 bg-white p-3 dark:border-stone-600 dark:bg-stone-900/60">
+                    <p className="text-muted-foreground text-xs font-semibold">Umur Manfaat</p>
+                    <p className="mt-1 text-sm font-bold">
                       {item.useful_life_months ? `${item.useful_life_months} Bulan` : "-"}
                     </p>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Akumulasi Penyusutan</p>
-                    <p className="text-sm font-medium">{formatRupiah(depreciationAccumulated)}</p>
+                  <div className="rounded-2xl border-[1.5px] border-[#2C2623]/25 bg-[#FEF3C7]/45 p-3 dark:border-stone-600 dark:bg-amber-950/30">
+                    <p className="text-muted-foreground text-xs font-semibold">Akumulasi Penyusutan</p>
+                    <p className="mt-1 text-sm font-bold">{formatRupiah(depreciationAccumulated)}</p>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Nilai Buku Saat Ini</p>
-                    <p className="text-primary text-base font-semibold">
-                      {formatRupiah(bookValue)}
-                    </p>
+                  <div className="rounded-2xl border-2 border-[#2C2623] bg-[#D1FAE5] p-3 text-[#14532D] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-emerald-950/70 dark:text-emerald-200">
+                    <p className="text-xs font-bold opacity-85">Nilai Buku Saat Ini</p>
+                    <p className="mt-1 text-base font-black">{formatRupiah(bookValue)}</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
           )}
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 border-b-2 border-[#2C2623]/15 bg-[#EDE9FE]/55 dark:border-stone-700 dark:bg-violet-950/25">
               <div>
-                <CardTitle className="text-base">Sub-Komponen / Anak Item ({childItems.length})</CardTitle>
-                <CardDescription>
+                <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+                  <span className="inline-flex size-7 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900">
+                    <Layers className="size-3.5 text-violet-700 dark:text-violet-300" />
+                  </span>
+                  Sub-Komponen / Anak Item ({childItems.length})
+                </CardTitle>
+                <CardDescription className="font-medium">
                   Komponen turunan dengan sub-kode dari {item.item_code}.
                 </CardDescription>
               </div>
               <Can action="inventory.create">
-                <Button size="sm" variant="outline" onClick={() => setCreateSubOpen(true)}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCreateSubOpen(true)}
+                  className="bg-[#FFFDF7] dark:bg-stone-900"
+                >
                   <Plus className="size-3.5" />
                   Tambah Sub-Item
                 </Button>
@@ -514,18 +670,22 @@ export function ItemDetailClient({
             </CardHeader>
             <CardContent className="p-0">
               {childItems.length === 0 ? (
-                <p className="text-muted-foreground px-6 pb-6 text-sm">
-                  Belum ada sub-item terdaftar di bawah {item.item_code}.
-                </p>
+                <div className="p-5">
+                  <KawaiiEmptyState
+                    mascot="box"
+                    title="Belum Ada Sub-Komponen"
+                    description={`Belum ada sub-item terdaftar di bawah ${item.item_code}.`}
+                  />
+                </div>
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Kode</TableHead>
-                      <TableHead>Nama</TableHead>
-                      <TableHead>Part</TableHead>
-                      <TableHead>Kondisi</TableHead>
-                      <TableHead>Sanitasi</TableHead>
+                    <TableRow className="bg-[#FEF3C7]/60 hover:bg-[#FEF3C7]/60 dark:bg-stone-800/80">
+                      <TableHead className="font-extrabold">Kode</TableHead>
+                      <TableHead className="font-extrabold">Nama</TableHead>
+                      <TableHead className="font-extrabold">Part</TableHead>
+                      <TableHead className="font-extrabold">Kondisi</TableHead>
+                      <TableHead className="font-extrabold">Sanitasi</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -534,12 +694,12 @@ export function ItemDetailClient({
                         <TableCell>
                           <Link
                             href={`/inventory/${child.id}`}
-                            className="text-primary font-mono text-xs font-semibold hover:underline"
+                            className="inline-block rounded-lg border border-[#2C2623]/25 bg-white px-2 py-0.5 font-mono text-xs font-bold text-[#14532D] hover:bg-[#D1FAE5] dark:border-stone-600 dark:bg-stone-900 dark:text-emerald-300"
                           >
                             {child.item_code}
                           </Link>
                         </TableCell>
-                        <TableCell>{child.name}</TableCell>
+                        <TableCell className="font-bold">{child.name}</TableCell>
                         <TableCell>
                           <PartProgressIndicator
                             currentParts={child.current_parts}
@@ -566,37 +726,45 @@ export function ItemDetailClient({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <History className="size-4" />
+          <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
+            <CardHeader className="border-b-2 border-[#2C2623]/15 bg-[#FFEDD5]/55 dark:border-stone-700 dark:bg-orange-950/25">
+              <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+                <span className="inline-flex size-7 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900">
+                  <History className="size-3.5 text-orange-600 dark:text-orange-300" />
+                </span>
                 Riwayat Peminjaman Terbaru
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               {borrowHistory.length === 0 ? (
-                <p className="text-muted-foreground px-6 pb-6 text-sm">
-                  Belum ada riwayat peminjaman untuk item ini.
-                </p>
+                <div className="p-5">
+                  <KawaiiEmptyState
+                    mascot="history"
+                    title="Belum Ada Riwayat Peminjaman"
+                    description="Riwayat peminjaman dan pengembalian untuk item ini akan tampil di sini."
+                  />
+                </div>
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Kode Trx</TableHead>
-                      <TableHead>Peminjam</TableHead>
-                      <TableHead>Ruangan</TableHead>
-                      <TableHead>Part</TableHead>
-                      <TableHead>Pinjam / Kembali</TableHead>
-                      <TableHead>Status</TableHead>
+                    <TableRow className="bg-[#FEF3C7]/60 hover:bg-[#FEF3C7]/60 dark:bg-stone-800/80">
+                      <TableHead className="font-extrabold">Kode Trx</TableHead>
+                      <TableHead className="font-extrabold">Peminjam</TableHead>
+                      <TableHead className="font-extrabold">Ruangan</TableHead>
+                      <TableHead className="font-extrabold">Part</TableHead>
+                      <TableHead className="font-extrabold">Pinjam / Kembali</TableHead>
+                      <TableHead className="font-extrabold">Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {borrowHistory.map((trx) => (
                       <TableRow key={trx.id}>
-                        <TableCell className="font-mono text-xs">{trx.transaction_code}</TableCell>
-                        <TableCell>{trx.borrower_name || "-"}</TableCell>
-                        <TableCell>{trx.room_code || "-"}</TableCell>
-                        <TableCell className="font-mono text-xs">
+                        <TableCell className="font-mono text-xs font-bold">
+                          {trx.transaction_code}
+                        </TableCell>
+                        <TableCell className="font-semibold">{trx.borrower_name || "-"}</TableCell>
+                        <TableCell className="font-semibold">{trx.room_code || "-"}</TableCell>
+                        <TableCell className="font-mono text-xs font-bold">
                           {trx.parts_before ?? "-"} → {trx.parts_after ?? "-"}
                         </TableCell>
                         <TableCell className="text-xs whitespace-normal">
@@ -609,12 +777,13 @@ export function ItemDetailClient({
                         </TableCell>
                         <TableCell>
                           <Badge
-                            variant={
+                            variant="outline"
+                            className={
                               trx.status === "HILANG_PART" || trx.status === "TERLAMBAT"
-                                ? "destructive"
+                                ? "rounded-full border-[1.5px] border-[#2C2623] bg-[#FECDD3] font-bold text-[#881337] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-rose-950/80 dark:text-rose-200"
                                 : trx.status === "DIKEMBALIKAN"
-                                  ? "outline"
-                                  : "secondary"
+                                  ? "rounded-full border-[1.5px] border-[#2C2623] bg-[#D1FAE5] font-bold text-[#14532D] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-emerald-950/70 dark:text-emerald-200"
+                                  : "rounded-full border-[1.5px] border-[#2C2623] bg-[#E0F2FE] font-bold text-[#0C4A6E] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-sky-950/70 dark:text-sky-200"
                             }
                           >
                             {BORROW_STATUS_LABELS[trx.status]}
@@ -660,7 +829,7 @@ export function ItemDetailClient({
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Hapus Item Inventaris?</DialogTitle>
+            <DialogTitle className="font-extrabold">Hapus Item Inventaris?</DialogTitle>
             <DialogDescription>
               Item <strong className="font-mono">{item.item_code}</strong> ({item.name}) akan
               dipindahkan ke Recycle Bin (dapat dipulihkan dalam 30 hari).

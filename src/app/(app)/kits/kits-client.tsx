@@ -14,9 +14,16 @@ import {
   QrCode,
   RotateCcw,
   Search,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 
+import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
+import {
+  KawaiiEmptyState,
+  KawaiiPageHeader,
+  KawaiiStatCard,
+} from "@/components/cartoon/kawaii-decor";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -102,6 +109,7 @@ export function KitsClient({
   todayWib,
 }: KitsClientProps) {
   const { user, role, can } = useRole();
+  const { runWithFeedback } = useCartoonFeedback();
   const canManageKits = can("kits.manage");
   const canReturnAnyKit = role !== "STAFF";
 
@@ -176,17 +184,39 @@ export function KitsClient({
     });
   }, [kits, search, roomFilter, statusFilter, itemMap]);
 
+  const hasActiveFilters = Boolean(search || roomFilter !== ALL_OPTION || statusFilter !== ALL_OPTION);
+
   const handleCheckout = (kit: ItemKit) => {
     setFeedback(null);
     setPendingKitId(kit.id);
     startTransition(async () => {
-      const res = await checkoutKitAction(kit.id);
-      setPendingKitId(null);
-      if (!res.ok) {
-        setFeedback({ type: "error", text: res.error });
-        return;
+      try {
+        const res = await runWithFeedback(
+          {
+            mode: "working",
+            workingTitle: "Memproses Check-Out Kit...",
+            workingMessage: `Dino Joguman lagi mencatat peminjaman paket ${kit.kit_code} (${kit.kit_name}) untuk sesimu~`,
+            successTitle: "Kit Siap Dipakai! 🎉",
+            successMessage: (r) =>
+              r.ok ? r.message ?? "Kit berhasil di-check-out!" : "",
+            errorTitle: "Gagal Check-Out Kit...",
+            isResultError: (r) => (!r.ok ? r.error : null),
+          },
+          () => checkoutKitAction(kit.id),
+        );
+        if (!res.ok) {
+          setFeedback({ type: "error", text: res.error });
+          return;
+        }
+        setFeedback({ type: "success", text: res.message ?? "Kit berhasil di-check-out." });
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          text: err instanceof Error ? err.message : "Gagal melakukan check-out kit.",
+        });
+      } finally {
+        setPendingKitId(null);
       }
-      setFeedback({ type: "success", text: res.message ?? "Kit berhasil di-check-out." });
     });
   };
 
@@ -223,108 +253,179 @@ export function KitsClient({
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
+    const isMultiItemReturn = itemUpdates.length > 1;
+
     startTransition(async () => {
-      const res = await returnKitAction(kit.id, {
-        hygieneStatus: returnHygiene,
-        itemUpdates,
-        notes: returnNotes.trim() || null,
-      });
-      setPendingKitId(null);
-      if (!res.ok) {
-        setFeedback({ type: "error", text: res.error });
-        return;
+      try {
+        const res = await runWithFeedback(
+          {
+            mode: isMultiItemReturn ? "batch" : "working",
+            workingTitle: isMultiItemReturn
+              ? "Memverifikasi Semua Item Kit..."
+              : "Memproses Pengembalian Kit...",
+            workingMessage: isMultiItemReturn
+              ? `Tim mini lagi memperbarui kelengkapan kepingan & status sanitasi untuk ${itemUpdates.length} barang dalam ${kit.kit_code} sekaligus~`
+              : `Dino Joguman lagi mencatat pengembalian ${kit.kit_code} dan status kebersihannya nih~`,
+            successTitle: "Kit Berhasil Dikembalikan! ✨",
+            successMessage: (r) =>
+              r.ok ? r.message ?? "Kit berhasil dikembalikan!" : "",
+            errorTitle: "Gagal Mengembalikan Kit...",
+            isResultError: (r) => (!r.ok ? r.error : null),
+          },
+          () =>
+            returnKitAction(kit.id, {
+              hygieneStatus: returnHygiene,
+              itemUpdates,
+              notes: returnNotes.trim() || null,
+            }),
+        );
+        if (!res.ok) {
+          setFeedback({ type: "error", text: res.error });
+          return;
+        }
+        setReturnTarget(null);
+        setFeedback({ type: "success", text: res.message ?? "Kit berhasil dikembalikan." });
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          text: err instanceof Error ? err.message : "Gagal memproses pengembalian kit.",
+        });
+      } finally {
+        setPendingKitId(null);
       }
-      setReturnTarget(null);
-      setFeedback({ type: "success", text: res.message ?? "Kit berhasil dikembalikan." });
     });
   };
 
   const handleConfirmDelete = () => {
     if (!deleteTarget) return;
-    const kitId = deleteTarget.id;
+    const kit = deleteTarget;
     setFeedback(null);
-    setPendingKitId(kitId);
+    setPendingKitId(kit.id);
     startTransition(async () => {
-      const res = await softDeleteKitAction(kitId);
-      setPendingKitId(null);
-      if (!res.ok) {
-        setFeedback({ type: "error", text: res.error });
-        return;
+      try {
+        const res = await runWithFeedback(
+          {
+            mode: "working",
+            workingTitle: "Memindahkan Kit ke Recycle Bin...",
+            workingMessage: `Sedang memindahkan ${kit.kit_code} (${kit.kit_name}) ke Recycle Bin, item di dalamnya tetap aman ya~`,
+            successTitle: "Kit Dipindahkan! 🗑️",
+            successMessage: (r) => (r.ok ? r.message ?? "Kit berhasil dihapus." : ""),
+            errorTitle: "Gagal Menghapus Kit...",
+            isResultError: (r) => (!r.ok ? r.error : null),
+          },
+          () => softDeleteKitAction(kit.id),
+        );
+        if (!res.ok) {
+          setFeedback({ type: "error", text: res.error });
+          return;
+        }
+        setDeleteTarget(null);
+        setFeedback({ type: "success", text: res.message ?? "Kit dihapus." });
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          text: err instanceof Error ? err.message : "Gagal menghapus kit.",
+        });
+      } finally {
+        setPendingKitId(null);
       }
-      setDeleteTarget(null);
-      setFeedback({ type: "success", text: res.message ?? "Kit dihapus." });
     });
+  };
+
+  const getKitHeaderBg = (status: KitStatus) => {
+    switch (status) {
+      case "TERSEDIA":
+        return "bg-[#D1FAE5]/55 dark:bg-emerald-950/25";
+      case "DIPINJAM":
+        return "bg-[#E0F2FE]/60 dark:bg-sky-950/25";
+      case "TIDAK_LENGKAP":
+        return "bg-[#FFE4E6]/60 dark:bg-rose-950/25";
+      case "NONAKTIF":
+        return "bg-stone-200/60 dark:bg-stone-800/40";
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Manajemen Kit Terapi</h1>
-          <p className="text-muted-foreground text-sm">
-            Bundling paket alat terapi per ruangan dengan check-out dan pengembalian 1 klik.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" asChild>
-            <Link href="/scan">
-              <QrCode className="size-4" />
-              Scan Kit
-            </Link>
-          </Button>
-          <Can action="kits.manage">
-            <Button
-              onClick={() => {
-                setEditingKit(null);
-                setFormOpen(true);
-              }}
-            >
-              <Plus className="size-4" />
-              Buat Kit Baru
+      <KawaiiPageHeader
+        badge="Bundling Paket Terapi"
+        title="Manajemen Kit Terapi"
+        description="Bundling paket alat terapi per ruangan dengan check-out dan pengembalian 1 klik."
+        accent="lavender"
+        mascot="chiikawa"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" asChild className="bg-[#FFFDF7] dark:bg-stone-900">
+              <Link href="/scan">
+                <QrCode className="size-4" />
+                Scan Kit
+              </Link>
             </Button>
-          </Can>
-        </div>
-      </div>
+            <Can action="kits.manage">
+              <Button
+                onClick={() => {
+                  setEditingKit(null);
+                  setFormOpen(true);
+                }}
+              >
+                <Plus className="size-4" />
+                Buat Kit Baru
+              </Button>
+            </Can>
+          </div>
+        }
+      />
 
       {feedback && (
-        <Alert variant={feedback.type === "error" ? "destructive" : "default"}>
+        <Alert
+          variant={feedback.type === "error" ? "destructive" : "default"}
+          className={
+            feedback.type === "success"
+              ? "rounded-2xl border-2 border-[#2C2623] bg-[#D1FAE5] text-[#14532D] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-emerald-950/60 dark:text-emerald-100"
+              : "rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] text-[#881337] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-rose-950/60 dark:text-rose-100"
+          }
+        >
           {feedback.type === "success" ? (
-            <CheckCircle2 className="size-4 text-emerald-600" />
+            <CheckCircle2 className="size-4" />
           ) : (
             <AlertTriangle className="size-4" />
           )}
-          <AlertDescription>{feedback.text}</AlertDescription>
+          <AlertDescription className="font-semibold">{feedback.text}</AlertDescription>
         </Alert>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total Kit Aktif</CardDescription>
-            <CardTitle className="text-2xl">{stats.total}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Kit Tersedia</CardDescription>
-            <CardTitle className="text-2xl text-emerald-600">{stats.available}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Sedang Dipinjam</CardDescription>
-            <CardTitle className="text-2xl text-sky-600">{stats.borrowed}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Kit Tidak Lengkap</CardDescription>
-            <CardTitle className="text-2xl text-amber-600">{stats.incomplete}</CardTitle>
-          </CardHeader>
-        </Card>
+        <KawaiiStatCard
+          label="Total Kit Aktif"
+          value={stats.total}
+          hint="Paket bundling terdaftar"
+          accent="lavender"
+          icon={<Boxes className="size-4" />}
+        />
+        <KawaiiStatCard
+          label="Kit Tersedia"
+          value={stats.available}
+          hint="Siap langsung check-out 1 klik"
+          accent="mint"
+          icon={<CheckCircle2 className="size-4" />}
+        />
+        <KawaiiStatCard
+          label="Sedang Dipinjam"
+          value={stats.borrowed}
+          hint="Sedang dipakai sesi terapi"
+          accent="sky"
+          icon={<ArrowLeftRight className="size-4" />}
+        />
+        <KawaiiStatCard
+          label="Kit Tidak Lengkap"
+          value={stats.incomplete}
+          hint="Ada item dengan part kurang"
+          accent="butter"
+          icon={<AlertTriangle className="size-4" />}
+        />
       </div>
 
-      <Card>
+      <Card className="rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
         <CardContent className="flex flex-wrap items-center gap-3 pt-6">
           <div className="relative min-w-[220px] flex-1">
             <Search className="text-muted-foreground absolute top-2.5 left-2.5 size-4" />
@@ -332,13 +433,13 @@ export function KitsClient({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Cari kode kit (KIT-...), nama kit, atau nama item…"
-              className="pl-8"
+              className="bg-white pl-8 dark:bg-stone-900"
             />
           </div>
 
           <div className="w-48">
             <Select value={roomFilter} onValueChange={setRoomFilter}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-stone-500 dark:bg-stone-900">
                 <SelectValue placeholder="Ruangan" />
               </SelectTrigger>
               <SelectContent>
@@ -354,7 +455,7 @@ export function KitsClient({
 
           <div className="w-44">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-stone-500 dark:bg-stone-900">
                 <SelectValue placeholder="Status Kit" />
               </SelectTrigger>
               <SelectContent>
@@ -368,15 +469,16 @@ export function KitsClient({
             </Select>
           </div>
 
-          {(search || roomFilter !== ALL_OPTION || statusFilter !== ALL_OPTION) && (
+          {hasActiveFilters && (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() => {
                 setSearch("");
                 setRoomFilter(ALL_OPTION);
                 setStatusFilter(ALL_OPTION);
               }}
+              className="rounded-full bg-[#FEF3C7] font-bold text-[#2C2623] hover:bg-[#FDE68A] dark:bg-amber-950/60 dark:text-amber-100"
             >
               <RotateCcw className="size-3.5" />
               Reset
@@ -386,17 +488,42 @@ export function KitsClient({
       </Card>
 
       {filteredKits.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-            <Boxes className="text-muted-foreground size-10 opacity-50" />
-            <p className="font-medium">Belum ada kit yang sesuai</p>
-            <p className="text-muted-foreground text-sm">
-              {canManageKits
-                ? "Buat kit baru untuk mengelompokkan beberapa mainan terapi dalam satu check-out."
-                : "Belum ada paket alat (kit) yang cocok dengan filter pencarian Anda."}
-            </p>
-          </CardContent>
-        </Card>
+        <KawaiiEmptyState
+          mascot="chiikawa"
+          title="Belum ada kit yang sesuai"
+          description={
+            canManageKits
+              ? "Buat kit baru untuk mengelompokkan beberapa mainan terapi dalam satu check-out praktis~"
+              : "Belum ada paket alat (kit) yang cocok dengan filter pencarian Anda."
+          }
+          action={
+            hasActiveFilters ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setRoomFilter(ALL_OPTION);
+                  setStatusFilter(ALL_OPTION);
+                }}
+              >
+                <RotateCcw className="size-3.5" />
+                Reset Filter
+              </Button>
+            ) : canManageKits ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEditingKit(null);
+                  setFormOpen(true);
+                }}
+              >
+                <Plus className="size-4" />
+                Buat Kit Baru
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {filteredKits.map((kit) => {
@@ -407,24 +534,35 @@ export function KitsClient({
             const rowBusy = isPending && pendingKitId === kit.id;
 
             return (
-              <Card key={kit.id} className="flex flex-col justify-between">
-                <CardHeader>
+              <Card
+                key={kit.id}
+                className="flex flex-col justify-between overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-stone-500 dark:bg-card dark:shadow-[4px_4px_0px_0px_#0c0a09]"
+              >
+                <CardHeader className={`border-b-2 border-[#2C2623]/15 dark:border-stone-700 ${getKitHeaderBg(kit.status)}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="space-y-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className="font-mono">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-[1.5px] border-[#2C2623] bg-white font-mono text-xs font-extrabold shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900"
+                        >
                           {kit.kit_code}
                         </Badge>
                         <KitStatusBadge status={kit.status} />
                         {kit.assigned_room && (
-                          <Badge variant="secondary">
+                          <Badge
+                            variant="outline"
+                            className="rounded-full border-[1.5px] border-[#2C2623] bg-[#FEF3C7] text-xs font-bold text-[#78350F] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-amber-950/70 dark:text-amber-200"
+                          >
                             {kit.assigned_room} · {LOCATION_LABELS[kit.assigned_room]}
                           </Badge>
                         )}
                       </div>
-                      <CardTitle className="text-lg">{kit.kit_name}</CardTitle>
+                      <CardTitle className="text-lg font-extrabold">{kit.kit_name}</CardTitle>
                       {kit.description && (
-                        <CardDescription>{kit.description}</CardDescription>
+                        <CardDescription className="font-medium text-[#2C2623]/75 dark:text-stone-300">
+                          {kit.description}
+                        </CardDescription>
                       )}
                     </div>
 
@@ -439,6 +577,7 @@ export function KitsClient({
                             setFormOpen(true);
                           }}
                           disabled={rowBusy}
+                          className="rounded-xl bg-white/70 hover:bg-[#FEF3C7] dark:bg-stone-900/60 dark:hover:bg-amber-950/60"
                         >
                           <Pencil className="size-4" />
                         </Button>
@@ -448,6 +587,7 @@ export function KitsClient({
                           title="Hapus Kit"
                           onClick={() => setDeleteTarget(kit)}
                           disabled={rowBusy || kit.status === "DIPINJAM"}
+                          className="rounded-xl bg-white/70 hover:bg-[#FFE4E6] dark:bg-stone-900/60 dark:hover:bg-rose-950/60"
                         >
                           <Trash2 className="text-destructive size-4" />
                         </Button>
@@ -456,13 +596,13 @@ export function KitsClient({
                   </div>
                 </CardHeader>
 
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-4 pt-4">
                   {activeBorrow && (
-                    <div className="rounded-md border border-sky-200 bg-sky-50/70 p-3 text-xs text-sky-950 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-100">
-                      <p className="font-medium">
+                    <div className="rounded-2xl border-2 border-[#2C2623] bg-[#E0F2FE] p-3 text-xs text-[#0C4A6E] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-sky-950/50 dark:text-sky-100">
+                      <p className="font-extrabold">
                         Sedang dipinjam oleh {activeBorrow.borrower_name || "Terapis"}
                       </p>
-                      <p className="opacity-80">
+                      <p className="mt-0.5 font-medium opacity-85">
                         {activeBorrow.transaction_code} · Sejak{" "}
                         {formatDateWIB(activeBorrow.borrowed_at, true)}
                       </p>
@@ -470,24 +610,25 @@ export function KitsClient({
                   )}
 
                   <div className="space-y-2">
-                    <p className="text-muted-foreground text-xs font-medium">
+                    <p className="text-muted-foreground flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide">
+                      <Sparkles className="size-3.5 text-amber-500" />
                       Komposisi Item ({bundledItems.length} barang)
                     </p>
                     {bundledItems.length === 0 ? (
-                      <p className="text-muted-foreground text-xs italic">
+                      <p className="rounded-2xl border-2 border-dashed border-[#2C2623]/20 bg-white/70 p-3 text-xs italic text-muted-foreground dark:border-stone-700 dark:bg-stone-900/40">
                         Tidak ada item aktif dalam kit ini.
                       </p>
                     ) : (
-                      <ul className="divide-y rounded-md border">
+                      <ul className="divide-y-2 divide-[#2C2623]/10 overflow-hidden rounded-2xl border-2 border-[#2C2623]/20 bg-white dark:divide-stone-800 dark:border-stone-700 dark:bg-stone-900/50">
                         {bundledItems.map((item) => (
                           <li
                             key={item.id}
-                            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs"
+                            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-xs transition-colors hover:bg-[#FEF3C7]/35 dark:hover:bg-stone-800/40"
                           >
                             <div className="min-w-0">
                               <Link
                                 href={`/inventory/${item.id}`}
-                                className="font-medium hover:underline"
+                                className="font-bold text-[#2C2623] hover:underline dark:text-stone-100"
                               >
                                 {item.name}
                               </Link>
@@ -515,8 +656,13 @@ export function KitsClient({
                   </div>
                 </CardContent>
 
-                <CardFooter className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-                  <Button variant="ghost" size="sm" asChild>
+                <CardFooter className="flex flex-wrap items-center justify-between gap-2 border-t-2 border-[#2C2623]/15 bg-white/60 pt-4 dark:border-stone-700 dark:bg-stone-900/30">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    asChild
+                    className="rounded-full bg-[#FFFDF7] font-bold dark:bg-stone-900"
+                  >
                     <Link href={`/scan?code=${encodeURIComponent(kit.kit_code)}`}>
                       <QrCode className="size-3.5" />
                       Buka di Scanner
@@ -531,6 +677,7 @@ export function KitsClient({
                           size="sm"
                           onClick={() => handleOpenReturnDialog(kit)}
                           disabled={rowBusy}
+                          className="rounded-full font-extrabold"
                         >
                           {rowBusy ? (
                             <Loader2 className="size-4 animate-spin" />
@@ -540,7 +687,10 @@ export function KitsClient({
                           Kembalikan Kit
                         </Button>
                       ) : (
-                        <Badge variant="secondary" className="text-xs font-normal">
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-[1.5px] border-[#2C2623] bg-[#E0F2FE] text-xs font-bold text-[#0C4A6E] dark:border-stone-400 dark:bg-sky-950/70 dark:text-sky-200"
+                        >
                           Dipinjam oleh {activeBorrow?.borrower_name || "rekan terapis"}
                         </Badge>
                       )
@@ -549,6 +699,7 @@ export function KitsClient({
                         size="sm"
                         onClick={() => handleCheckout(kit)}
                         disabled={rowBusy || kit.status === "NONAKTIF"}
+                        className="rounded-full font-extrabold"
                       >
                         {rowBusy ? (
                           <Loader2 className="size-4 animate-spin" />
@@ -566,41 +717,49 @@ export function KitsClient({
         </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <History className="size-4" />
+      <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
+        <CardHeader className="border-b-2 border-[#2C2623]/15 bg-[#FFEDD5]/55 dark:border-stone-700 dark:bg-orange-950/25">
+          <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+            <span className="inline-flex size-7 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900">
+              <History className="size-3.5 text-orange-600 dark:text-orange-300" />
+            </span>
             Riwayat Transaksi Kit Terbaru
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {recentKitBorrows.length === 0 ? (
-            <p className="text-muted-foreground px-6 pb-6 text-sm">
-              Belum ada transaksi peminjaman kit.
-            </p>
+            <div className="p-5">
+              <KawaiiEmptyState
+                mascot="history"
+                title="Belum Ada Transaksi Kit"
+                description="Riwayat peminjaman dan pengembalian paket kit terapi akan tampil di sini."
+              />
+            </div>
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Kode Trx</TableHead>
-                  <TableHead>Kode Kit</TableHead>
-                  <TableHead>Peminjam</TableHead>
-                  <TableHead>Ruangan</TableHead>
-                  <TableHead>Total Part</TableHead>
-                  <TableHead>Waktu</TableHead>
-                  <TableHead>Status</TableHead>
+                <TableRow className="bg-[#FEF3C7]/60 hover:bg-[#FEF3C7]/60 dark:bg-stone-800/80">
+                  <TableHead className="font-extrabold">Kode Trx</TableHead>
+                  <TableHead className="font-extrabold">Kode Kit</TableHead>
+                  <TableHead className="font-extrabold">Peminjam</TableHead>
+                  <TableHead className="font-extrabold">Ruangan</TableHead>
+                  <TableHead className="font-extrabold">Total Part</TableHead>
+                  <TableHead className="font-extrabold">Waktu</TableHead>
+                  <TableHead className="font-extrabold">Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {recentKitBorrows.map((trx) => (
                   <TableRow key={trx.id}>
-                    <TableCell className="font-mono text-xs">{trx.transaction_code}</TableCell>
-                    <TableCell className="font-mono text-xs">
+                    <TableCell className="font-mono text-xs font-bold">
+                      {trx.transaction_code}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs font-bold">
                       {trx.kit_id ? kitCodeMap.get(trx.kit_id) ?? "-" : "-"}
                     </TableCell>
-                    <TableCell>{trx.borrower_name || "-"}</TableCell>
-                    <TableCell>{trx.room_code || "-"}</TableCell>
-                    <TableCell className="font-mono text-xs">
+                    <TableCell className="font-semibold">{trx.borrower_name || "-"}</TableCell>
+                    <TableCell className="font-semibold">{trx.room_code || "-"}</TableCell>
+                    <TableCell className="font-mono text-xs font-bold">
                       {trx.parts_before ?? "-"} → {trx.parts_after ?? "-"}
                     </TableCell>
                     <TableCell className="text-xs whitespace-normal">
@@ -613,12 +772,13 @@ export function KitsClient({
                     </TableCell>
                     <TableCell>
                       <Badge
-                        variant={
+                        variant="outline"
+                        className={
                           trx.status === "HILANG_PART" || trx.status === "TERLAMBAT"
-                            ? "destructive"
+                            ? "rounded-full border-[1.5px] border-[#2C2623] bg-[#FECDD3] font-bold text-[#881337] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-rose-950/80 dark:text-rose-200"
                             : trx.status === "DIKEMBALIKAN"
-                              ? "outline"
-                              : "secondary"
+                              ? "rounded-full border-[1.5px] border-[#2C2623] bg-[#D1FAE5] font-bold text-[#14532D] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-emerald-950/70 dark:text-emerald-200"
+                              : "rounded-full border-[1.5px] border-[#2C2623] bg-[#E0F2FE] font-bold text-[#0C4A6E] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-sky-950/70 dark:text-sky-200"
                         }
                       >
                         {BORROW_STATUS_LABELS[trx.status]}
@@ -653,19 +813,21 @@ export function KitsClient({
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Kembalikan Kit ({returnTarget?.kit_code})</DialogTitle>
+            <DialogTitle className="font-extrabold">
+              Kembalikan Kit ({returnTarget?.kit_code})
+            </DialogTitle>
             <DialogDescription>
               Verifikasi kelengkapan part dan status sanitasi mainan setelah sesi terapi.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleConfirmReturn} className="space-y-4">
             <div className="space-y-2">
-              <Label>Status Kebersihan Mainan Setelah Sesi</Label>
+              <Label className="font-bold">Status Kebersihan Mainan Setelah Sesi</Label>
               <Select
                 value={returnHygiene}
                 onValueChange={(v) => setReturnHygiene(v as HygieneStatus)}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -679,8 +841,8 @@ export function KitsClient({
             </div>
 
             {returnTarget && returnTarget.bundled_item_ids.length > 0 && (
-              <div className="space-y-2 rounded-md border p-3">
-                <Label className="text-xs font-medium">Cek Kepingan / Part Item</Label>
+              <div className="space-y-2.5 rounded-2xl border-2 border-[#2C2623] bg-[#FEF3C7]/45 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-amber-950/25">
+                <Label className="text-xs font-extrabold">Cek Kepingan / Part Item</Label>
                 <div className="space-y-2.5">
                   {returnTarget.bundled_item_ids.map((itemId) => {
                     const item = itemMap.get(itemId);
@@ -689,10 +851,10 @@ export function KitsClient({
                     return (
                       <div
                         key={item.id}
-                        className="flex items-center justify-between gap-2 text-xs"
+                        className="flex items-center justify-between gap-2 rounded-xl border border-[#2C2623]/15 bg-white px-2.5 py-2 text-xs dark:border-stone-700 dark:bg-stone-900/70"
                       >
                         <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">{item.name}</p>
+                          <p className="truncate font-bold">{item.name}</p>
                           <p className="text-muted-foreground font-mono text-[11px]">
                             {item.item_code} · Total: {item.total_parts} {item.unit_label}
                           </p>
@@ -708,7 +870,7 @@ export function KitsClient({
                               [item.id]: Math.trunc(Number(e.target.value) || 0),
                             }))
                           }
-                          className="h-8 w-20 text-right font-mono"
+                          className="h-8 w-20 bg-white text-right font-mono font-bold dark:bg-stone-900"
                         />
                       </div>
                     );
@@ -718,13 +880,16 @@ export function KitsClient({
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="kit-return-notes">Catatan Pengembalian (Opsional)</Label>
+              <Label htmlFor="kit-return-notes" className="font-bold">
+                Catatan Pengembalian (Opsional)
+              </Label>
               <Textarea
                 id="kit-return-notes"
                 rows={2}
                 value={returnNotes}
                 onChange={(e) => setReturnNotes(e.target.value)}
                 placeholder="Catat jika ada kerusakan atau kepingan tertinggal…"
+                className="rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900"
               />
             </div>
 
@@ -754,7 +919,7 @@ export function KitsClient({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Hapus Kit?</DialogTitle>
+            <DialogTitle className="font-extrabold">Hapus Kit?</DialogTitle>
             <DialogDescription>
               Kit <strong className="font-mono">{deleteTarget?.kit_code}</strong> (
               {deleteTarget?.kit_name}) akan dipindahkan ke Recycle Bin. Item di dalamnya tetap aman di inventaris.

@@ -44,9 +44,12 @@ export default async function KitsPage() {
 
   if (kitsRes.error) {
     return (
-      <Alert variant="destructive">
+      <Alert
+        variant="destructive"
+        className="rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] text-[#881337] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-rose-950/60 dark:text-rose-100"
+      >
         <AlertTriangle className="size-4" />
-        <AlertTitle>Gagal Memuat Data Kit</AlertTitle>
+        <AlertTitle className="font-extrabold">Gagal Memuat Data Kit</AlertTitle>
         <AlertDescription>{kitsRes.error.message}</AlertDescription>
       </Alert>
     );

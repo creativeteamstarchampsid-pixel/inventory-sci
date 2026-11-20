@@ -10,30 +10,34 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  LayoutGrid,
   Lock,
   Pencil,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
+  Table2,
   Trash2,
   UserX,
   Users,
 } from "lucide-react";
 
+import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
+import {
+  KawaiiEmptyState,
+  KawaiiPageHeader,
+  KawaiiStatCard,
+} from "@/components/cartoon/kawaii-decor";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -134,6 +138,14 @@ const EMPTY_FORM: FormState = {
   is_active: true,
 };
 
+const VAULT_CARD_RIBBONS = [
+  "bg-[#E0F2FE] dark:bg-sky-950/45",
+  "bg-[#D1FAE5] dark:bg-emerald-950/45",
+  "bg-[#FEF3C7] dark:bg-amber-950/45",
+  "bg-[#EDE9FE] dark:bg-violet-950/45",
+  "bg-[#FFE8D6] dark:bg-orange-950/45",
+] as const;
+
 function generateStrongPassword(length = 16): string {
   const charset =
     "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*?";
@@ -156,12 +168,14 @@ export function VaultClient({
   const canViewBilling = can("vault.view_billing");
   const canReveal = can("vault.reveal_secret");
   const canManage = can("vault.manage");
+  const { showWorking, showSuccess, showError } = useCartoonFeedback();
 
   const [search, setSearch] = useState("");
   const [filterTab, setFilterTab] = useState<
     "all" | "expiring" | "rotate" | "active" | "inactive"
   >("all");
   const [cycleFilter, setCycleFilter] = useState<"ALL" | BillingCycle>("ALL");
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
 
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
@@ -181,9 +195,8 @@ export function VaultClient({
   const [isPending, startTransition] = useTransition();
 
   // Reveal Dialog
-  const [revealTarget, setRevealTarget] = useState<VaultSubscriptionItem | null>(
-    null,
-  );
+  const [revealTarget, setRevealTarget] =
+    useState<VaultSubscriptionItem | null>(null);
   const [revealedSecret, setRevealedSecret] = useState<RevealedSecret | null>(
     null,
   );
@@ -272,7 +285,8 @@ export function VaultClient({
   }, [enriched, canViewBilling]);
 
   const offboardingAlerts = useMemo(
-    () => enriched.filter((e) => e.sub.is_active && e.offboardedFlags.length > 0),
+    () =>
+      enriched.filter((e) => e.sub.is_active && e.offboardedFlags.length > 0),
     [enriched],
   );
 
@@ -291,7 +305,11 @@ export function VaultClient({
     const q = search.trim().toLowerCase();
     return enriched.filter(({ sub, renewal, offboardedFlags }) => {
       if (filterTab === "expiring") {
-        if (!sub.is_active || renewal.daysLeft === null || renewal.daysLeft > 7) {
+        if (
+          !sub.is_active ||
+          renewal.daysLeft === null ||
+          renewal.daysLeft > 7
+        ) {
           return false;
         }
       } else if (filterTab === "rotate") {
@@ -312,13 +330,24 @@ export function VaultClient({
         sub.service_name,
         sub.plan_name ?? "",
         sub.login_email,
-        ...sub.assigned_users.map((u) => `${u.full_name ?? ""} ${u.email ?? ""}`),
+        ...sub.assigned_users.map(
+          (u) => `${u.full_name ?? ""} ${u.email ?? ""}`,
+        ),
       ]
         .join(" ")
         .toLowerCase();
       return haystack.includes(q);
     });
   }, [enriched, filterTab, cycleFilter, search]);
+
+  const hasActiveFilters =
+    filterTab !== "all" || cycleFilter !== "ALL" || search.trim().length > 0;
+
+  function resetFilters() {
+    setFilterTab("all");
+    setCycleFilter("ALL");
+    setSearch("");
+  }
 
   async function copyToClipboard(text: string, marker: string) {
     try {
@@ -386,43 +415,102 @@ export function VaultClient({
     setRevealError(null);
     setShowPlainPassword(false);
     setRevealLoading(true);
+    showWorking({
+      title: "Membuka Kunci Brankas AES-256...",
+      message: `Dino Joguman lagi mendekripsi kata sandi ${sub.service_name} (${sub.sub_code}) dan mencatat akses aman ke Audit Log~`,
+    });
 
-    const res = await revealSecretAction(sub.id);
-    setRevealLoading(false);
-    if (!res.ok) {
-      setRevealError(res.error);
-      return;
+    try {
+      const res = await revealSecretAction(sub.id);
+      setRevealLoading(false);
+      if (!res.ok) {
+        setRevealError(res.error);
+        showError({
+          title: "Yah, Gagal Membuka Sandi...",
+          message: res.error,
+        });
+        return;
+      }
+      setRevealedSecret(res.data);
+      showSuccess({
+        title: "Kredensial Terbuka! ♪",
+        message: `Kata sandi ${sub.service_name} siap dilihat. Jaga kerahasiaannya ya~`,
+        durationMs: 1350,
+      });
+    } catch (err) {
+      setRevealLoading(false);
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Gagal mendekripsi kredensial dari brankas.";
+      setRevealError(msg);
+      showError({
+        title: "Yah, Gagal Membuka Sandi...",
+        message: msg,
+      });
     }
-    setRevealedSecret(res.data);
   }
 
   async function handleOneClickCopyPassword(sub: VaultSubscriptionItem) {
     setCopyingSubId(sub.id);
     setFeedback(null);
-    const res = await revealSecretAction(sub.id);
-    setCopyingSubId(null);
+    showWorking({
+      title: "Mengambil & Menyalin Sandi...",
+      message: `Dino Joguman lagi membuka kunci AES-256 ${sub.service_name} untuk disalin cepat ke clipboard~`,
+    });
 
-    if (!res.ok) {
-      setFeedback({ type: "error", message: res.error });
-      return;
-    }
+    try {
+      const res = await revealSecretAction(sub.id);
+      setCopyingSubId(null);
 
-    const copied = await copyToClipboard(res.data.passwordPlain, `row-${sub.id}`);
-    if (copied) {
-      setCopiedId(sub.id);
-      setTimeout(() => {
-        setCopiedId((prev) => (prev === sub.id ? null : prev));
-      }, 3000);
-      setFeedback({
-        type: "success",
-        message: `Kata sandi ${sub.service_name} (${sub.sub_code}) berhasil disalin ke clipboard (tercatat di Audit Log).`,
+      if (!res.ok) {
+        setFeedback({ type: "error", message: res.error });
+        showError({
+          title: "Yah, Gagal Menyalin Sandi...",
+          message: res.error,
+        });
+        return;
+      }
+
+      const copied = await copyToClipboard(
+        res.data.passwordPlain,
+        `row-${sub.id}`,
+      );
+      if (copied) {
+        setCopiedId(sub.id);
+        setTimeout(() => {
+          setCopiedId((prev) => (prev === sub.id ? null : prev));
+        }, 3000);
+        setFeedback({
+          type: "success",
+          message: `Kata sandi ${sub.service_name} (${sub.sub_code}) berhasil disalin ke clipboard (tercatat di Audit Log).`,
+        });
+        showSuccess({
+          title: "Sandi Tersalin! ♪",
+          message: `Kata sandi ${sub.service_name} (${sub.sub_code}) sudah siap ditempel & tercatat di Audit Log.`,
+          durationMs: 1700,
+        });
+      } else {
+        // Fallback: show modal so admin can copy manually
+        setRevealTarget(sub);
+        setRevealedSecret(res.data);
+        setRevealError(null);
+        setShowPlainPassword(false);
+        showSuccess({
+          title: "Sandi Siap Disalin Manual ♪",
+          message: `Browser membatasi salin otomatis — silakan salin dari jendela kredensial ${sub.service_name}.`,
+          durationMs: 1600,
+        });
+      }
+    } catch (err) {
+      setCopyingSubId(null);
+      const msg =
+        err instanceof Error ? err.message : "Gagal menyalin kata sandi.";
+      setFeedback({ type: "error", message: msg });
+      showError({
+        title: "Yah, Gagal Menyalin Sandi...",
+        message: msg,
       });
-    } else {
-      // Fallback: show modal so admin can copy manually
-      setRevealTarget(sub);
-      setRevealedSecret(res.data);
-      setRevealError(null);
-      setShowPlainPassword(false);
     }
   }
 
@@ -437,7 +525,9 @@ export function VaultClient({
       }
       return {
         ...prev,
-        assigned_user_ids: prev.assigned_user_ids.filter((id) => id !== profileId),
+        assigned_user_ids: prev.assigned_user_ids.filter(
+          (id) => id !== profileId,
+        ),
       };
     });
   }
@@ -480,66 +570,102 @@ export function VaultClient({
       },
     );
 
+    const serviceName = form.service_name;
+    const isCreate = formMode === "create";
+
+    showWorking({
+      title: isCreate
+        ? "Mengenkripsi & Menyimpan Akun..."
+        : "Memperbarui Brankas Akun...",
+      message: isCreate
+        ? `Dino Joguman lagi mengunci kata sandi ${serviceName} dengan AES-256 dan menyimpannya ke brankas aman~`
+        : `Dino Joguman lagi merapikan perubahan akun ${serviceName} di brankas terenkripsi~`,
+    });
+
     startTransition(async () => {
-      if (formMode === "create") {
-        const res = await createSubscriptionAction({
-          service_name: form.service_name,
-          plan_name: form.plan_name || null,
-          login_email: form.login_email,
-          password_plain: form.password_plain,
-          pin_recovery_plain: form.pin_recovery_plain || null,
-          billing_cycle: form.billing_cycle,
-          cost: costNum,
-          payment_method: form.payment_method,
-          payment_account_label: form.payment_account_label || null,
-          renewal_date: form.renewal_date || null,
-          auto_renew: form.auto_renew,
-          max_slots: maxSlotsNum,
-          assigned_users: assignedUsers,
-          notes: form.notes || null,
-          is_active: form.is_active,
-        });
+      try {
+        if (isCreate) {
+          const res = await createSubscriptionAction({
+            service_name: form.service_name,
+            plan_name: form.plan_name || null,
+            login_email: form.login_email,
+            password_plain: form.password_plain,
+            pin_recovery_plain: form.pin_recovery_plain || null,
+            billing_cycle: form.billing_cycle,
+            cost: costNum,
+            payment_method: form.payment_method,
+            payment_account_label: form.payment_account_label || null,
+            renewal_date: form.renewal_date || null,
+            auto_renew: form.auto_renew,
+            max_slots: maxSlotsNum,
+            assigned_users: assignedUsers,
+            notes: form.notes || null,
+            is_active: form.is_active,
+          });
 
-        if (!res.ok) {
-          setFormError(res.error);
-          return;
+          if (!res.ok) {
+            setFormError(res.error);
+            showError({
+              title: "Yah, Gagal Menyimpan ke Brankas...",
+              message: res.error,
+            });
+            return;
+          }
+
+          setFormOpen(false);
+          const successMsg = `Langganan ${serviceName} (${res.data.sub_code}) berhasil ditambahkan ke Vault terenkripsi.`;
+          setFeedback({ type: "success", message: successMsg });
+          showSuccess({
+            title: "Akun Aman di Brankas! ♪",
+            message: successMsg,
+          });
+        } else if (form.id) {
+          const res = await updateSubscriptionAction({
+            id: form.id,
+            service_name: form.service_name,
+            plan_name: form.plan_name || null,
+            login_email: form.login_email,
+            password_plain: form.password_plain || null,
+            pin_recovery_plain: form.pin_recovery_plain || null,
+            clear_pin_recovery: form.clear_pin_recovery,
+            billing_cycle: form.billing_cycle,
+            cost: costNum,
+            payment_method: form.payment_method,
+            payment_account_label: form.payment_account_label || null,
+            renewal_date: form.renewal_date || null,
+            auto_renew: form.auto_renew,
+            max_slots: maxSlotsNum,
+            assigned_users: assignedUsers,
+            notes: form.notes || null,
+            is_active: form.is_active,
+          });
+
+          if (!res.ok) {
+            setFormError(res.error);
+            showError({
+              title: "Yah, Gagal Memperbarui Akun...",
+              message: res.error,
+            });
+            return;
+          }
+
+          setFormOpen(false);
+          const successMsg = `Perubahan langganan ${serviceName} (${res.data.sub_code}) berhasil disimpan.`;
+          setFeedback({ type: "success", message: successMsg });
+          showSuccess({
+            title: "Brankas Diperbarui! ♪",
+            message: successMsg,
+          });
         }
-
-        setFormOpen(false);
-        setFeedback({
-          type: "success",
-          message: `Langganan ${form.service_name} (${res.data.sub_code}) berhasil ditambahkan ke Vault terenkripsi.`,
-        });
-      } else if (form.id) {
-        const res = await updateSubscriptionAction({
-          id: form.id,
-          service_name: form.service_name,
-          plan_name: form.plan_name || null,
-          login_email: form.login_email,
-          password_plain: form.password_plain || null,
-          pin_recovery_plain: form.pin_recovery_plain || null,
-          clear_pin_recovery: form.clear_pin_recovery,
-          billing_cycle: form.billing_cycle,
-          cost: costNum,
-          payment_method: form.payment_method,
-          payment_account_label: form.payment_account_label || null,
-          renewal_date: form.renewal_date || null,
-          auto_renew: form.auto_renew,
-          max_slots: maxSlotsNum,
-          assigned_users: assignedUsers,
-          notes: form.notes || null,
-          is_active: form.is_active,
-        });
-
-        if (!res.ok) {
-          setFormError(res.error);
-          return;
-        }
-
-        setFormOpen(false);
-        setFeedback({
-          type: "success",
-          message: `Perubahan langganan ${form.service_name} (${res.data.sub_code}) berhasil disimpan.`,
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : "Gagal menyimpan data brankas akun.";
+        setFormError(msg);
+        showError({
+          title: "Yah, Gagal Menyimpan ke Brankas...",
+          message: msg,
         });
       }
     });
@@ -567,43 +693,86 @@ export function VaultClient({
       return;
     }
 
+    const targetSub = rotateTarget.sub;
+    showWorking({
+      title: "Merotasi Kata Sandi...",
+      message: `Dino Joguman lagi mengenkripsi sandi baru untuk ${targetSub.service_name} dan memperbarui keamanan akses~`,
+    });
+
     startTransition(async () => {
-      const res = await rotateSubscriptionPasswordAction({
-        id: rotateTarget.sub.id,
-        new_password: rotatePassword,
-        new_pin_recovery: rotatePin || null,
-        remove_user_ids: removeUserIds,
-      });
+      try {
+        const res = await rotateSubscriptionPasswordAction({
+          id: targetSub.id,
+          new_password: rotatePassword,
+          new_pin_recovery: rotatePin || null,
+          remove_user_ids: removeUserIds,
+        });
 
-      if (!res.ok) {
-        setRotateError(res.error);
-        return;
+        if (!res.ok) {
+          setRotateError(res.error);
+          showError({
+            title: "Yah, Gagal Rotasi Sandi...",
+            message: res.error,
+          });
+          return;
+        }
+
+        setRotateTarget(null);
+        const successMsg = `Kata sandi ${targetSub.service_name} berhasil dirotasi dan diperbarui.`;
+        setFeedback({ type: "success", message: successMsg });
+        showSuccess({
+          title: "Sandi Berhasil Dirotasi! ♪",
+          message: successMsg,
+        });
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Gagal merotasi kata sandi.";
+        setRotateError(msg);
+        showError({
+          title: "Yah, Gagal Rotasi Sandi...",
+          message: msg,
+        });
       }
-
-      const name = rotateTarget.sub.service_name;
-      setRotateTarget(null);
-      setFeedback({
-        type: "success",
-        message: `Kata sandi ${name} berhasil dirotasi dan diperbarui.`,
-      });
     });
   }
 
   function handleSoftDelete() {
     if (!deleteTarget) return;
+    const target = deleteTarget;
+    showWorking({
+      title: "Memindahkan ke Recycle Bin...",
+      message: `Dino Joguman lagi memindahkan akun ${target.service_name} (${target.sub_code}) ke Recycle Bin dengan aman~`,
+    });
+
     startTransition(async () => {
-      const res = await softDeleteSubscriptionAction(deleteTarget.id);
-      if (!res.ok) {
-        setFeedback({ type: "error", message: res.error });
+      try {
+        const res = await softDeleteSubscriptionAction(target.id);
+        if (!res.ok) {
+          setFeedback({ type: "error", message: res.error });
+          setDeleteTarget(null);
+          showError({
+            title: "Yah, Gagal Menghapus Akun...",
+            message: res.error,
+          });
+          return;
+        }
         setDeleteTarget(null);
-        return;
+        const successMsg = `${target.service_name} dipindahkan ke Recycle Bin (dapat dipulihkan dalam 30 hari).`;
+        setFeedback({ type: "success", message: successMsg });
+        showSuccess({
+          title: "Akun Dipindahkan! ♪",
+          message: successMsg,
+        });
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Gagal menghapus akun brankas.";
+        setFeedback({ type: "error", message: msg });
+        setDeleteTarget(null);
+        showError({
+          title: "Yah, Gagal Menghapus Akun...",
+          message: msg,
+        });
       }
-      const deletedName = deleteTarget.service_name;
-      setDeleteTarget(null);
-      setFeedback({
-        type: "success",
-        message: `${deletedName} dipindahkan ke Recycle Bin (dapat dipulihkan dalam 30 hari).`,
-      });
     });
   }
 
@@ -619,53 +788,71 @@ export function VaultClient({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <KeyRound className="text-primary size-6" />
-            Brankas Akun Digital
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Brankas akun digital operasional Star Champs (enkripsi AES-256), jadwal tagihan &amp; keamanan offboarding.
-          </p>
-        </div>
-
-        <Can action="vault.manage">
-          <Button onClick={openCreateDialog}>
-            <Plus className="size-4" />
-            Tambah Langganan
-          </Button>
-        </Can>
-      </div>
+      {/* 2D Japanese Cartoon Page Header */}
+      <KawaiiPageHeader
+        badge="Enkripsi AES-256"
+        title="Brankas Akun Digital"
+        description="Brankas akun digital operasional Star Champs (enkripsi AES-256), jadwal tagihan & keamanan offboarding."
+        accent="sky"
+        mascot="vault"
+        actions={
+          <Can action="vault.manage">
+            <Button
+              onClick={openCreateDialog}
+              className="rounded-2xl border-2 border-[#2C2623] bg-[#7CC4FA] font-extrabold text-[#0C4A6E] shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#5EB6F9] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none dark:border-[#F5E9D6]/70"
+            >
+              <Plus className="size-4 stroke-[2.5]" />
+              Tambah Langganan
+            </Button>
+          </Can>
+        }
+      />
 
       {schemaError && (
-        <Alert variant="warning">
+        <Alert
+          variant="warning"
+          className="rounded-2xl border-2 border-[#2C2623] bg-[#FEF3C7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-amber-400/50 dark:bg-amber-950/40"
+        >
           <AlertTriangle className="size-4" />
-          <AlertTitle>Gagal Memuat Data Brankas Akun Digital</AlertTitle>
+          <AlertTitle className="font-extrabold">
+            Gagal Memuat Data Brankas Akun Digital
+          </AlertTitle>
           <AlertDescription>{schemaError}</AlertDescription>
         </Alert>
       )}
 
       {!vaultKeyConfigured && (canManage || canReveal) && (
-        <Alert variant="warning">
+        <Alert
+          variant="warning"
+          className="rounded-2xl border-2 border-[#2C2623] bg-[#FEF3C7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-amber-400/50 dark:bg-amber-950/40"
+        >
           <Lock className="size-4" />
-          <AlertTitle>Kunci Enkripsi Server Belum Dikonfigurasi</AlertTitle>
+          <AlertTitle className="font-extrabold">
+            Kunci Enkripsi Server Belum Dikonfigurasi
+          </AlertTitle>
           <AlertDescription>
-            Variabel environment <code>VAULT_ENCRYPTION_KEY</code> belum diatur atau kurang dari 16
-            karakter. Tambah/ubah/buka kata sandi akan tertolak sampai kunci AES-256 dikonfigurasi di
-            server.
+            Variabel environment <code>VAULT_ENCRYPTION_KEY</code> belum diatur
+            atau kurang dari 16 karakter. Tambah/ubah/buka kata sandi akan
+            tertolak sampai kunci AES-256 dikonfigurasi di server.
           </AlertDescription>
         </Alert>
       )}
 
       {feedback && (
-        <Alert variant={feedback.type === "error" ? "destructive" : "default"}>
+        <Alert
+          variant={feedback.type === "error" ? "destructive" : "default"}
+          className={
+            feedback.type === "error"
+              ? "rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] shadow-[3px_3px_0px_0px_#2C2623] dark:border-rose-400/50 dark:bg-rose-950/40"
+              : "rounded-2xl border-2 border-[#2C2623] bg-[#D1FAE5] text-[#14532D] shadow-[3px_3px_0px_0px_#2C2623] dark:border-emerald-400/50 dark:bg-emerald-950/45 dark:text-emerald-100"
+          }
+        >
           {feedback.type === "error" ? (
             <AlertTriangle className="size-4" />
           ) : (
-            <Check className="size-4 text-emerald-600" />
+            <Check className="size-4 text-emerald-700 dark:text-emerald-300" />
           )}
-          <AlertTitle>
+          <AlertTitle className="font-extrabold">
             {feedback.type === "error" ? "Terjadi Kendala" : "Berhasil"}
           </AlertTitle>
           <AlertDescription>{feedback.message}</AlertDescription>
@@ -674,26 +861,33 @@ export function VaultClient({
 
       {/* Staff Offboarding Warning Banner */}
       {offboardingAlerts.length > 0 && (
-        <Alert variant="destructive" className="border-red-300 bg-red-50/70 dark:border-red-900 dark:bg-red-950/30">
+        <Alert
+          variant="destructive"
+          className="rounded-3xl border-2 border-[#2C2623] bg-[#FFE4E6] text-[#881337] shadow-[4px_4px_0px_0px_#2C2623] dark:border-rose-400/60 dark:bg-rose-950/40 dark:text-rose-100"
+        >
           <ShieldAlert className="size-4" />
-          <AlertTitle>
-            Peringatan Keamanan Offboarding: {offboardingAlerts.length} Akun Wajib Rotasi Kata Sandi!
+          <AlertTitle className="font-extrabold">
+            Peringatan Keamanan Offboarding: {offboardingAlerts.length} Akun
+            Wajib Rotasi Kata Sandi!
           </AlertTitle>
           <AlertDescription className="w-full space-y-2 pt-1">
-            <p>
-              Staf berikut berstatus nonaktif / offboarded setelah rotasi kata sandi terakhir,
-              namun masih tercatat sebagai pengguna pada akun langganan di bawah ini:
+            <p className="font-medium">
+              Staf berikut berstatus nonaktif / offboarded setelah rotasi kata
+              sandi terakhir, namun masih tercatat sebagai pengguna pada akun
+              langganan di bawah ini:
             </p>
-            <div className="w-full space-y-1.5">
+            <div className="w-full space-y-2">
               {offboardingAlerts.map(({ sub, offboardedFlags }) => (
                 <div
                   key={sub.id}
-                  className="bg-background/80 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 px-3 py-2 text-xs dark:border-red-900"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/60 bg-[#FFFDF7] px-3.5 py-2.5 text-xs text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-rose-400/40 dark:bg-background/90 dark:text-foreground"
                 >
                   <div className="space-y-0.5">
-                    <div className="font-semibold">
+                    <div className="font-extrabold">
                       {sub.service_name}{" "}
-                      <span className="text-muted-foreground font-mono">({sub.sub_code})</span>
+                      <span className="text-muted-foreground font-mono font-bold">
+                        ({sub.sub_code})
+                      </span>
                     </div>
                     <div className="text-muted-foreground">
                       Mantan/Nonaktif:{" "}
@@ -707,7 +901,8 @@ export function VaultClient({
                             }`,
                         )
                         .join(", ")}{" "}
-                      · Rotasi terakhir: {formatDateWIB(sub.password_rotated_at, true)}
+                      · Rotasi terakhir:{" "}
+                      {formatDateWIB(sub.password_rotated_at, true)}
                     </div>
                   </div>
                   <Can action="vault.manage">
@@ -715,6 +910,7 @@ export function VaultClient({
                       size="sm"
                       variant="destructive"
                       onClick={() => openRotateDialog(sub, offboardedFlags)}
+                      className="rounded-full border-2 border-[#2C2623] font-extrabold shadow-[2px_2px_0px_0px_#2C2623]"
                     >
                       <RefreshCw className="size-3.5" />
                       Rotasi Sandi Sekarang
@@ -729,13 +925,17 @@ export function VaultClient({
 
       {/* Renewal H-7 / H-3 / H-1 Alert Banner */}
       {expiringAlerts.length > 0 && (
-        <Alert variant="warning">
+        <Alert
+          variant="warning"
+          className="rounded-3xl border-2 border-[#2C2623] bg-[#FEF3C7] text-[#5C3D00] shadow-[4px_4px_0px_0px_#2C2623] dark:border-amber-400/50 dark:bg-amber-950/35 dark:text-amber-100"
+        >
           <CalendarClock className="size-4" />
-          <AlertTitle>
-            Pengingat Perpanjangan: {expiringAlerts.length} Langganan Jatuh Tempo ≤ 7 Hari
+          <AlertTitle className="font-extrabold">
+            Pengingat Perpanjangan: {expiringAlerts.length} Langganan Jatuh
+            Tempo ≤ 7 Hari
           </AlertTitle>
           <AlertDescription>
-            <div className="flex flex-wrap gap-2 pt-1">
+            <div className="flex flex-wrap gap-2 pt-1.5">
               {expiringAlerts.map(({ sub, renewal }) => (
                 <Badge
                   key={sub.id}
@@ -744,8 +944,14 @@ export function VaultClient({
                       ? "destructive"
                       : "secondary"
                   }
+                  className={
+                    renewal.tier === "overdue" || renewal.tier === "h1"
+                      ? "rounded-full border-[1.5px] border-[#2C2623] bg-[#FECDD3] font-bold text-[#881337]"
+                      : "rounded-full border-[1.5px] border-[#2C2623] bg-[#FFFDF7] font-bold text-[#5C3D00] dark:bg-amber-900/60 dark:text-amber-100"
+                  }
                 >
-                  {sub.service_name}: {renewal.label} ({formatDateWIB(sub.renewal_date)})
+                  {sub.service_name}: {renewal.label} (
+                  {formatDateWIB(sub.renewal_date)})
                 </Badge>
               ))}
             </div>
@@ -755,99 +961,102 @@ export function VaultClient({
 
       {/* Summary KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Langganan Aktif</span>
-              <KeyRound className="text-muted-foreground size-4" />
-            </CardDescription>
-            <CardTitle className="text-2xl">{summary.activeCount}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-xs">
-            Dari total {subscriptions.length} akun terdaftar di Vault
-          </CardContent>
-        </Card>
+        <KawaiiStatCard
+          label="Langganan Aktif"
+          value={summary.activeCount}
+          hint={`Dari total ${subscriptions.length} akun terdaftar di Vault`}
+          accent="sky"
+          icon={<KeyRound className="size-4 text-sky-700 dark:text-sky-300" />}
+        />
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Perpanjangan ≤ 7 Hari</span>
-              <CalendarClock className="size-4 text-amber-600" />
-            </CardDescription>
-            <CardTitle className="text-2xl">{summary.expiringCount}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-xs">
-            Termasuk peringatan H-7, H-3, dan H-1
-          </CardContent>
-        </Card>
+        <KawaiiStatCard
+          label="Perpanjangan ≤ 7 Hari"
+          value={summary.expiringCount}
+          hint="Termasuk peringatan H-7, H-3, dan H-1"
+          accent="butter"
+          icon={
+            <CalendarClock className="size-4 text-amber-700 dark:text-amber-300" />
+          }
+        />
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription className="flex items-center justify-between">
-              <span>Wajib Rotasi Sandi</span>
-              <UserX className="size-4 text-red-600" />
-            </CardDescription>
-            <CardTitle className="text-2xl">{summary.mustRotateCount}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-xs">
-            Terdampak staf offboarded / nonaktif
-          </CardContent>
-        </Card>
+        <KawaiiStatCard
+          label="Wajib Rotasi Sandi"
+          value={summary.mustRotateCount}
+          hint="Terdampak staf offboarded / nonaktif"
+          accent="pink"
+          icon={<UserX className="size-4 text-rose-700 dark:text-rose-300" />}
+        />
 
         <Can action="vault.view_billing">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription className="flex items-center justify-between">
-                <span>Estimasi Biaya / Bulan</span>
-                <CreditCard className="text-muted-foreground size-4" />
-              </CardDescription>
-              <CardTitle className="text-2xl">
-                {formatRupiah(summary.monthlyBurn)}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-muted-foreground text-xs">
-              Akumulasi langganan bulanan &amp; prorata tahunan aktif
-            </CardContent>
-          </Card>
+          <KawaiiStatCard
+            label="Estimasi Biaya / Bulan"
+            value={formatRupiah(summary.monthlyBurn)}
+            hint="Akumulasi langganan bulanan & prorata tahunan aktif"
+            accent="mint"
+            icon={
+              <CreditCard className="size-4 text-emerald-700 dark:text-emerald-300" />
+            }
+          />
         </Can>
       </div>
 
-      {/* Filters & Search */}
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      {/* Filters, View Toggle & Vault Listing */}
+      <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-card dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
+        <CardContent className="space-y-5 p-5">
+          <div className="flex flex-col gap-3 rounded-2xl border-2 border-[#2C2623]/20 bg-[#F0F9FF]/85 p-3.5 lg:flex-row lg:items-center lg:justify-between dark:border-stone-700 dark:bg-sky-950/20">
             <Tabs
               value={filterTab}
               onValueChange={(v) => setFilterTab(v as typeof filterTab)}
             >
-              <TabsList className="flex-wrap">
-                <TabsTrigger value="all">Semua ({subscriptions.length})</TabsTrigger>
-                <TabsTrigger value="expiring">
+              <TabsList className="h-auto flex-wrap rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-background">
+                <TabsTrigger
+                  value="all"
+                  className="rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#E0F2FE] data-[state=active]:text-[#0C4A6E]"
+                >
+                  Semua ({subscriptions.length})
+                </TabsTrigger>
+                <TabsTrigger
+                  value="expiring"
+                  className="rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#FEF3C7] data-[state=active]:text-[#5C3D00]"
+                >
                   H-7 Jatuh Tempo ({summary.expiringCount})
                 </TabsTrigger>
-                <TabsTrigger value="rotate">
+                <TabsTrigger
+                  value="rotate"
+                  className="rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#FFE4E6] data-[state=active]:text-[#881337]"
+                >
                   Wajib Rotasi ({summary.mustRotateCount})
                 </TabsTrigger>
-                <TabsTrigger value="active">Aktif ({summary.activeCount})</TabsTrigger>
-                <TabsTrigger value="inactive">Nonaktif</TabsTrigger>
+                <TabsTrigger
+                  value="active"
+                  className="rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#D1FAE5] data-[state=active]:text-[#14532D]"
+                >
+                  Aktif ({summary.activeCount})
+                </TabsTrigger>
+                <TabsTrigger
+                  value="inactive"
+                  className="rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#E2E8F0] data-[state=active]:text-[#334155]"
+                >
+                  Nonaktif
+                </TabsTrigger>
               </TabsList>
             </Tabs>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="relative w-full sm:w-64">
-                <Search className="text-muted-foreground absolute top-2.5 left-2.5 size-4" />
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-full sm:w-60">
+                <Search className="text-muted-foreground absolute top-2.5 left-3 size-4" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Cari layanan, kode, email, staf..."
-                  className="pl-8"
+                  className="rounded-xl border-2 border-[#2C2623] bg-white pl-9 dark:border-stone-600 dark:bg-background"
                 />
               </div>
               <Select
                 value={cycleFilter}
                 onValueChange={(v) => setCycleFilter(v as "ALL" | BillingCycle)}
               >
-                <SelectTrigger className="w-full sm:w-44">
+                <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold sm:w-40 dark:border-stone-600 dark:bg-background">
                   <SelectValue placeholder="Semua Siklus" />
                 </SelectTrigger>
                 <SelectContent>
@@ -857,237 +1066,143 @@ export function VaultClient({
                   <SelectItem value="SEKALI_BAYAR">Sekali Bayar</SelectItem>
                 </SelectContent>
               </Select>
+
+              {/* Cute Card / Table View Toggle */}
+              <div className="inline-flex items-center rounded-xl border-2 border-[#2C2623] bg-white p-0.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-background">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("cards")}
+                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold transition-colors ${
+                    viewMode === "cards"
+                      ? "bg-[#7CC4FA] text-[#0C4A6E]"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  title="Tampilan Kartu Vault"
+                >
+                  <LayoutGrid className="size-3.5" />
+                  Kartu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("table")}
+                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold transition-colors ${
+                    viewMode === "table"
+                      ? "bg-[#7CC4FA] text-[#0C4A6E]"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  title="Tampilan Tabel Ringkas"
+                >
+                  <Table2 className="size-3.5" />
+                  Tabel
+                </button>
+              </div>
             </div>
           </div>
 
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Layanan & Status</TableHead>
-                <TableHead>Login & Slot Pengguna</TableHead>
-                <TableHead>Jatuh Tempo</TableHead>
-                {canViewBilling && <TableHead>Tagihan & Pembayaran</TableHead>}
-                {canReveal && <TableHead>Kredensial</TableHead>}
-                {canManage && <TableHead className="text-right">Aksi</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredItems.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={
-                      3 + (canViewBilling ? 1 : 0) + (canReveal ? 1 : 0) + (canManage ? 1 : 0)
-                    }
-                    className="text-muted-foreground py-8 text-center text-sm"
+          {filteredItems.length === 0 ? (
+            <KawaiiEmptyState
+              mascot="vault"
+              title="Belum ada akun brankas yang cocok nih~"
+              description={
+                hasActiveFilters
+                  ? "Coba ubah kata kunci pencarian atau reset filter untuk melihat semua akun langganan."
+                  : canManage
+                    ? "Klik tombol Tambah Langganan untuk menyimpan kredensial akun digital secara terenkripsi AES-256."
+                    : "Belum ada akun langganan yang tercatat di brankas."
+              }
+              action={
+                hasActiveFilters ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={resetFilters}
+                    className="rounded-2xl border-2 border-[#2C2623] bg-[#FEF9C3] font-bold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FEF08A]"
                   >
-                    Tidak ada akun langganan yang sesuai dengan filter saat ini.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredItems.map(({ sub, renewal, offboardedFlags }) => {
-                  const hasOffboardWarning =
-                    sub.is_active && offboardedFlags.length > 0;
-                  const offboardedIdSet = new Set(
-                    offboardedFlags.map((f) => f.userId),
-                  );
+                    <RotateCcw className="size-4" />
+                    Reset Filter
+                  </Button>
+                ) : canManage ? (
+                  <Button
+                    type="button"
+                    onClick={openCreateDialog}
+                    className="rounded-2xl border-2 border-[#2C2623] bg-[#7CC4FA] font-extrabold text-[#0C4A6E] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#5EB6F9]"
+                  >
+                    <Plus className="size-4" />
+                    Tambah Langganan
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : viewMode === "cards" ? (
+            /* Kawaii Subscription Vault Cards Grid */
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {filteredItems.map(({ sub, renewal, offboardedFlags }, idx) => {
+                const hasOffboardWarning =
+                  sub.is_active && offboardedFlags.length > 0;
+                const offboardedIdSet = new Set(
+                  offboardedFlags.map((f) => f.userId),
+                );
+                const ribbonClass = hasOffboardWarning
+                  ? "bg-[#FFE4E6] dark:bg-rose-950/50"
+                  : !sub.is_active
+                    ? "bg-[#E2E8F0] dark:bg-slate-800/70"
+                    : VAULT_CARD_RIBBONS[idx % VAULT_CARD_RIBBONS.length];
 
-                  return (
-                    <TableRow
-                      key={sub.id}
-                      className={
-                        hasOffboardWarning
-                          ? "bg-red-50/40 hover:bg-red-50/70 dark:bg-red-950/15 dark:hover:bg-red-950/25"
-                          : undefined
-                      }
+                return (
+                  <div
+                    key={sub.id}
+                    className={`flex flex-col overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-stone-600 dark:bg-card dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)] ${
+                      hasOffboardWarning ? "ring-2 ring-rose-400/50" : ""
+                    }`}
+                  >
+                    {/* Pastel Header Ribbon */}
+                    <div
+                      className={`border-b-2 border-[#2C2623]/20 px-4 py-3 dark:border-stone-700 ${ribbonClass}`}
                     >
-                      <TableCell className="align-top whitespace-normal">
-                        <div className="space-y-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 space-y-1">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="font-semibold">{sub.service_name}</span>
+                            <span className="truncate text-base font-black text-[#2C2623] dark:text-foreground">
+                              {sub.service_name}
+                            </span>
                             {sub.plan_name && (
-                              <Badge variant="outline" className="text-xs">
+                              <Badge
+                                variant="outline"
+                                className="rounded-full border-[1.5px] border-[#2C2623] bg-white/90 px-2 py-0 text-[11px] font-bold text-[#2C2623] dark:bg-background dark:text-foreground"
+                              >
                                 {sub.plan_name}
                               </Badge>
                             )}
-                            {!sub.is_active && (
-                              <Badge variant="secondary">Nonaktif</Badge>
-                            )}
                           </div>
-                          <div className="text-muted-foreground font-mono text-xs">
-                            {sub.sub_code}
-                          </div>
-                          {hasOffboardWarning && (
-                            <Badge variant="destructive" className="mt-1">
-                              <ShieldAlert className="size-3" />
-                              Wajib Rotasi Sandi ({offboardedFlags.length} staf nonaktif)
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="align-top whitespace-normal">
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-1.5 text-sm">
-                            <span className="font-mono text-xs break-all">
-                              {sub.login_email}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-[#2C2623]/50 bg-white/85 px-2 py-0.5 font-mono text-[11px] font-bold text-[#2C2623] dark:bg-background/80 dark:text-foreground">
+                              <Lock className="size-2.5" />
+                              {sub.sub_code}
                             </span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="size-6 shrink-0"
-                              title="Salin email login"
-                              onClick={() =>
-                                copyToClipboard(sub.login_email, `email-${sub.id}`)
-                              }
-                            >
-                              {copiedField === `email-${sub.id}` ? (
-                                <Check className="size-3 text-emerald-600" />
-                              ) : (
-                                <Copy className="size-3" />
-                              )}
-                            </Button>
-                          </div>
-
-                          <div className="text-muted-foreground flex items-center gap-1 text-xs">
-                            <Users className="size-3.5" />
-                            <span>
-                              {sub.assigned_users.length} / {sub.max_slots} slot terpakai
-                            </span>
-                          </div>
-
-                          {sub.assigned_users.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {sub.assigned_users.map((u) => {
-                                const matchedProfile =
-                                  profilesById.get(u.user_id) ??
-                                  (u.email
-                                    ? profilesByEmail.get(u.email.toLowerCase())
-                                    : undefined);
-                                const isFlagged =
-                                  matchedProfile && offboardedIdSet.has(matchedProfile.id);
-                                const label =
-                                  matchedProfile?.full_name ||
-                                  u.full_name ||
-                                  u.email ||
-                                  u.user_id;
-
-                                return (
-                                  <Badge
-                                    key={u.user_id}
-                                    variant={isFlagged ? "destructive" : "secondary"}
-                                    className="text-[11px] font-normal"
-                                  >
-                                    {label}
-                                    {isFlagged ? " (Offboarded)" : ""}
-                                  </Badge>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          <div className="text-muted-foreground text-[11px]">
-                            Rotasi sandi: {formatDateWIB(sub.password_rotated_at)}
-                          </div>
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="align-top whitespace-normal">
-                        <div className="space-y-1">
-                          <div className="text-sm font-medium">
-                            {sub.renewal_date
-                              ? formatDateWIB(sub.renewal_date)
-                              : "Tidak ada jatuh tempo"}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1">
-                            <Badge variant="outline" className="text-[11px]">
-                              {BILLING_CYCLE_LABELS[sub.billing_cycle]}
-                            </Badge>
-                            {sub.auto_renew && (
-                              <Badge variant="secondary" className="text-[11px]">
-                                Auto-Renew
+                            {sub.is_active ? (
+                              <Badge className="rounded-full border-[1.5px] border-[#2C2623] bg-[#A7F3D0] px-2 py-0 text-[10px] font-extrabold text-[#064E3B] hover:bg-[#A7F3D0]">
+                                <ShieldCheck className="size-2.5" />
+                                Aktif
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="secondary"
+                                className="rounded-full border-[1.5px] border-[#2C2623] bg-[#E2E8F0] px-2 py-0 text-[10px] font-bold text-[#334155]"
+                              >
+                                Nonaktif
                               </Badge>
                             )}
                           </div>
-                          {renewal.tier === "overdue" || renewal.tier === "h1" ? (
-                            <Badge variant="destructive">{renewal.label}</Badge>
-                          ) : renewal.tier === "h3" ? (
-                            <Badge className="bg-amber-600 text-white hover:bg-amber-600">
-                              {renewal.label}
-                            </Badge>
-                          ) : renewal.tier === "h7" ? (
-                            <Badge className="bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                              {renewal.label}
-                            </Badge>
-                          ) : null}
                         </div>
-                      </TableCell>
 
-                      {canViewBilling && (
-                        <TableCell className="align-top whitespace-normal">
-                          <div className="space-y-1">
-                            <div className="font-semibold">
-                              {formatRupiah(sub.cost)}
-                            </div>
-                            <div className="text-muted-foreground text-xs">
-                              {sub.payment_method
-                                ? PAYMENT_METHOD_LABELS[sub.payment_method]
-                                : "-"}
-                            </div>
-                            {sub.payment_account_label && (
-                              <div className="text-muted-foreground text-xs">
-                                {sub.payment_account_label}
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                      )}
-
-                      {canReveal && (
-                        <TableCell className="align-top">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleRevealOpen(sub)}
-                            >
-                              <Eye className="size-3.5" />
-                              Lihat Sandi
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="secondary"
-                              disabled={copyingSubId === sub.id}
-                              onClick={() => handleOneClickCopyPassword(sub)}
-                            >
-                              {copiedId === sub.id ? (
-                                <>
-                                  <Check className="size-3.5 text-emerald-600" />
-                                  Tersalin
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="size-3.5" />
-                                  {copyingSubId === sub.id
-                                    ? "Menyalin..."
-                                    : "Salin 1-Klik"}
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      )}
-
-                      {canManage && (
-                        <TableCell className="text-right align-top">
-                          <div className="flex justify-end gap-1">
+                        {canManage && (
+                          <div className="flex shrink-0 items-center gap-1">
                             {hasOffboardWarning && (
                               <Button
                                 type="button"
-                                size="sm"
+                                size="icon"
                                 variant="destructive"
+                                className="size-8 rounded-full border-2 border-[#2C2623] shadow-[1.5px_1.5px_0px_0px_#2C2623]"
                                 title="Rotasi kata sandi"
                                 onClick={() =>
                                   openRotateDialog(sub, offboardedFlags)
@@ -1098,8 +1213,9 @@ export function VaultClient({
                             )}
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon"
                               variant="ghost"
+                              className="size-8 rounded-full border border-[#2C2623]/25 bg-white/80 hover:bg-[#FEF3C7] dark:bg-background/60"
                               title="Edit langganan"
                               onClick={() => openEditDialog(sub)}
                             >
@@ -1107,23 +1223,553 @@ export function VaultClient({
                             </Button>
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon"
                               variant="ghost"
-                              className="text-destructive hover:text-destructive"
+                              className="text-destructive hover:text-destructive size-8 rounded-full border border-[#2C2623]/25 bg-white/80 hover:bg-[#FFE4E6] dark:bg-background/60"
                               title="Hapus langganan"
                               onClick={() => setDeleteTarget(sub)}
                             >
                               <Trash2 className="size-3.5" />
                             </Button>
                           </div>
-                        </TableCell>
+                        )}
+                      </div>
+
+                      {hasOffboardWarning && (
+                        <div className="mt-2">
+                          <Badge
+                            variant="destructive"
+                            className="rounded-full border-[1.5px] border-[#2C2623] bg-[#FDA4AF] text-[11px] font-extrabold text-[#881337]"
+                          >
+                            <ShieldAlert className="size-3" />
+                            Wajib Rotasi Sandi ({offboardedFlags.length} staf
+                            nonaktif)
+                          </Badge>
+                        </div>
                       )}
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
+                    </div>
+
+                    {/* Card Body */}
+                    <div className="flex flex-1 flex-col justify-between gap-3 p-4">
+                      <div className="space-y-3">
+                        {/* Login Email Box */}
+                        <div className="flex items-center justify-between gap-2 rounded-2xl border-[1.5px] border-[#2C2623]/30 bg-[#F8FAFC] px-3 py-2 dark:border-stone-700 dark:bg-muted/35">
+                          <div className="min-w-0">
+                            <p className="text-muted-foreground text-[10px] font-extrabold tracking-wide uppercase">
+                              Email / Username Login
+                            </p>
+                            <p className="truncate font-mono text-xs font-bold text-[#2C2623] dark:text-foreground">
+                              {sub.login_email}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-7 shrink-0 rounded-full border border-[#2C2623]/25 bg-white hover:bg-[#E0F2FE] dark:bg-background"
+                            title="Salin email login"
+                            onClick={() =>
+                              copyToClipboard(
+                                sub.login_email,
+                                `email-${sub.id}`,
+                              )
+                            }
+                          >
+                            {copiedField === `email-${sub.id}` ? (
+                              <Check className="size-3.5 text-emerald-600" />
+                            ) : (
+                              <Copy className="size-3.5" />
+                            )}
+                          </Button>
+                        </div>
+
+                        {/* Renewal & Billing Grid */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-2xl border-[1.5px] border-[#2C2623]/25 bg-[#FEFCE8]/80 p-2.5 dark:border-stone-700 dark:bg-amber-950/20">
+                            <p className="text-muted-foreground text-[10px] font-extrabold uppercase">
+                              Jatuh Tempo
+                            </p>
+                            <p className="mt-0.5 text-xs font-extrabold">
+                              {sub.renewal_date
+                                ? formatDateWIB(sub.renewal_date)
+                                : "Tanpa batas"}
+                            </p>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              <Badge
+                                variant="outline"
+                                className="rounded-full border border-[#2C2623]/40 bg-white px-1.5 py-0 text-[10px] font-bold text-[#2C2623] dark:bg-background dark:text-foreground"
+                              >
+                                {BILLING_CYCLE_LABELS[sub.billing_cycle]}
+                              </Badge>
+                              {sub.auto_renew && (
+                                <Badge
+                                  variant="secondary"
+                                  className="rounded-full border border-[#2C2623]/30 bg-[#E0F2FE] px-1.5 py-0 text-[10px] font-bold text-[#0C4A6E]"
+                                >
+                                  Auto
+                                </Badge>
+                              )}
+                            </div>
+                            {renewal.tier === "overdue" ||
+                            renewal.tier === "h1" ? (
+                              <Badge
+                                variant="destructive"
+                                className="mt-1.5 rounded-full border border-[#2C2623] text-[10px] font-extrabold"
+                              >
+                                {renewal.label}
+                              </Badge>
+                            ) : renewal.tier === "h3" ? (
+                              <Badge className="mt-1.5 rounded-full border border-[#2C2623] bg-amber-500 text-[10px] font-extrabold text-white hover:bg-amber-500">
+                                {renewal.label}
+                              </Badge>
+                            ) : renewal.tier === "h7" ? (
+                              <Badge className="mt-1.5 rounded-full border border-[#2C2623] bg-[#FDE68A] text-[10px] font-extrabold text-[#5C3D00] hover:bg-[#FDE68A]">
+                                {renewal.label}
+                              </Badge>
+                            ) : null}
+                          </div>
+
+                          {canViewBilling ? (
+                            <div className="rounded-2xl border-[1.5px] border-[#2C2623]/25 bg-[#ECFDF5]/80 p-2.5 dark:border-stone-700 dark:bg-emerald-950/20">
+                              <p className="text-muted-foreground text-[10px] font-extrabold uppercase">
+                                Tagihan
+                              </p>
+                              <p className="mt-0.5 text-sm font-black text-[#065F46] dark:text-emerald-300">
+                                {formatRupiah(sub.cost)}
+                              </p>
+                              <p className="text-muted-foreground mt-0.5 text-[11px] font-medium">
+                                {sub.payment_method
+                                  ? PAYMENT_METHOD_LABELS[sub.payment_method]
+                                  : "-"}
+                              </p>
+                              {sub.payment_account_label && (
+                                <p className="text-muted-foreground truncate text-[10px]">
+                                  {sub.payment_account_label}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="rounded-2xl border-[1.5px] border-[#2C2623]/25 bg-[#F0F9FF]/80 p-2.5 dark:border-stone-700 dark:bg-sky-950/20">
+                              <p className="text-muted-foreground text-[10px] font-extrabold uppercase">
+                                Kapasitas Slot
+                              </p>
+                              <p className="mt-0.5 text-sm font-black text-[#0C4A6E] dark:text-sky-300">
+                                {sub.assigned_users.length} / {sub.max_slots}
+                              </p>
+                              <p className="text-muted-foreground mt-0.5 text-[11px]">
+                                Pengguna aktif
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Assigned Users & Password Rotation */}
+                        <div className="space-y-1.5">
+                          <div className="text-muted-foreground flex items-center justify-between text-[11px] font-semibold">
+                            <span className="flex items-center gap-1">
+                              <Users className="size-3.5" />
+                              {sub.assigned_users.length} / {sub.max_slots} slot
+                              terpakai
+                            </span>
+                            <span>
+                              Rotasi: {formatDateWIB(sub.password_rotated_at)}
+                            </span>
+                          </div>
+                          {sub.assigned_users.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {sub.assigned_users.map((u) => {
+                                const matchedProfile =
+                                  profilesById.get(u.user_id) ??
+                                  (u.email
+                                    ? profilesByEmail.get(u.email.toLowerCase())
+                                    : undefined);
+                                const isFlagged =
+                                  matchedProfile &&
+                                  offboardedIdSet.has(matchedProfile.id);
+                                const label =
+                                  matchedProfile?.full_name ||
+                                  u.full_name ||
+                                  u.email ||
+                                  u.user_id;
+
+                                return (
+                                  <Badge
+                                    key={u.user_id}
+                                    variant={
+                                      isFlagged ? "destructive" : "secondary"
+                                    }
+                                    className={
+                                      isFlagged
+                                        ? "rounded-full border border-[#2C2623] text-[10px] font-bold"
+                                        : "rounded-full border border-[#2C2623]/30 bg-[#F1F5F9] text-[10px] font-semibold text-[#334155] dark:bg-muted dark:text-foreground"
+                                    }
+                                  >
+                                    {label}
+                                    {isFlagged ? " (Offboarded)" : ""}
+                                  </Badge>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Cute Secret-Reveal Pill Buttons */}
+                      {canReveal && (
+                        <div className="flex flex-wrap items-center gap-2 border-t-2 border-dashed border-[#2C2623]/15 pt-3">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleRevealOpen(sub)}
+                            className="flex-1 rounded-full border-2 border-[#2C2623] bg-[#E0F2FE] font-extrabold text-[#0C4A6E] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#BAE6FD] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none dark:border-sky-400/50 dark:bg-sky-950/60 dark:text-sky-100"
+                          >
+                            <Eye className="size-3.5" />
+                            Lihat Sandi
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={copyingSubId === sub.id}
+                            onClick={() => handleOneClickCopyPassword(sub)}
+                            className="flex-1 rounded-full border-2 border-[#2C2623] bg-[#FEF08A] font-extrabold text-[#5C3D00] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FDE047] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none dark:border-amber-400/50 dark:bg-amber-950/60 dark:text-amber-100"
+                          >
+                            {copiedId === sub.id ? (
+                              <>
+                                <Check className="size-3.5 text-emerald-700 dark:text-emerald-300" />
+                                Tersalin!
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="size-3.5" />
+                                {copyingSubId === sub.id
+                                  ? "Menyalin..."
+                                  : "Salin 1-Klik"}
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* Compact Table View */
+            <div className="overflow-x-auto rounded-2xl border-2 border-[#2C2623]/20 dark:border-stone-700">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b-2 border-[#2C2623]/20 bg-[#E0F2FE]/70 hover:bg-[#E0F2FE]/70 dark:bg-sky-950/35">
+                    <TableHead className="font-extrabold text-[#2C2623] dark:text-foreground">
+                      Layanan &amp; Status
+                    </TableHead>
+                    <TableHead className="font-extrabold text-[#2C2623] dark:text-foreground">
+                      Login &amp; Slot Pengguna
+                    </TableHead>
+                    <TableHead className="font-extrabold text-[#2C2623] dark:text-foreground">
+                      Jatuh Tempo
+                    </TableHead>
+                    {canViewBilling && (
+                      <TableHead className="font-extrabold text-[#2C2623] dark:text-foreground">
+                        Tagihan &amp; Pembayaran
+                      </TableHead>
+                    )}
+                    {canReveal && (
+                      <TableHead className="font-extrabold text-[#2C2623] dark:text-foreground">
+                        Kredensial
+                      </TableHead>
+                    )}
+                    {canManage && (
+                      <TableHead className="text-right font-extrabold text-[#2C2623] dark:text-foreground">
+                        Aksi
+                      </TableHead>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredItems.map(({ sub, renewal, offboardedFlags }) => {
+                    const hasOffboardWarning =
+                      sub.is_active && offboardedFlags.length > 0;
+                    const offboardedIdSet = new Set(
+                      offboardedFlags.map((f) => f.userId),
+                    );
+
+                    return (
+                      <TableRow
+                        key={sub.id}
+                        className={
+                          hasOffboardWarning
+                            ? "bg-rose-50/60 hover:bg-rose-50/90 dark:bg-rose-950/20 dark:hover:bg-rose-950/30"
+                            : "hover:bg-[#F0F9FF]/70 dark:hover:bg-sky-950/15"
+                        }
+                      >
+                        <TableCell className="align-top whitespace-normal">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-extrabold">
+                                {sub.service_name}
+                              </span>
+                              {sub.plan_name && (
+                                <Badge
+                                  variant="outline"
+                                  className="rounded-full text-xs"
+                                >
+                                  {sub.plan_name}
+                                </Badge>
+                              )}
+                              {!sub.is_active && (
+                                <Badge
+                                  variant="secondary"
+                                  className="rounded-full"
+                                >
+                                  Nonaktif
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-muted-foreground font-mono text-xs">
+                              {sub.sub_code}
+                            </div>
+                            {hasOffboardWarning && (
+                              <Badge
+                                variant="destructive"
+                                className="mt-1 rounded-full"
+                              >
+                                <ShieldAlert className="size-3" />
+                                Wajib Rotasi Sandi ({offboardedFlags.length}{" "}
+                                staf nonaktif)
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="align-top whitespace-normal">
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-sm">
+                              <span className="font-mono text-xs break-all">
+                                {sub.login_email}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="size-6 shrink-0 rounded-full"
+                                title="Salin email login"
+                                onClick={() =>
+                                  copyToClipboard(
+                                    sub.login_email,
+                                    `email-${sub.id}`,
+                                  )
+                                }
+                              >
+                                {copiedField === `email-${sub.id}` ? (
+                                  <Check className="size-3 text-emerald-600" />
+                                ) : (
+                                  <Copy className="size-3" />
+                                )}
+                              </Button>
+                            </div>
+
+                            <div className="text-muted-foreground flex items-center gap-1 text-xs">
+                              <Users className="size-3.5" />
+                              <span>
+                                {sub.assigned_users.length} / {sub.max_slots}{" "}
+                                slot terpakai
+                              </span>
+                            </div>
+
+                            {sub.assigned_users.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {sub.assigned_users.map((u) => {
+                                  const matchedProfile =
+                                    profilesById.get(u.user_id) ??
+                                    (u.email
+                                      ? profilesByEmail.get(
+                                          u.email.toLowerCase(),
+                                        )
+                                      : undefined);
+                                  const isFlagged =
+                                    matchedProfile &&
+                                    offboardedIdSet.has(matchedProfile.id);
+                                  const label =
+                                    matchedProfile?.full_name ||
+                                    u.full_name ||
+                                    u.email ||
+                                    u.user_id;
+
+                                  return (
+                                    <Badge
+                                      key={u.user_id}
+                                      variant={
+                                        isFlagged ? "destructive" : "secondary"
+                                      }
+                                      className="rounded-full text-[11px] font-normal"
+                                    >
+                                      {label}
+                                      {isFlagged ? " (Offboarded)" : ""}
+                                    </Badge>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            <div className="text-muted-foreground text-[11px]">
+                              Rotasi sandi:{" "}
+                              {formatDateWIB(sub.password_rotated_at)}
+                            </div>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="align-top whitespace-normal">
+                          <div className="space-y-1">
+                            <div className="text-sm font-bold">
+                              {sub.renewal_date
+                                ? formatDateWIB(sub.renewal_date)
+                                : "Tidak ada jatuh tempo"}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                              <Badge
+                                variant="outline"
+                                className="rounded-full text-[11px]"
+                              >
+                                {BILLING_CYCLE_LABELS[sub.billing_cycle]}
+                              </Badge>
+                              {sub.auto_renew && (
+                                <Badge
+                                  variant="secondary"
+                                  className="rounded-full text-[11px]"
+                                >
+                                  Auto-Renew
+                                </Badge>
+                              )}
+                            </div>
+                            {renewal.tier === "overdue" ||
+                            renewal.tier === "h1" ? (
+                              <Badge
+                                variant="destructive"
+                                className="rounded-full"
+                              >
+                                {renewal.label}
+                              </Badge>
+                            ) : renewal.tier === "h3" ? (
+                              <Badge className="rounded-full bg-amber-600 text-white hover:bg-amber-600">
+                                {renewal.label}
+                              </Badge>
+                            ) : renewal.tier === "h7" ? (
+                              <Badge className="rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                                {renewal.label}
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </TableCell>
+
+                        {canViewBilling && (
+                          <TableCell className="align-top whitespace-normal">
+                            <div className="space-y-1">
+                              <div className="font-extrabold">
+                                {formatRupiah(sub.cost)}
+                              </div>
+                              <div className="text-muted-foreground text-xs">
+                                {sub.payment_method
+                                  ? PAYMENT_METHOD_LABELS[sub.payment_method]
+                                  : "-"}
+                              </div>
+                              {sub.payment_account_label && (
+                                <div className="text-muted-foreground text-xs">
+                                  {sub.payment_account_label}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                        )}
+
+                        {canReveal && (
+                          <TableCell className="align-top">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRevealOpen(sub)}
+                                className="rounded-full border-2 border-[#2C2623] bg-[#E0F2FE] font-bold text-[#0C4A6E] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#BAE6FD]"
+                              >
+                                <Eye className="size-3.5" />
+                                Lihat Sandi
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                disabled={copyingSubId === sub.id}
+                                onClick={() => handleOneClickCopyPassword(sub)}
+                                className="rounded-full border-2 border-[#2C2623] bg-[#FEF08A] font-bold text-[#5C3D00] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FDE047]"
+                              >
+                                {copiedId === sub.id ? (
+                                  <>
+                                    <Check className="size-3.5 text-emerald-600" />
+                                    Tersalin
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="size-3.5" />
+                                    {copyingSubId === sub.id
+                                      ? "Menyalin..."
+                                      : "Salin 1-Klik"}
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        )}
+
+                        {canManage && (
+                          <TableCell className="text-right align-top">
+                            <div className="flex justify-end gap-1">
+                              {hasOffboardWarning && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="destructive"
+                                  title="Rotasi kata sandi"
+                                  onClick={() =>
+                                    openRotateDialog(sub, offboardedFlags)
+                                  }
+                                  className="rounded-xl"
+                                >
+                                  <RefreshCw className="size-3.5" />
+                                </Button>
+                              )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                title="Edit langganan"
+                                onClick={() => openEditDialog(sub)}
+                                className="rounded-xl"
+                              >
+                                <Pencil className="size-3.5" />
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="text-destructive hover:text-destructive rounded-xl"
+                                title="Hapus langganan"
+                                onClick={() => setDeleteTarget(sub)}
+                              >
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1131,29 +1777,36 @@ export function VaultClient({
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="font-extrabold">
               {formMode === "create"
                 ? "Tambah Langganan Baru ke Vault"
                 : "Edit Langganan Vault"}
             </DialogTitle>
             <DialogDescription>
-              Kata sandi dan PIN pemulihan akan dienkripsi menggunakan AES-256 (pgcrypto) di
-              database Supabase.
+              Kata sandi dan PIN pemulihan akan dienkripsi menggunakan AES-256
+              (pgcrypto) di database Supabase.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleFormSubmit} className="space-y-4">
             {formError && (
-              <Alert variant="destructive">
+              <Alert
+                variant="destructive"
+                className="rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] dark:border-rose-400/50 dark:bg-rose-950/40"
+              >
                 <AlertTriangle className="size-4" />
-                <AlertTitle>Validasi Gagal</AlertTitle>
+                <AlertTitle className="font-extrabold">
+                  Validasi Gagal
+                </AlertTitle>
                 <AlertDescription>{formError}</AlertDescription>
               </Alert>
             )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="sub-service">Nama Layanan *</Label>
+                <Label htmlFor="sub-service" className="font-bold">
+                  Nama Layanan *
+                </Label>
                 <Input
                   id="sub-service"
                   required
@@ -1166,7 +1819,9 @@ export function VaultClient({
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="sub-plan">Paket / Plan</Label>
+                <Label htmlFor="sub-plan" className="font-bold">
+                  Paket / Plan
+                </Label>
                 <Input
                   id="sub-plan"
                   value={form.plan_name}
@@ -1180,7 +1835,9 @@ export function VaultClient({
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="sub-email">Email / Username Login *</Label>
+                <Label htmlFor="sub-email" className="font-bold">
+                  Email / Username Login *
+                </Label>
                 <Input
                   id="sub-email"
                   required
@@ -1194,12 +1851,13 @@ export function VaultClient({
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="sub-pass">
-                    Kata Sandi {formMode === "create" ? "*" : "(Opsional saat edit)"}
+                  <Label htmlFor="sub-pass" className="font-bold">
+                    Kata Sandi{" "}
+                    {formMode === "create" ? "*" : "(Opsional saat edit)"}
                   </Label>
                   <button
                     type="button"
-                    className="text-primary flex items-center gap-1 text-xs hover:underline"
+                    className="inline-flex items-center gap-1 rounded-full border border-[#2C2623]/40 bg-[#FEF08A] px-2 py-0.5 text-[11px] font-bold text-[#5C3D00] hover:bg-[#FDE047]"
                     onClick={() => {
                       setForm((p) => ({
                         ...p,
@@ -1244,7 +1902,9 @@ export function VaultClient({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="sub-pin">PIN / Kode Pemulihan / Backup 2FA (Opsional)</Label>
+              <Label htmlFor="sub-pin" className="font-bold">
+                PIN / Kode Pemulihan / Backup 2FA (Opsional)
+              </Label>
               <Input
                 id="sub-pin"
                 value={form.pin_recovery_plain}
@@ -1278,7 +1938,7 @@ export function VaultClient({
 
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-1.5">
-                <Label>Siklus Tagihan</Label>
+                <Label className="font-bold">Siklus Tagihan</Label>
                 <Select
                   value={form.billing_cycle}
                   onValueChange={(v) =>
@@ -1297,19 +1957,25 @@ export function VaultClient({
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="sub-cost">Biaya (IDR)</Label>
+                <Label htmlFor="sub-cost" className="font-bold">
+                  Biaya (IDR)
+                </Label>
                 <Input
                   id="sub-cost"
                   type="number"
                   min={0}
                   step="100"
                   value={form.cost}
-                  onChange={(e) => setForm((p) => ({ ...p, cost: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, cost: e.target.value }))
+                  }
                 />
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="sub-renewal">Tanggal Jatuh Tempo</Label>
+                <Label htmlFor="sub-renewal" className="font-bold">
+                  Tanggal Jatuh Tempo
+                </Label>
                 <Input
                   id="sub-renewal"
                   type="date"
@@ -1323,11 +1989,14 @@ export function VaultClient({
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>Metode Pembayaran</Label>
+                <Label className="font-bold">Metode Pembayaran</Label>
                 <Select
                   value={form.payment_method}
                   onValueChange={(v) =>
-                    setForm((p) => ({ ...p, payment_method: v as PaymentMethod }))
+                    setForm((p) => ({
+                      ...p,
+                      payment_method: v as PaymentMethod,
+                    }))
                   }
                 >
                   <SelectTrigger className="w-full">
@@ -1344,7 +2013,9 @@ export function VaultClient({
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="sub-pay-label">Label Rekening / Kartu</Label>
+                <Label htmlFor="sub-pay-label" className="font-bold">
+                  Label Rekening / Kartu
+                </Label>
                 <Input
                   id="sub-pay-label"
                   value={form.payment_account_label}
@@ -1361,7 +2032,9 @@ export function VaultClient({
 
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-1.5">
-                <Label htmlFor="sub-slots">Maksimal Slot</Label>
+                <Label htmlFor="sub-slots" className="font-bold">
+                  Maksimal Slot
+                </Label>
                 <Input
                   id="sub-slots"
                   type="number"
@@ -1373,8 +2046,11 @@ export function VaultClient({
                 />
               </div>
 
-              <div className="flex items-center justify-between rounded-md border px-3 py-2">
-                <Label htmlFor="sub-autorenew" className="cursor-pointer">
+              <div className="flex items-center justify-between rounded-2xl border-2 border-[#2C2623]/40 bg-[#F0F9FF]/70 px-3 py-2 dark:border-stone-600 dark:bg-sky-950/20">
+                <Label
+                  htmlFor="sub-autorenew"
+                  className="cursor-pointer font-bold"
+                >
                   Auto-Renew
                 </Label>
                 <Switch
@@ -1386,8 +2062,11 @@ export function VaultClient({
                 />
               </div>
 
-              <div className="flex items-center justify-between rounded-md border px-3 py-2">
-                <Label htmlFor="sub-active" className="cursor-pointer">
+              <div className="flex items-center justify-between rounded-2xl border-2 border-[#2C2623]/40 bg-[#ECFDF5]/70 px-3 py-2 dark:border-stone-600 dark:bg-emerald-950/20">
+                <Label
+                  htmlFor="sub-active"
+                  className="cursor-pointer font-bold"
+                >
                   Status Aktif
                 </Label>
                 <Switch
@@ -1401,9 +2080,9 @@ export function VaultClient({
             </div>
 
             {/* Assigned Users Picker */}
-            <div className="space-y-2 rounded-lg border p-3">
+            <div className="space-y-2 rounded-2xl border-2 border-[#2C2623]/40 bg-[#FEFCE8]/65 p-3.5 dark:border-stone-600 dark:bg-amber-950/15">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <Label>
+                <Label className="font-extrabold">
                   Pengguna Terassign ({form.assigned_user_ids.length} /{" "}
                   {form.max_slots || 1} slot)
                 </Label>
@@ -1411,7 +2090,7 @@ export function VaultClient({
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
                   placeholder="Filter staf..."
-                  className="h-8 w-48"
+                  className="h-8 w-48 bg-white dark:bg-background"
                 />
               </div>
               <div className="max-h-40 space-y-1.5 overflow-y-auto pr-1">
@@ -1421,7 +2100,7 @@ export function VaultClient({
                   return (
                     <label
                       key={p.id}
-                      className="hover:bg-muted/50 flex cursor-pointer items-center justify-between rounded px-2 py-1 text-sm"
+                      className="flex cursor-pointer items-center justify-between rounded-xl px-2 py-1 text-sm hover:bg-white/80 dark:hover:bg-muted/50"
                     >
                       <span className="flex items-center gap-2">
                         <Checkbox
@@ -1438,7 +2117,10 @@ export function VaultClient({
                         </span>
                       </span>
                       {isOffboarded && (
-                        <Badge variant="destructive" className="text-[10px]">
+                        <Badge
+                          variant="destructive"
+                          className="rounded-full text-[10px]"
+                        >
                           Nonaktif / Offboard
                         </Badge>
                       )}
@@ -1454,13 +2136,18 @@ export function VaultClient({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="sub-notes">Catatan Internal (Opsional)</Label>
+              <Label htmlFor="sub-notes" className="font-bold">
+                Catatan Internal (Opsional)
+              </Label>
               <Textarea
                 id="sub-notes"
                 rows={2}
                 value={form.notes}
-                onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, notes: e.target.value }))
+                }
                 placeholder="Catatan penggunaan akun, pembagian seat, atau instruksi login"
+                className="rounded-xl border-2 border-[#2C2623]/50 dark:border-stone-600"
               />
             </div>
 
@@ -1472,7 +2159,11 @@ export function VaultClient({
               >
                 Batal
               </Button>
-              <Button type="submit" disabled={isPending}>
+              <Button
+                type="submit"
+                disabled={isPending}
+                className="rounded-xl border-2 border-[#2C2623] bg-[#7CC4FA] font-extrabold text-[#0C4A6E] shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#5EB6F9]"
+              >
                 {isPending
                   ? "Menyimpan..."
                   : formMode === "create"
@@ -1498,40 +2189,54 @@ export function VaultClient({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="text-primary size-5" />
+            <DialogTitle className="flex items-center gap-2 font-extrabold">
+              <span className="inline-flex size-8 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#E0F2FE] text-[#0C4A6E] shadow-[1.5px_1.5px_0px_0px_#2C2623]">
+                <KeyRound className="size-4" />
+              </span>
               Kredensial {revealTarget?.service_name}
             </DialogTitle>
             <DialogDescription>
-              Kode {revealTarget?.sub_code} · Aktivitas pembukaan sandi ini otomatis dicatat ke
-              Audit Log (<code>VAULT_REVEAL</code>).
+              Kode {revealTarget?.sub_code} · Aktivitas pembukaan sandi ini
+              otomatis dicatat ke Audit Log (<code>VAULT_REVEAL</code>).
             </DialogDescription>
           </DialogHeader>
 
           {revealLoading && (
-            <div className="text-muted-foreground py-6 text-center text-sm">
+            <div className="text-muted-foreground rounded-2xl border-2 border-dashed border-[#2C2623]/30 bg-[#F0F9FF]/70 py-6 text-center text-sm font-semibold">
               Mendekripsi kredensial dari brankas AES-256...
             </div>
           )}
 
           {revealError && (
-            <Alert variant="destructive">
+            <Alert
+              variant="destructive"
+              className="rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] dark:border-rose-400/50 dark:bg-rose-950/40"
+            >
               <AlertTriangle className="size-4" />
-              <AlertTitle>Gagal Membuka Kredensial</AlertTitle>
+              <AlertTitle className="font-extrabold">
+                Gagal Membuka Kredensial
+              </AlertTitle>
               <AlertDescription>{revealError}</AlertDescription>
             </Alert>
           )}
 
           {revealedSecret && revealTarget && (
             <div className="space-y-4">
-              <div className="space-y-1">
-                <Label className="text-muted-foreground text-xs">Email / Username</Label>
+              <div className="space-y-1.5 rounded-2xl border-2 border-[#2C2623]/35 bg-[#F0F9FF]/60 p-3 dark:border-stone-700 dark:bg-sky-950/20">
+                <Label className="text-muted-foreground text-xs font-extrabold uppercase">
+                  Email / Username
+                </Label>
                 <div className="flex items-center gap-2">
-                  <Input readOnly value={revealTarget.login_email} className="font-mono text-xs" />
+                  <Input
+                    readOnly
+                    value={revealTarget.login_email}
+                    className="bg-white font-mono text-xs dark:bg-background"
+                  />
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="rounded-full border-2 border-[#2C2623] bg-white font-bold shadow-[1.5px_1.5px_0px_0px_#2C2623]"
                     onClick={() =>
                       copyToClipboard(revealTarget.login_email, "modal-email")
                     }
@@ -1545,15 +2250,36 @@ export function VaultClient({
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-muted-foreground text-xs">Kata Sandi</Label>
+              <div className="space-y-1.5 rounded-2xl border-2 border-[#2C2623]/35 bg-[#FEFCE8]/75 p-3 dark:border-stone-700 dark:bg-amber-950/20">
+                <div className="flex items-center justify-between">
+                  <Label className="text-muted-foreground text-xs font-extrabold uppercase">
+                    Kata Sandi
+                  </Label>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full border-[1.5px] border-[#2C2623] bg-white px-2.5 py-0.5 text-[11px] font-bold text-[#2C2623] hover:bg-[#E0F2FE] dark:bg-background dark:text-foreground"
+                    onClick={() => setShowPlainPassword((s) => !s)}
+                  >
+                    {showPlainPassword ? (
+                      <>
+                        <EyeOff className="size-3" />
+                        Sembunyikan
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="size-3" />
+                        Tampilkan
+                      </>
+                    )}
+                  </button>
+                </div>
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
                     <Input
                       readOnly
                       type={showPlainPassword ? "text" : "password"}
                       value={revealedSecret.passwordPlain}
-                      className="pr-9 font-mono text-sm"
+                      className="bg-white pr-9 font-mono text-sm dark:bg-background"
                     />
                     <button
                       type="button"
@@ -1570,13 +2296,17 @@ export function VaultClient({
                   <Button
                     type="button"
                     size="sm"
+                    className="rounded-full border-2 border-[#2C2623] bg-[#FEF08A] font-extrabold text-[#5C3D00] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FDE047]"
                     onClick={() =>
-                      copyToClipboard(revealedSecret.passwordPlain, "modal-pass")
+                      copyToClipboard(
+                        revealedSecret.passwordPlain,
+                        "modal-pass",
+                      )
                     }
                   >
                     {copiedField === "modal-pass" ? (
                       <>
-                        <Check className="size-4" />
+                        <Check className="size-4 text-emerald-700" />
                         Tersalin
                       </>
                     ) : (
@@ -1590,20 +2320,21 @@ export function VaultClient({
               </div>
 
               {revealedSecret.pinRecoveryPlain && (
-                <div className="space-y-1">
-                  <Label className="text-muted-foreground text-xs">
+                <div className="space-y-1.5 rounded-2xl border-2 border-[#2C2623]/35 bg-[#EDE9FE]/65 p-3 dark:border-stone-700 dark:bg-violet-950/20">
+                  <Label className="text-muted-foreground text-xs font-extrabold uppercase">
                     PIN / Kode Pemulihan
                   </Label>
                   <div className="flex items-center gap-2">
                     <Input
                       readOnly
                       value={revealedSecret.pinRecoveryPlain}
-                      className="font-mono text-sm"
+                      className="bg-white font-mono text-sm dark:bg-background"
                     />
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="rounded-full border-2 border-[#2C2623] bg-white shadow-[1.5px_1.5px_0px_0px_#2C2623]"
                       onClick={() =>
                         copyToClipboard(
                           revealedSecret.pinRecoveryPlain ?? "",
@@ -1649,19 +2380,22 @@ export function VaultClient({
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 font-extrabold">
               <RefreshCw className="text-primary size-5" />
               Rotasi Kata Sandi — {rotateTarget?.sub.service_name}
             </DialogTitle>
             <DialogDescription>
-              Perbarui kata sandi terenkripsi dan cabut akses staf yang sudah offboarded agar akun
-              tetap aman.
+              Perbarui kata sandi terenkripsi dan cabut akses staf yang sudah
+              offboarded agar akun tetap aman.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleRotateSubmit} className="space-y-4">
             {rotateError && (
-              <Alert variant="destructive">
+              <Alert
+                variant="destructive"
+                className="rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] dark:border-rose-400/50 dark:bg-rose-950/40"
+              >
                 <AlertTriangle className="size-4" />
                 <AlertDescription>{rotateError}</AlertDescription>
               </Alert>
@@ -1669,10 +2403,12 @@ export function VaultClient({
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <Label htmlFor="rot-pass">Kata Sandi Baru *</Label>
+                <Label htmlFor="rot-pass" className="font-bold">
+                  Kata Sandi Baru *
+                </Label>
                 <button
                   type="button"
-                  className="text-primary flex items-center gap-1 text-xs hover:underline"
+                  className="inline-flex items-center gap-1 rounded-full border border-[#2C2623]/40 bg-[#FEF08A] px-2 py-0.5 text-[11px] font-bold text-[#5C3D00] hover:bg-[#FDE047]"
                   onClick={() => {
                     setRotatePassword(generateStrongPassword());
                     setShowRotatePassword(true);
@@ -1707,7 +2443,9 @@ export function VaultClient({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="rot-pin">PIN / Kode Pemulihan Baru (Opsional)</Label>
+              <Label htmlFor="rot-pin" className="font-bold">
+                PIN / Kode Pemulihan Baru (Opsional)
+              </Label>
               <Input
                 id="rot-pin"
                 value={rotatePin}
@@ -1717,8 +2455,8 @@ export function VaultClient({
             </div>
 
             {rotateTarget && rotateTarget.flagged.length > 0 && (
-              <div className="space-y-2 rounded-md border p-3">
-                <Label className="text-xs font-semibold">
+              <div className="space-y-2 rounded-2xl border-2 border-[#2C2623]/45 bg-[#FFE4E6]/60 p-3.5 dark:border-rose-400/40 dark:bg-rose-950/25">
+                <Label className="text-xs font-extrabold">
                   Cabut akses staf nonaktif / offboarded dari daftar pengguna:
                 </Label>
                 <div className="space-y-1.5">
@@ -1760,7 +2498,11 @@ export function VaultClient({
               >
                 Batal
               </Button>
-              <Button type="submit" disabled={isPending}>
+              <Button
+                type="submit"
+                disabled={isPending}
+                className="rounded-xl border-2 border-[#2C2623] bg-[#7CC4FA] font-extrabold text-[#0C4A6E] shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#5EB6F9]"
+              >
                 {isPending ? "Memproses..." : "Simpan & Rotasi Sandi"}
               </Button>
             </DialogFooter>
@@ -1777,10 +2519,13 @@ export function VaultClient({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Hapus Akun Langganan?</DialogTitle>
+            <DialogTitle className="font-extrabold">
+              Hapus Akun Langganan?
+            </DialogTitle>
             <DialogDescription>
-              Akun <strong>{deleteTarget?.service_name}</strong> ({deleteTarget?.sub_code})
-              akan dipindahkan ke Recycle Bin dan masih dapat dipulihkan selama 30 hari.
+              Akun <strong>{deleteTarget?.service_name}</strong> (
+              {deleteTarget?.sub_code}) akan dipindahkan ke Recycle Bin dan
+              masih dapat dipulihkan selama 30 hari.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

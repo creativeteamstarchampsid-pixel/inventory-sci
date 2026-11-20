@@ -14,6 +14,7 @@ import {
   Tag,
 } from "lucide-react";
 
+import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -478,12 +479,19 @@ function DocumentSheetContent({
   );
 }
 
+const DOC_TYPE_LABELS: Record<DeliveryDocType, string> = {
+  label: "Label Barcode",
+  "surat-jalan": "Surat Jalan",
+  bast: "Berita Acara Serah Terima (BAST)",
+};
+
 export function DeliveryPrintDialog({
   open,
   onOpenChange,
   delivery,
   initialTab = "label",
 }: DeliveryPrintDialogProps) {
+  const { showBatch, showSuccess, showError } = useCartoonFeedback();
   const [activeTab, setActiveTab] = useState<DeliveryDocType>(initialTab);
   const [downloading, setDownloading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
@@ -522,17 +530,30 @@ export function DeliveryPrintDialog({
 
   async function handleDownloadPdf() {
     if (!delivery) return;
+    const docLabel = DOC_TYPE_LABELS[activeTab];
     setDownloading(true);
     setPdfError(null);
+    showBatch({
+      title: `Menyusun PDF ${docLabel}...`,
+      message: `Tim mini lagi merakit dokumen ${docLabel} (${delivery.delivery_code}), barcode Code-128, dan rincian barang jadi berkas PDF siap cetak! Tunggu sebentar ya~`,
+    });
     try {
       const { downloadDeliveryPdf } = await import("./pdf-documents");
       await downloadDeliveryPdf(activeTab, delivery, bastMeta);
+      showSuccess({
+        title: `PDF ${docLabel} Siap! ♪`,
+        message: `Dokumen ${docLabel} untuk ${delivery.delivery_code} berhasil diunduh dan siap dicetak!`,
+      });
     } catch (err) {
-      setPdfError(
+      const msg =
         err instanceof Error
           ? err.message
-          : "Gagal membuat file PDF dokumen.",
-      );
+          : "Gagal membuat file PDF dokumen.";
+      setPdfError(msg);
+      showError({
+        title: "Yah, Gagal Membuat PDF...",
+        message: msg,
+      });
     } finally {
       setDownloading(false);
     }
@@ -547,9 +568,12 @@ export function DeliveryPrintDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle className="flex flex-wrap items-center gap-2">
+            <DialogTitle className="flex flex-wrap items-center gap-2 font-extrabold">
               <span>Dokumen Logistik &amp; Cetak</span>
-              <Badge variant="outline" className="font-mono">
+              <Badge
+                variant="outline"
+                className="rounded-full border-[1.5px] border-[#2C2623] bg-[#FFF4D6] font-mono font-extrabold text-[#2C2623] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-amber-400/60 dark:bg-amber-950/60 dark:text-amber-100"
+              >
                 {delivery.delivery_code}
               </Badge>
             </DialogTitle>
@@ -565,16 +589,25 @@ export function DeliveryPrintDialog({
             className="mt-1"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <TabsList>
-                <TabsTrigger value="label" className="gap-1.5">
+              <TabsList className="rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-background">
+                <TabsTrigger
+                  value="label"
+                  className="gap-1.5 rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#FFE8D6] data-[state=active]:text-[#2C2623]"
+                >
                   <Tag className="size-3.5" />
                   Label Barcode
                 </TabsTrigger>
-                <TabsTrigger value="surat-jalan" className="gap-1.5">
+                <TabsTrigger
+                  value="surat-jalan"
+                  className="gap-1.5 rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#E0F2FE] data-[state=active]:text-[#0C4A6E]"
+                >
                   <FileText className="size-3.5" />
                   Surat Jalan
                 </TabsTrigger>
-                <TabsTrigger value="bast" className="gap-1.5">
+                <TabsTrigger
+                  value="bast"
+                  className="gap-1.5 rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#D1FAE5] data-[state=active]:text-[#14532D]"
+                >
                   <FileCheck2 className="size-3.5" />
                   BAST
                 </TabsTrigger>
@@ -586,6 +619,7 @@ export function DeliveryPrintDialog({
                   variant="outline"
                   size="sm"
                   onClick={handlePrint}
+                  className="rounded-xl border-2 border-[#2C2623] bg-[#FEF9C3] font-bold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FEF08A] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
                 >
                   <Printer className="size-4" />
                   Cetak (@page)
@@ -595,6 +629,7 @@ export function DeliveryPrintDialog({
                   size="sm"
                   onClick={handleDownloadPdf}
                   disabled={downloading}
+                  className="rounded-xl border-2 border-[#2C2623] bg-[#7CC4FA] font-extrabold text-[#0C4A6E] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#60B6F8] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
                 >
                   {downloading ? (
                     <Loader2 className="size-4 animate-spin" />
@@ -607,15 +642,18 @@ export function DeliveryPrintDialog({
             </div>
 
             {pdfError && (
-              <Alert variant="destructive" className="mt-2">
+              <Alert
+                variant="destructive"
+                className="mt-2 rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] dark:border-rose-400/50 dark:bg-rose-950/40"
+              >
                 <AlertDescription>{pdfError}</AlertDescription>
               </Alert>
             )}
 
             <TabsContent value="bast" className="mt-3 space-y-3">
-              <div className="bg-muted/40 grid gap-3 rounded-lg border p-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-3 rounded-2xl border-2 border-[#2C2623]/60 bg-[#ECFDF5]/70 p-3.5 sm:grid-cols-2 lg:grid-cols-4 dark:border-stone-600 dark:bg-emerald-950/20">
                 <div className="space-y-1">
-                  <Label className="text-xs">Keperluan BAST</Label>
+                  <Label className="text-xs font-bold">Keperluan BAST</Label>
                   <Input
                     value={bastPurpose}
                     onChange={(e) => setBastPurpose(e.target.value)}
@@ -624,7 +662,9 @@ export function DeliveryPrintDialog({
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Jabatan Pihak Pertama</Label>
+                  <Label className="text-xs font-bold">
+                    Jabatan Pihak Pertama
+                  </Label>
                   <Input
                     value={senderRoleLabel}
                     onChange={(e) => setSenderRoleLabel(e.target.value)}
@@ -633,7 +673,9 @@ export function DeliveryPrintDialog({
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Jabatan Pihak Kedua</Label>
+                  <Label className="text-xs font-bold">
+                    Jabatan Pihak Kedua
+                  </Label>
                   <Input
                     value={receiverRoleLabel}
                     onChange={(e) => setReceiverRoleLabel(e.target.value)}
@@ -642,7 +684,7 @@ export function DeliveryPrintDialog({
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Saksi / PIC</Label>
+                  <Label className="text-xs font-bold">Saksi / PIC</Label>
                   <Input
                     value={witnessName}
                     onChange={(e) => setWitnessName(e.target.value)}
@@ -653,7 +695,7 @@ export function DeliveryPrintDialog({
               </div>
             </TabsContent>
 
-            <div className="bg-muted/50 mt-3 rounded-lg border p-4">
+            <div className="mt-3 rounded-2xl border-2 border-[#2C2623]/40 bg-[#F5EFE6]/80 p-4 dark:border-stone-700 dark:bg-muted/50">
               <DocumentSheetContent
                 docType={activeTab}
                 delivery={delivery}

@@ -21,12 +21,18 @@ import {
   QrCode,
   RotateCcw,
   Search,
+  Sparkles,
   Tag,
   Trash2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 
+import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
+import {
+  KawaiiEmptyState,
+  KawaiiPageHeader,
+} from "@/components/cartoon/kawaii-decor";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -158,6 +164,9 @@ export function BarcodeStudioClient({
   initialSourceTab = "ALL",
   initialTemplate = "THERMAL",
 }: BarcodeStudioClientProps) {
+  const { showWorking, showBatch, showSuccess, showError, runWithFeedback } =
+    useCartoonFeedback();
+
   const allRecords = React.useMemo(
     () => [...items, ...archives],
     [items, archives],
@@ -207,12 +216,19 @@ export function BarcodeStudioClient({
     getDefaultZoomForTemplate(initialTemplate, "A4_SHEET"),
   );
   const [isExportingPdf, setIsExportingPdf] = React.useState(false);
+  const [isPreparingPrint, setIsPreparingPrint] = React.useState(false);
   const [pdfError, setPdfError] = React.useState<string | null>(null);
+  const printTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
     if (typeof window !== "undefined") {
       setQrOrigin(window.location.origin);
     }
+    return () => {
+      if (printTimerRef.current) {
+        clearTimeout(printTimerRef.current);
+      }
+    };
   }, []);
 
   // Derive unique categories from current records for filter dropdown
@@ -421,9 +437,49 @@ export function BarcodeStudioClient({
     });
   };
 
+  const selectedCount = batchEntries.length;
+  const totalStickers = expandedQueue.length;
+  const firstSelectedRecord = expandedQueue[0] ?? allRecords[0] ?? null;
+
   const handlePrint = () => {
-    if (pages.length === 0) return;
-    window.print();
+    if (pages.length === 0 || isPreparingPrint) return;
+    setIsPreparingPrint(true);
+
+    const isBatch = totalStickers > 1 || pages.length > 1;
+    if (isBatch) {
+      showBatch({
+        title: "Menyiapkan Cetak Massal...",
+        message: `Tim mini lagi nyusun ${totalStickers} stiker (${pages.length} halaman) biar siap dikirim ke printer dengan presisi 1:1 mm nih~`,
+      });
+    } else {
+      showWorking({
+        title: "Menyiapkan Stiker Cetak...",
+        message:
+          "Dino Joguman lagi merapikan 1 stiker barcode siap cetak biar langsung tajam saat keluar dari printer~",
+      });
+    }
+
+    printTimerRef.current = setTimeout(() => {
+      try {
+        window.print();
+        showSuccess({
+          title: "Dialog Cetak Siap! ✨",
+          message: `Yeay! ${totalStickers} stiker (${pages.length} halaman) sudah dikirim ke dialog cetak browser. Pastikan skala 100% tanpa margin ya ♪`,
+        });
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : "Gagal membuka dialog cetak browser.";
+        showError({
+          title: "Gagal Membuka Cetak...",
+          message: `Yah, proses cetak terkendala: ${msg}. Coba unduh versi PDF sebagai alternatif ya!`,
+        });
+      } finally {
+        setIsPreparingPrint(false);
+        printTimerRef.current = null;
+      }
+    }, 220);
   };
 
   const handleDownloadPdf = async () => {
@@ -431,35 +487,58 @@ export function BarcodeStudioClient({
     setIsExportingPdf(true);
     setPdfError(null);
 
+    const isBatch = totalStickers > 1 || pages.length > 1;
+
     try {
-      const { generateBarcodeBatchPdfBlob } = await import("./label-pdf");
-      const blob = await generateBarcodeBatchPdfBlob({
-        pages,
-        template,
-        thermalSize,
-        spinePaperMode,
-        symbology,
-        origin: qrOrigin,
-      });
+      await runWithFeedback(
+        {
+          mode: isBatch ? "batch" : "working",
+          workingTitle: isBatch
+            ? "Merender Lembar PDF Stiker..."
+            : "Membuat Stiker PDF...",
+          workingMessage: isBatch
+            ? `Tim mini lagi lembur ngebut merender ${totalStickers} stiker (${pages.length} halaman) ke file PDF vektor tajam nih! Santai sebentar ya~`
+            : "Dino Joguman lagi menggambar 1 stiker barcode vektor yang super rapi & tajam buatmu nih~",
+          successTitle: "PDF Stiker Siap Dicetak! ✨",
+          successMessage: `Yeay! File PDF berisi ${totalStickers} stiker (${pages.length} halaman) berhasil diunduh dan siap dicetak ♪`,
+          errorTitle: "Gagal Membuat PDF...",
+          errorMessage: (err) =>
+            err instanceof Error
+              ? `Gagal membuat PDF label: ${err.message}`
+              : "Yah, hujan turun... terjadi kesalahan saat merender file PDF. Coba ulangi lagi ya!",
+        },
+        async () => {
+          const { generateBarcodeBatchPdfBlob } = await import("./label-pdf");
+          const blob = await generateBarcodeBatchPdfBlob({
+            pages,
+            template,
+            thermalSize,
+            spinePaperMode,
+            symbology,
+            origin: qrOrigin,
+          });
 
-      const url = URL.createObjectURL(blob);
-      const stamp = new Date().toISOString().slice(0, 10);
-      const templateSlug =
-        template === "THERMAL"
-          ? `thermal-${thermalSize}`
-          : template === "A4_GRID"
-            ? "a4-24grid"
-            : spinePaperMode === "A4_SHEET"
-              ? "spine-a4"
-              : "spine-150x35";
+          const url = URL.createObjectURL(blob);
+          const stamp = new Date().toISOString().slice(0, 10);
+          const templateSlug =
+            template === "THERMAL"
+              ? `thermal-${thermalSize}`
+              : template === "A4_GRID"
+                ? "a4-24grid"
+                : spinePaperMode === "A4_SHEET"
+                  ? "spine-a4"
+                  : "spine-150x35";
 
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `starops-label-${templateSlug}-${symbology.toLowerCase()}-${stamp}.pdf`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = `starops-label-${templateSlug}-${symbology.toLowerCase()}-${stamp}.pdf`;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          return true;
+        },
+      );
     } catch (err) {
       const msg =
         err instanceof Error
@@ -482,53 +561,63 @@ export function BarcodeStudioClient({
     spinePaperMode,
   );
 
-  const selectedCount = batchEntries.length;
-  const totalStickers = expandedQueue.length;
-  const firstSelectedRecord = expandedQueue[0] ?? allRecords[0] ?? null;
-
   return (
     <>
       {/* Dynamic @page size matching the currently selected print layout */}
       <style>{`@media print { @page { size: ${printPageSizeCss}; margin: 0; } }`}</style>
 
       {/* Interactive Studio Workspace (hidden when printing) */}
-      <div className="barcode-no-print space-y-6">
-        {/* Top Header */}
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <Barcode className="text-primary size-6" />
-              Barcode & Label Print Studio
-            </h1>
-            <p className="text-muted-foreground text-sm">
-              Desain dan cetak stiker Code-128 & QR Code siap potong untuk
-              inventaris terapi, aset kantor, dan punggung map arsip.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="gap-1.5 px-2.5 py-1">
-              <Package className="size-3.5" />
-              {items.length} Inventaris
-            </Badge>
-            <Badge variant="outline" className="gap-1.5 px-2.5 py-1">
-              <Archive className="size-3.5" />
-              {archives.length} Arsip
-            </Badge>
-            <Badge
-              variant={selectedCount > 0 ? "default" : "secondary"}
-              className="gap-1.5 px-2.5 py-1"
-            >
-              <Layers className="size-3.5" />
-              {selectedCount} Item · {totalStickers} Stiker · {pages.length}{" "}
-              Hal.
-            </Badge>
-          </div>
-        </div>
+      <div className="barcode-no-print space-y-6 print:hidden">
+        {/* Top Kawaii Header */}
+        <KawaiiPageHeader
+          badge="Studio Cetak Stiker & Label"
+          title="Barcode & Label Print Studio"
+          description="Desain dan cetak stiker Code-128 & QR Code siap potong untuk inventaris terapi, aset kantor, dan punggung map arsip."
+          accent="pink"
+          mascot="barcode"
+          className="print:hidden"
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant="outline"
+                className="gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#D1FAE5] px-3 py-1 font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-emerald-950/70 dark:text-emerald-100"
+              >
+                <Package className="size-3.5" />
+                {items.length} Inventaris
+              </Badge>
+              <Badge
+                variant="outline"
+                className="gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#E0F2FE] px-3 py-1 font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-sky-950/70 dark:text-sky-100"
+              >
+                <Archive className="size-3.5" />
+                {archives.length} Arsip
+              </Badge>
+              <Badge
+                variant={selectedCount > 0 ? "default" : "secondary"}
+                className={cn(
+                  "gap-1.5 rounded-full border-2 border-[#2C2623] px-3 py-1 font-extrabold shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500",
+                  selectedCount > 0
+                    ? "bg-[#FDE68A] text-[#2C2623] dark:bg-amber-900/80 dark:text-amber-100"
+                    : "bg-white text-[#2C2623] dark:bg-stone-800 dark:text-stone-200",
+                )}
+              >
+                <Layers className="size-3.5" />
+                {selectedCount} Item · {totalStickers} Stiker · {pages.length}{" "}
+                Hal.
+              </Badge>
+            </div>
+          }
+        />
 
         {!schemaReady && (
-          <Alert variant="warning">
+          <Alert
+            variant="warning"
+            className="rounded-2xl border-2 border-[#2C2623] bg-[#FEF3C7] text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] print:hidden dark:border-amber-500 dark:bg-amber-950/50 dark:text-amber-100"
+          >
             <AlertTriangle className="size-4" />
-            <AlertTitle>Skema Database Supabase Belum Diterapkan</AlertTitle>
+            <AlertTitle className="font-extrabold">
+              Skema Database Supabase Belum Diterapkan
+            </AlertTitle>
             <AlertDescription>
               <p>
                 Jalankan file <code>supabase/schema.sql</code> di Supabase SQL
@@ -545,24 +634,30 @@ export function BarcodeStudioClient({
         )}
 
         {pdfError && (
-          <Alert variant="destructive">
+          <Alert
+            variant="destructive"
+            className="rounded-2xl border-2 border-[#2C2623] bg-[#FFF1F2] shadow-[3px_3px_0px_0px_#2C2623] print:hidden dark:border-rose-500 dark:bg-rose-950/50"
+          >
             <AlertTriangle className="size-4" />
-            <AlertTitle>Ekspor PDF Gagal</AlertTitle>
+            <AlertTitle className="font-extrabold">Ekspor PDF Gagal</AlertTitle>
             <AlertDescription>{pdfError}</AlertDescription>
           </Alert>
         )}
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
           {/* LEFT COLUMN: Batch Selection Table */}
-          <Card className="flex flex-col">
-            <CardHeader className="pb-3">
+          <Card className="flex flex-col overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[4px_4px_0px_0px_#0c0a09]">
+            <CardHeader className="border-b-2 border-[#2C2623] bg-[#FFE4E6]/65 pb-4 dark:border-stone-600 dark:bg-rose-950/35">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <CardTitle className="flex items-center gap-2 text-base">
+                  <CardTitle className="flex items-center gap-2.5 text-base font-extrabold text-[#2C2623] dark:text-stone-100">
+                    <span className="inline-flex size-7 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#FDE68A] text-xs font-black text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                      1
+                    </span>
                     <CheckSquare className="size-4" />
-                    1. Pilih Batch Item & Arsip
+                    Pilih Batch Item & Arsip
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="mt-1 text-[#2C2623]/75 dark:text-stone-300">
                     Centang satu atau beberapa item/arsip lalu atur jumlah
                     cetakan per item.
                   </CardDescription>
@@ -570,10 +665,10 @@ export function BarcodeStudioClient({
                 {selectedCount > 0 && (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     onClick={clearSelection}
-                    className="text-destructive hover:text-destructive h-8 px-2"
+                    className="h-8 rounded-xl border-2 border-[#2C2623] bg-white px-2.5 font-bold text-rose-600 shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FFF1F2] hover:text-rose-700 dark:border-stone-500 dark:bg-stone-900 dark:text-rose-300"
                   >
                     <Trash2 className="mr-1.5 size-3.5" />
                     Bersihkan ({selectedCount})
@@ -582,7 +677,7 @@ export function BarcodeStudioClient({
               </div>
 
               {/* Source Tabs */}
-              <div className="pt-2">
+              <div className="pt-2.5">
                 <Tabs
                   value={sourceTab}
                   onValueChange={(val) => {
@@ -591,14 +686,23 @@ export function BarcodeStudioClient({
                     setCategoryFilter("ALL");
                   }}
                 >
-                  <TabsList className="w-full sm:w-auto">
-                    <TabsTrigger value="ALL">
+                  <TabsList className="h-auto w-full gap-1 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 sm:w-auto dark:border-stone-500 dark:bg-stone-900">
+                    <TabsTrigger
+                      value="ALL"
+                      className="rounded-xl px-3 py-1.5 font-bold data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#FDE68A] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
+                    >
                       Semua ({allRecords.length})
                     </TabsTrigger>
-                    <TabsTrigger value="INVENTORY">
+                    <TabsTrigger
+                      value="INVENTORY"
+                      className="rounded-xl px-3 py-1.5 font-bold data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#A7F3D0] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
+                    >
                       Inventaris ({items.length})
                     </TabsTrigger>
-                    <TabsTrigger value="ARCHIVE">
+                    <TabsTrigger
+                      value="ARCHIVE"
+                      className="rounded-xl px-3 py-1.5 font-bold data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#BAE6FD] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
+                    >
                       Arsip ({archives.length})
                     </TabsTrigger>
                   </TabsList>
@@ -606,16 +710,16 @@ export function BarcodeStudioClient({
               </div>
             </CardHeader>
 
-            <CardContent className="flex flex-1 flex-col gap-3">
+            <CardContent className="flex flex-1 flex-col gap-3.5 pt-4">
               {/* Filter Bar */}
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="relative sm:col-span-2">
-                  <Search className="text-muted-foreground pointer-events-none absolute top-2.5 left-2.5 size-4" />
+                  <Search className="text-muted-foreground pointer-events-none absolute top-2.5 left-3 size-4" />
                   <Input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Cari kode SC-..., nama, kategori, rak/laci..."
-                    className="pl-8"
+                    className="rounded-xl border-2 border-[#2C2623] bg-white pl-9 dark:border-stone-500 dark:bg-stone-900"
                   />
                 </div>
 
@@ -623,7 +727,7 @@ export function BarcodeStudioClient({
                   value={locationFilter}
                   onValueChange={setLocationFilter}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                     <SelectValue placeholder="Semua Lokasi" />
                   </SelectTrigger>
                   <SelectContent>
@@ -640,7 +744,7 @@ export function BarcodeStudioClient({
                   value={categoryFilter}
                   onValueChange={setCategoryFilter}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                     <SelectValue placeholder="Semua Kategori" />
                   </SelectTrigger>
                   <SelectContent>
@@ -660,7 +764,10 @@ export function BarcodeStudioClient({
                     value={typeFilter}
                     onValueChange={(v) => setTypeFilter(v as TypeFilter)}
                   >
-                    <SelectTrigger size="sm" className="w-[190px]">
+                    <SelectTrigger
+                      size="sm"
+                      className="w-[195px] rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-stone-500 dark:bg-stone-900"
+                    >
                       <Filter className="mr-1.5 size-3.5" />
                       <SelectValue placeholder="Filter Jenis" />
                     </SelectTrigger>
@@ -690,10 +797,10 @@ export function BarcodeStudioClient({
                     typeFilter !== "ALL") && (
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
                       onClick={resetFilters}
-                      className="h-8 px-2 text-xs"
+                      className="h-8 rounded-xl border-2 border-[#2C2623] bg-[#FFFBEB] px-2.5 text-xs font-bold text-[#2C2623] hover:bg-[#FEF3C7] dark:border-stone-500 dark:bg-stone-800 dark:text-stone-100"
                     >
                       <RotateCcw className="mr-1 size-3" />
                       Reset Filter
@@ -702,8 +809,8 @@ export function BarcodeStudioClient({
                 </div>
 
                 {selectedCount > 0 && (
-                  <div className="flex flex-wrap items-center gap-1 text-xs">
-                    <span className="text-muted-foreground mr-1">
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="font-bold text-[#2C2623]/75 dark:text-stone-300">
                       Set Qty Terpilih:
                     </span>
                     {[1, 2, 5, 10, 24].map((qty) => (
@@ -713,7 +820,7 @@ export function BarcodeStudioClient({
                         variant="outline"
                         size="sm"
                         onClick={() => applyQuantityToSelected(qty)}
-                        className="h-7 px-2 text-xs"
+                        className="h-7 rounded-lg border-2 border-[#2C2623] bg-[#FEF3C7] px-2 text-xs font-extrabold text-[#2C2623] shadow-[1.5px_1.5px_0px_0px_#2C2623] hover:bg-[#FDE68A] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none dark:border-stone-500 dark:bg-amber-950/60 dark:text-amber-100"
                       >
                         ×{qty}
                       </Button>
@@ -723,9 +830,9 @@ export function BarcodeStudioClient({
               </div>
 
               {/* Records Table */}
-              <div className="max-h-[540px] overflow-y-auto rounded-md border">
+              <div className="max-h-[540px] overflow-y-auto rounded-2xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-950/40">
                 <Table>
-                  <TableHeader className="bg-muted/40 sticky top-0 z-10">
+                  <TableHeader className="sticky top-0 z-10 border-b-2 border-[#2C2623] bg-[#FEF3C7]/95 dark:border-stone-600 dark:bg-stone-800">
                     <TableRow>
                       <TableHead className="w-10">
                         <Checkbox
@@ -735,9 +842,13 @@ export function BarcodeStudioClient({
                           disabled={filteredRecords.length === 0}
                         />
                       </TableHead>
-                      <TableHead>Kode & Sumber</TableHead>
-                      <TableHead>Nama, Lokasi & Indikator</TableHead>
-                      <TableHead className="w-32 text-right">
+                      <TableHead className="font-extrabold text-[#2C2623] dark:text-stone-100">
+                        Kode & Sumber
+                      </TableHead>
+                      <TableHead className="font-extrabold text-[#2C2623] dark:text-stone-100">
+                        Nama, Lokasi & Indikator
+                      </TableHead>
+                      <TableHead className="w-32 text-right font-extrabold text-[#2C2623] dark:text-stone-100">
                         Qty Label
                       </TableHead>
                     </TableRow>
@@ -747,11 +858,36 @@ export function BarcodeStudioClient({
                       <TableRow>
                         <TableCell
                           colSpan={4}
-                          className="text-muted-foreground py-12 text-center text-sm whitespace-normal"
+                          className="py-6 whitespace-normal"
                         >
-                          {allRecords.length === 0
-                            ? "Belum ada data inventaris atau arsip aktif di database."
-                            : "Tidak ada item atau arsip yang cocok dengan filter pencarian."}
+                          <KawaiiEmptyState
+                            mascot="barcode"
+                            title={
+                              allRecords.length === 0
+                                ? "Belum Ada Data Stiker"
+                                : "Tidak Ada Hasil yang Cocok"
+                            }
+                            description={
+                              allRecords.length === 0
+                                ? "Belum ada data inventaris atau arsip aktif di database."
+                                : "Coba ubah kata kunci pencarian atau reset filter untuk melihat daftar item lainnya ya!"
+                            }
+                            action={
+                              allRecords.length > 0 ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={resetFilters}
+                                  className="rounded-xl border-2 border-[#2C2623] bg-[#FEF3C7] font-bold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]"
+                                >
+                                  <RotateCcw className="mr-1.5 size-3.5" />
+                                  Reset Semua Filter
+                                </Button>
+                              ) : undefined
+                            }
+                            className="border-0 bg-transparent py-4 shadow-none"
+                          />
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -762,7 +898,12 @@ export function BarcodeStudioClient({
                           <TableRow
                             key={rec.key}
                             data-state={isSelected ? "selected" : undefined}
-                            className="cursor-pointer"
+                            className={cn(
+                              "cursor-pointer transition-colors",
+                              isSelected
+                                ? "bg-[#D1FAE5]/45 hover:bg-[#D1FAE5]/65 dark:bg-emerald-950/35"
+                                : "hover:bg-[#FFFBEB] dark:hover:bg-stone-800/50",
+                            )}
                             onClick={() => toggleSelectRecord(rec.key)}
                           >
                             <TableCell
@@ -778,7 +919,7 @@ export function BarcodeStudioClient({
                               />
                             </TableCell>
                             <TableCell className="align-top whitespace-normal">
-                              <div className="font-mono text-xs font-semibold">
+                              <div className="font-mono text-xs font-extrabold text-[#2C2623] dark:text-stone-100">
                                 {rec.code}
                               </div>
                               <div className="mt-1 flex flex-wrap gap-1">
@@ -788,7 +929,12 @@ export function BarcodeStudioClient({
                                       ? "secondary"
                                       : "outline"
                                   }
-                                  className="px-1.5 py-0 text-[10px]"
+                                  className={cn(
+                                    "rounded-full border border-[#2C2623] px-1.5 py-0 text-[10px] font-bold dark:border-stone-500",
+                                    rec.source === "ARCHIVE"
+                                      ? "bg-[#E0F2FE] text-[#2C2623] dark:bg-sky-950/60 dark:text-sky-100"
+                                      : "bg-[#D1FAE5] text-[#2C2623] dark:bg-emerald-950/60 dark:text-emerald-100",
+                                  )}
                                 >
                                   {rec.source === "ARCHIVE"
                                     ? "Arsip"
@@ -796,7 +942,7 @@ export function BarcodeStudioClient({
                                 </Badge>
                                 <Badge
                                   variant="outline"
-                                  className="px-1.5 py-0 text-[10px]"
+                                  className="rounded-full border border-[#2C2623]/60 bg-white px-1.5 py-0 text-[10px] font-semibold dark:border-stone-500 dark:bg-stone-900"
                                 >
                                   {
                                     SYMBOLOGY_LABELS[rec.recommendedFormat]
@@ -806,14 +952,14 @@ export function BarcodeStudioClient({
                               </div>
                             </TableCell>
                             <TableCell className="align-top whitespace-normal">
-                              <div className="font-medium leading-snug">
+                              <div className="leading-snug font-bold text-[#2C2623] dark:text-stone-100">
                                 {rec.title}
                               </div>
                               <div className="text-muted-foreground text-xs">
                                 {rec.category} · {rec.locationDisplay}
                               </div>
                               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
-                                <span className="font-medium">
+                                <span className="font-semibold">
                                   {rec.counterOrIndicator}
                                 </span>
                                 {rec.statusTag && (
@@ -823,7 +969,7 @@ export function BarcodeStudioClient({
                                         ? "destructive"
                                         : "secondary"
                                     }
-                                    className="px-1.5 py-0 text-[10px]"
+                                    className="rounded-full border border-[#2C2623] px-1.5 py-0 text-[10px] font-bold"
                                   >
                                     {rec.statusTag}
                                   </Badge>
@@ -840,7 +986,7 @@ export function BarcodeStudioClient({
                                     type="button"
                                     variant="outline"
                                     size="icon"
-                                    className="size-7"
+                                    className="size-7 rounded-lg border-2 border-[#2C2623] bg-[#FFE4E6] text-[#2C2623] hover:bg-[#FECDD3] dark:border-stone-500"
                                     aria-label={`Kurangi jumlah ${rec.code}`}
                                     onClick={() =>
                                       updateQuantity(
@@ -863,14 +1009,14 @@ export function BarcodeStudioClient({
                                           1,
                                       )
                                     }
-                                    className="h-7 w-13 px-1 text-center font-mono text-xs"
+                                    className="h-7 w-13 rounded-lg border-2 border-[#2C2623] bg-white px-1 text-center font-mono text-xs font-bold dark:border-stone-500 dark:bg-stone-900"
                                     aria-label={`Jumlah label untuk ${rec.code}`}
                                   />
                                   <Button
                                     type="button"
                                     variant="outline"
                                     size="icon"
-                                    className="size-7"
+                                    className="size-7 rounded-lg border-2 border-[#2C2623] bg-[#D1FAE5] text-[#2C2623] hover:bg-[#A7F3D0] dark:border-stone-500"
                                     aria-label={`Tambah jumlah ${rec.code}`}
                                     onClick={() =>
                                       updateQuantity(rec.key, qty + 1)
@@ -882,10 +1028,10 @@ export function BarcodeStudioClient({
                               ) : (
                                 <Button
                                   type="button"
-                                  variant="ghost"
+                                  variant="outline"
                                   size="sm"
                                   onClick={() => toggleSelectRecord(rec.key)}
-                                  className="text-muted-foreground h-7 px-2 text-xs"
+                                  className="h-7 rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] px-2.5 text-xs font-extrabold text-[#2C2623] shadow-[1.5px_1.5px_0px_0px_#2C2623] hover:bg-[#FEF3C7] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
                                 >
                                   + Pilih
                                 </Button>
@@ -899,9 +1045,16 @@ export function BarcodeStudioClient({
                 </Table>
               </div>
 
-              <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-xs font-medium">
                 <span>
-                  Menampilkan {filteredRecords.length} dari {allRecords.length}{" "}
+                  Menampilkan{" "}
+                  <strong className="text-foreground">
+                    {filteredRecords.length}
+                  </strong>{" "}
+                  dari{" "}
+                  <strong className="text-foreground">
+                    {allRecords.length}
+                  </strong>{" "}
                   data aktif
                 </span>
                 <span>
@@ -915,24 +1068,27 @@ export function BarcodeStudioClient({
           {/* RIGHT COLUMN: Configuration & Live Preview */}
           <div className="flex flex-col gap-6">
             {/* Configuration Card */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
+            <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[4px_4px_0px_0px_#0c0a09]">
+              <CardHeader className="border-b-2 border-[#2C2623] bg-[#E0F2FE]/80 pb-4 dark:border-stone-600 dark:bg-sky-950/35">
+                <CardTitle className="flex items-center gap-2.5 text-base font-extrabold text-[#2C2623] dark:text-stone-100">
+                  <span className="inline-flex size-7 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#A7F3D0] text-xs font-black text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                    2
+                  </span>
                   <Tag className="size-4" />
-                  2. Pengaturan Simbologi & Template Cetak
+                  Pengaturan Simbologi & Template Cetak
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-[#2C2623]/75 dark:text-stone-300">
                   Sesuaikan mode barcode/QR dan ukuran kertas cetak sesuai PRD
                   Section 3.2.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-5">
+              <CardContent className="space-y-5 pt-4">
                 {/* Symbology Selector */}
                 <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide">
+                  <Label className="text-xs font-extrabold tracking-wide text-[#2C2623] uppercase dark:text-stone-200">
                     Mode Simbologi
                   </Label>
-                  <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="grid gap-2.5 sm:grid-cols-3">
                     {(
                       [
                         { id: "CODE128", icon: Barcode },
@@ -948,26 +1104,26 @@ export function BarcodeStudioClient({
                           type="button"
                           onClick={() => setSymbology(id)}
                           className={cn(
-                            "flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition-colors",
+                            "flex flex-col items-start gap-1 rounded-2xl border-2 border-[#2C2623] p-3 text-left transition-all dark:border-stone-500",
                             active
-                              ? "border-primary bg-primary/5 ring-primary/20 ring-2"
-                              : "hover:bg-muted/50",
+                              ? "-translate-y-0.5 bg-[#D1FAE5] text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] dark:bg-emerald-950/70 dark:text-emerald-100"
+                              : "bg-white hover:-translate-y-0.5 hover:bg-[#FFFBEB] dark:bg-stone-900 dark:hover:bg-stone-800",
                           )}
                         >
                           <div className="flex w-full items-center justify-between">
-                            <span className="text-xs font-semibold">
+                            <span className="text-xs font-extrabold">
                               {meta.title}
                             </span>
                             <Icon
                               className={cn(
                                 "size-4 shrink-0",
                                 active
-                                  ? "text-primary"
+                                  ? "text-[#2AB673] dark:text-emerald-300"
                                   : "text-muted-foreground",
                               )}
                             />
                           </div>
-                          <span className="text-muted-foreground text-[11px] leading-snug">
+                          <span className="text-[11px] leading-snug opacity-80">
                             {meta.description}
                           </span>
                         </button>
@@ -978,10 +1134,10 @@ export function BarcodeStudioClient({
 
                 {/* Layout Template Selector */}
                 <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide">
+                  <Label className="text-xs font-extrabold tracking-wide text-[#2C2623] uppercase dark:text-stone-200">
                     Template Kertas & Stiker
                   </Label>
-                  <div className="grid gap-2">
+                  <div className="grid gap-2.5">
                     {(
                       [
                         { id: "THERMAL", icon: Tag },
@@ -997,33 +1153,40 @@ export function BarcodeStudioClient({
                           type="button"
                           onClick={() => handleTemplateChange(id)}
                           className={cn(
-                            "flex items-center justify-between gap-3 rounded-lg border p-2.5 text-left transition-colors",
+                            "flex items-center justify-between gap-3 rounded-2xl border-2 border-[#2C2623] p-3 text-left transition-all dark:border-stone-500",
                             active
-                              ? "border-primary bg-primary/5 ring-primary/20 ring-2"
-                              : "hover:bg-muted/50",
+                              ? "-translate-y-0.5 bg-[#FFE4E6] text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] dark:bg-rose-950/60 dark:text-rose-100"
+                              : "bg-white hover:-translate-y-0.5 hover:bg-[#FFFBEB] dark:bg-stone-900 dark:hover:bg-stone-800",
                           )}
                         >
                           <div className="flex min-w-0 items-center gap-2.5">
-                            <Icon
+                            <span
                               className={cn(
-                                "size-4 shrink-0",
+                                "inline-flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] dark:border-stone-500",
                                 active
-                                  ? "text-primary"
-                                  : "text-muted-foreground",
+                                  ? "bg-[#FDE68A] text-[#2C2623]"
+                                  : "bg-[#F5EFE6] text-muted-foreground dark:bg-stone-800",
                               )}
-                            />
+                            >
+                              <Icon className="size-4" />
+                            </span>
                             <div className="min-w-0">
-                              <div className="truncate text-xs font-semibold">
+                              <div className="truncate text-xs font-extrabold">
                                 {meta.title}
                               </div>
-                              <div className="text-muted-foreground truncate text-[11px]">
+                              <div className="truncate text-[11px] opacity-80">
                                 {meta.subtitle}
                               </div>
                             </div>
                           </div>
                           <Badge
                             variant={active ? "default" : "outline"}
-                            className="shrink-0 text-[10px]"
+                            className={cn(
+                              "shrink-0 rounded-full border-[1.5px] border-[#2C2623] text-[10px] font-extrabold dark:border-stone-500",
+                              active
+                                ? "bg-[#2C2623] text-[#FFFDF7]"
+                                : "bg-white text-[#2C2623] dark:bg-stone-800 dark:text-stone-200",
+                            )}
                           >
                             {meta.dimensions}
                           </Badge>
@@ -1035,11 +1198,11 @@ export function BarcodeStudioClient({
 
                 {/* Template-Specific Sub-options */}
                 {template === "THERMAL" && (
-                  <div className="bg-muted/30 grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+                  <div className="grid gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#FFFBEB] p-3.5 sm:grid-cols-2 dark:border-stone-600 dark:bg-stone-900/60">
                     <div className="space-y-1.5">
                       <Label
                         htmlFor="thermal-size-select"
-                        className="text-xs font-medium"
+                        className="text-xs font-bold"
                       >
                         Ukuran Roll Stiker Thermal
                       </Label>
@@ -1051,7 +1214,7 @@ export function BarcodeStudioClient({
                       >
                         <SelectTrigger
                           id="thermal-size-select"
-                          className="w-full bg-background"
+                          className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900"
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -1077,11 +1240,11 @@ export function BarcodeStudioClient({
                 )}
 
                 {template === "A4_GRID" && (
-                  <div className="bg-muted/30 grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+                  <div className="grid gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#FFFBEB] p-3.5 sm:grid-cols-2 dark:border-stone-600 dark:bg-stone-900/60">
                     <div className="space-y-1.5">
                       <Label
                         htmlFor="a4-start-slot"
-                        className="text-xs font-medium"
+                        className="text-xs font-bold"
                       >
                         Mulai dari Slot ke- (Kertas Terpakai Sebagian)
                       </Label>
@@ -1094,7 +1257,7 @@ export function BarcodeStudioClient({
                       >
                         <SelectTrigger
                           id="a4-start-slot"
-                          className="w-full bg-background"
+                          className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900"
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -1120,11 +1283,11 @@ export function BarcodeStudioClient({
                 )}
 
                 {template === "ARCHIVE_SPINE" && (
-                  <div className="bg-muted/30 grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+                  <div className="grid gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#FFFBEB] p-3.5 sm:grid-cols-2 dark:border-stone-600 dark:bg-stone-900/60">
                     <div className="space-y-1.5">
                       <Label
                         htmlFor="spine-paper-mode"
-                        className="text-xs font-medium"
+                        className="text-xs font-bold"
                       >
                         Mode Kertas Cetak Punggung Map
                       </Label>
@@ -1136,7 +1299,7 @@ export function BarcodeStudioClient({
                       >
                         <SelectTrigger
                           id="spine-paper-mode"
-                          className="w-full bg-background"
+                          className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900"
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -1159,11 +1322,11 @@ export function BarcodeStudioClient({
 
                 {/* QR Base Origin (only shown when QR or COMBO is selected) */}
                 {symbology !== "CODE128" && (
-                  <div className="space-y-1.5 rounded-lg border p-3">
+                  <div className="space-y-1.5 rounded-2xl border-2 border-[#2C2623] bg-white p-3.5 dark:border-stone-600 dark:bg-stone-900/60">
                     <div className="flex items-center justify-between gap-2">
                       <Label
                         htmlFor="qr-base-origin"
-                        className="text-xs font-medium"
+                        className="text-xs font-bold"
                       >
                         Base URL Deep-Link QR Code
                       </Label>
@@ -1178,28 +1341,32 @@ export function BarcodeStudioClient({
                       value={qrOrigin}
                       onChange={(e) => setQrOrigin(e.target.value)}
                       placeholder="https://starops.starchamps.id"
-                      className="h-8 font-mono text-xs"
+                      className="h-8 rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] font-mono text-xs dark:border-stone-500 dark:bg-stone-950"
                     />
                   </div>
                 )}
 
                 {/* Print & PDF Action Buttons */}
-                <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+                <div className="flex flex-wrap items-center gap-2.5 border-t-2 border-dashed border-[#2C2623]/25 pt-4 dark:border-stone-700">
                   <Button
                     type="button"
                     onClick={handlePrint}
-                    disabled={pages.length === 0}
-                    className="flex-1"
+                    disabled={pages.length === 0 || isPreparingPrint}
+                    className="h-11 flex-1 rounded-xl border-2 border-[#2C2623] bg-[#2AB673] font-extrabold text-white shadow-[3px_3px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:bg-[#229c61] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none"
                   >
-                    <Printer className="mr-2 size-4" />
+                    {isPreparingPrint ? (
+                      <Loader2 className="mr-2 size-4 animate-spin" />
+                    ) : (
+                      <Printer className="mr-2 size-4" />
+                    )}
                     Cetak Langsung ({totalStickers} Stiker)
                   </Button>
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={handleDownloadPdf}
+                    onClick={() => void handleDownloadPdf()}
                     disabled={pages.length === 0 || isExportingPdf}
-                    className="flex-1"
+                    className="h-11 flex-1 rounded-xl border-2 border-[#2C2623] bg-[#FDE68A] font-extrabold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:bg-[#FCD34D] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none"
                   >
                     {isExportingPdf ? (
                       <Loader2 className="mr-2 size-4 animate-spin" />
@@ -1215,14 +1382,17 @@ export function BarcodeStudioClient({
             </Card>
 
             {/* Live Preview Card */}
-            <Card>
-              <CardHeader className="pb-3">
+            <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[4px_4px_0px_0px_#0c0a09]">
+              <CardHeader className="border-b-2 border-[#2C2623] bg-[#EDE9FE]/80 pb-4 dark:border-stone-600 dark:bg-violet-950/35">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <CardTitle className="text-base">
-                      3. Live Preview Siap Cetak
+                    <CardTitle className="flex items-center gap-2.5 text-base font-extrabold text-[#2C2623] dark:text-stone-100">
+                      <span className="inline-flex size-7 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#FFE4E6] text-xs font-black text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                        3
+                      </span>
+                      Live Preview Siap Cetak
                     </CardTitle>
-                    <CardDescription>
+                    <CardDescription className="mt-1 text-[#2C2623]/75 dark:text-stone-300">
                       {pages.length === 0
                         ? "Pilih minimal 1 item atau arsip untuk melihat pratinjau label."
                         : `Halaman ${previewPageIndex + 1} dari ${pages.length} · Ukuran cetak ${printPageSizeCss}`}
@@ -1235,37 +1405,41 @@ export function BarcodeStudioClient({
                       type="button"
                       variant="outline"
                       size="icon"
-                      className="size-8"
+                      className="size-8 rounded-xl border-2 border-[#2C2623] bg-white text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FEF3C7] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
                       aria-label="Perkecil pratinjau"
                       onClick={() =>
-                        setZoom((z) => Math.max(0.4, Number((z - 0.15).toFixed(2))))
+                        setZoom((z) =>
+                          Math.max(0.4, Number((z - 0.15).toFixed(2))),
+                        )
                       }
                     >
                       <ZoomOut className="size-3.5" />
                     </Button>
-                    <span className="w-12 text-center font-mono text-xs">
+                    <span className="w-12 text-center font-mono text-xs font-extrabold text-[#2C2623] dark:text-stone-100">
                       {Math.round(zoom * 100)}%
                     </span>
                     <Button
                       type="button"
                       variant="outline"
                       size="icon"
-                      className="size-8"
+                      className="size-8 rounded-xl border-2 border-[#2C2623] bg-white text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FEF3C7] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
                       aria-label="Perbesar pratinjau"
                       onClick={() =>
-                        setZoom((z) => Math.min(2, Number((z + 0.15).toFixed(2))))
+                        setZoom((z) =>
+                          Math.min(2, Number((z + 0.15).toFixed(2))),
+                        )
                       }
                     >
                       <ZoomIn className="size-3.5" />
                     </Button>
 
                     {pages.length > 1 && (
-                      <div className="ml-1 flex items-center gap-1 border-l pl-2">
+                      <div className="ml-1 flex items-center gap-1 border-l-2 border-[#2C2623]/25 pl-2 dark:border-stone-600">
                         <Button
                           type="button"
                           variant="outline"
                           size="icon"
-                          className="size-8"
+                          className="size-8 rounded-xl border-2 border-[#2C2623] bg-white text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#E0F2FE] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
                           disabled={previewPageIndex <= 0}
                           onClick={() =>
                             setPreviewPageIndex((p) => Math.max(0, p - 1))
@@ -1274,14 +1448,14 @@ export function BarcodeStudioClient({
                         >
                           <ChevronLeft className="size-4" />
                         </Button>
-                        <span className="px-1 font-mono text-xs">
+                        <span className="px-1 font-mono text-xs font-extrabold text-[#2C2623] dark:text-stone-100">
                           {previewPageIndex + 1}/{pages.length}
                         </span>
                         <Button
                           type="button"
                           variant="outline"
                           size="icon"
-                          className="size-8"
+                          className="size-8 rounded-xl border-2 border-[#2C2623] bg-white text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#E0F2FE] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
                           disabled={previewPageIndex >= pages.length - 1}
                           onClick={() =>
                             setPreviewPageIndex((p) =>
@@ -1298,44 +1472,43 @@ export function BarcodeStudioClient({
                 </div>
               </CardHeader>
 
-              <CardContent>
+              <CardContent className="pt-4">
                 {pages.length === 0 ? (
-                  <div className="bg-muted/30 flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-4 py-12 text-center">
-                    <Barcode className="text-muted-foreground size-10 opacity-50" />
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">
-                        Antrean Label Masih Kosong
-                      </p>
-                      <p className="text-muted-foreground max-w-sm text-xs">
-                        Centang item inventaris atau berkas arsip di panel kiri
-                        untuk melihat pratinjau label real-time.
-                      </p>
-                    </div>
-                    {allRecords.length > 0 && (
-                      <div className="flex flex-wrap justify-center gap-2 pt-1">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleSelectQuickSample(1)}
-                        >
-                          Pilih 1 Contoh
-                        </Button>
-                        {allRecords.length >= 3 && (
+                  <KawaiiEmptyState
+                    mascot="barcode"
+                    title="Antrean Label Masih Kosong"
+                    description="Centang item inventaris atau berkas arsip di panel kiri untuk melihat pratinjau label real-time."
+                    action={
+                      allRecords.length > 0 ? (
+                        <div className="flex flex-wrap justify-center gap-2">
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => handleSelectQuickSample(3)}
+                            onClick={() => handleSelectQuickSample(1)}
+                            className="rounded-xl border-2 border-[#2C2623] bg-[#D1FAE5] font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#A7F3D0]"
                           >
-                            Pilih 3 Contoh
+                            <Sparkles className="mr-1.5 size-3.5" />
+                            Pilih 1 Contoh
                           </Button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                          {allRecords.length >= 3 && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleSelectQuickSample(3)}
+                              className="rounded-xl border-2 border-[#2C2623] bg-[#FEF3C7] font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FDE68A]"
+                            >
+                              <Layers className="mr-1.5 size-3.5" />
+                              Pilih 3 Contoh
+                            </Button>
+                          )}
+                        </div>
+                      ) : undefined
+                    }
+                  />
                 ) : (
-                  <div className="bg-muted/40 flex max-h-[580px] justify-center overflow-auto rounded-lg border p-6">
+                  <div className="flex max-h-[580px] justify-center overflow-auto rounded-2xl border-2 border-[#2C2623] bg-[#F5EFE6] p-6 shadow-inner dark:border-stone-500 dark:bg-stone-900/80">
                     <div
                       style={{
                         width: `${previewDims.widthMm * zoom}mm`,
@@ -1365,16 +1538,21 @@ export function BarcodeStudioClient({
                 )}
 
                 {/* Anatomy Reference Footer */}
-                <div className="text-muted-foreground mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+                <div className="text-muted-foreground mt-3.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border-2 border-dashed border-[#2C2623]/25 bg-[#FFFBEB]/80 px-3 py-2 text-[11px] dark:border-stone-700 dark:bg-stone-900/50">
                   <span>
-                    <strong>Anatomi Stiker:</strong> Header Star Champs · Nama
-                    & Kategori · Code-128/QR · Kode Monospace · Lokasi
-                    Ruang/Lemari & Rak/Laci · Part Counter / Status Digital.
+                    <strong className="text-foreground">Anatomi Stiker:</strong>{" "}
+                    Header Star Champs · Nama & Kategori · Code-128/QR · Kode
+                    Monospace · Lokasi Ruang/Lemari & Rak/Laci · Part Counter /
+                    Status Digital.
                   </span>
                   {firstSelectedRecord && (
-                    <span className="font-mono">
+                    <span className="font-mono font-semibold">
                       Default item pertama:{" "}
-                      {BARCODE_FORMAT_LABELS[firstSelectedRecord.recommendedFormat]}
+                      {
+                        BARCODE_FORMAT_LABELS[
+                          firstSelectedRecord.recommendedFormat
+                        ]
+                      }
                     </span>
                   )}
                 </div>

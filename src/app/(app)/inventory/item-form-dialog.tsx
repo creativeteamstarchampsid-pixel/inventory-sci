@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { ImagePlus, Loader2, Sparkles, Trash2 } from "lucide-react";
 
+import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,7 +26,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { createItemAction, updateItemAction } from "@/lib/actions/inventory";
+import {
+  createItemAction,
+  updateItemAction,
+  type ActionResult,
+} from "@/lib/actions/inventory";
 import {
   ASSET_TYPE_LABELS,
   BARCODE_FORMAT_LABELS,
@@ -71,6 +77,7 @@ export function ItemFormDialog({
   onSaved,
 }: ItemFormDialogProps) {
   const { can } = useRole();
+  const { runWithFeedback } = useCartoonFeedback();
   const canApproveWriteoff = can("writeoff.approve");
   const isEditing = Boolean(editingItem);
   const lockedWrittenOff = editingItem?.condition === "DIHAPUSBUKU" && !canApproveWriteoff;
@@ -217,62 +224,89 @@ export function ItemFormDialog({
     );
 
     startTransition(async () => {
-      let nextPhotoPath = photoPath;
+      try {
+        const res = await runWithFeedback<ActionResult<ItemMaster>>(
+          {
+            mode: "working",
+            workingTitle: isEditing ? "Menyimpan Perubahan Item..." : "Menambahkan Item Baru...",
+            workingMessage: selectedFile
+              ? "Dino Joguman lagi mengunggah foto dan menyimpan data item ke inventaris nih~"
+              : isEditing
+                ? `Dino Joguman lagi memperbarui data ${editingItem?.item_code ?? "item"} biar makin rapi~`
+                : "Dino Joguman lagi membuat kode unik dan mencatat item barumu ke inventaris~",
+            successTitle: isEditing ? "Perubahan Item Tersimpan! ✨" : "Item Baru Ditambahkan! 🎉",
+            successMessage: (result) =>
+              result.ok
+                ? result.message ??
+                  (isEditing ? "Data item berhasil diperbarui!" : "Item baru berhasil ditambahkan!")
+                : "",
+            errorTitle: isEditing ? "Gagal Memperbarui Item..." : "Gagal Menambahkan Item...",
+            isResultError: (result) => (!result.ok ? result.error : null),
+          },
+          async () => {
+            let nextPhotoPath = photoPath;
 
-      if (selectedFile) {
-        const supabase = createClient();
-        const ext = selectedFile.name.split(".").pop()?.toLowerCase() || "jpg";
-        const uploadPath = `items/${crypto.randomUUID()}.${ext}`;
-        const { error: uploadError } = await supabase.storage
-          .from("inventory-photos")
-          .upload(uploadPath, selectedFile, {
-            contentType: selectedFile.type,
-            upsert: true,
-          });
+            if (selectedFile) {
+              const supabase = createClient();
+              const ext = selectedFile.name.split(".").pop()?.toLowerCase() || "jpg";
+              const uploadPath = `items/${crypto.randomUUID()}.${ext}`;
+              const { error: uploadError } = await supabase.storage
+                .from("inventory-photos")
+                .upload(uploadPath, selectedFile, {
+                  contentType: selectedFile.type,
+                  upsert: true,
+                });
 
-        if (uploadError) {
-          setError(`Gagal mengunggah foto ke bucket inventory-photos: ${uploadError.message}`);
+              if (uploadError) {
+                return {
+                  ok: false,
+                  error: `Gagal mengunggah foto ke bucket inventory-photos: ${uploadError.message}`,
+                };
+              }
+              nextPhotoPath = uploadPath;
+            }
+
+            const payload = {
+              parent_item_id: parentItemId || null,
+              barcode_format: barcodeFormat,
+              name: name.trim(),
+              description: description.trim() || null,
+              category_prefix: categoryPrefix,
+              category: resolvedCategory,
+              asset_type: assetType,
+              room_code: roomCode,
+              rack_location: rackLocation.trim() || null,
+              pic_name: picName.trim() || null,
+              photo_url: nextPhotoPath,
+              acquisition_date: acquisitionDate || null,
+              purchase_price: parsedPrice,
+              useful_life_months: parsedLife,
+              residual_value: parsedResidual,
+              total_parts: totalPartsNum,
+              current_parts: currentPartsNum,
+              unit_label: unitLabel.trim() || "Pcs",
+              stock_qty: Math.max(0, Math.trunc(Number(stockQty) || 0)),
+              min_stock_threshold: Math.max(0, Math.trunc(Number(minStockThreshold) || 0)),
+              condition,
+              hygiene_status: hygieneStatus,
+            };
+
+            return editingItem
+              ? await updateItemAction(editingItem.id, payload)
+              : await createItemAction(payload);
+          },
+        );
+
+        if (!res.ok) {
+          setError(res.error);
           return;
         }
-        nextPhotoPath = uploadPath;
+
+        onOpenChange(false);
+        onSaved?.(res.data, res.message);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Terjadi kesalahan saat menyimpan item.");
       }
-
-      const payload = {
-        parent_item_id: parentItemId || null,
-        barcode_format: barcodeFormat,
-        name: name.trim(),
-        description: description.trim() || null,
-        category_prefix: categoryPrefix,
-        category: resolvedCategory,
-        asset_type: assetType,
-        room_code: roomCode,
-        rack_location: rackLocation.trim() || null,
-        pic_name: picName.trim() || null,
-        photo_url: nextPhotoPath,
-        acquisition_date: acquisitionDate || null,
-        purchase_price: parsedPrice,
-        useful_life_months: parsedLife,
-        residual_value: parsedResidual,
-        total_parts: totalPartsNum,
-        current_parts: currentPartsNum,
-        unit_label: unitLabel.trim() || "Pcs",
-        stock_qty: Math.max(0, Math.trunc(Number(stockQty) || 0)),
-        min_stock_threshold: Math.max(0, Math.trunc(Number(minStockThreshold) || 0)),
-        condition,
-        hygiene_status: hygieneStatus,
-      };
-
-      const res = editingItem
-        ? await updateItemAction(editingItem.id, payload)
-        : await createItemAction(payload);
-
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-
-      onOpenChange(false);
-      onSaved?.(res.data, res.message);
     });
   };
 
@@ -280,7 +314,16 @@ export function ItemFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className="rounded-full border-[1.5px] border-[#2C2623] bg-[#D1FAE5] px-2.5 py-0.5 text-[11px] font-extrabold text-[#14532D] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-emerald-950/70 dark:text-emerald-200"
+            >
+              <Sparkles className="size-3" />
+              {isEditing ? editingItem?.item_code : "Item Inventaris Baru"}
+            </Badge>
+          </div>
+          <DialogTitle className="text-xl font-extrabold">
             {isEditing ? `Edit Item (${editingItem?.item_code})` : "Tambah Item Inventaris"}
           </DialogTitle>
           <DialogDescription>
@@ -292,20 +335,25 @@ export function ItemFormDialog({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+            <Alert
+              variant="destructive"
+              className="rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] text-[#881337] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-rose-950/60 dark:text-rose-100"
+            >
+              <AlertDescription className="font-semibold">{error}</AlertDescription>
             </Alert>
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="item-parent">Induk Item (Opsional — untuk Sub-Kode Anak)</Label>
+              <Label htmlFor="item-parent" className="font-bold">
+                Induk Item (Opsional — untuk Sub-Kode Anak)
+              </Label>
               <Select
                 value={parentItemId || NO_PARENT_VALUE}
                 onValueChange={handleParentChange}
                 disabled={isPending}
               >
-                <SelectTrigger id="item-parent" className="w-full">
+                <SelectTrigger id="item-parent" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue placeholder="Pilih item induk (jika sub-item)" />
                 </SelectTrigger>
                 <SelectContent>
@@ -327,7 +375,9 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="item-name">Nama Barang / Mainan *</Label>
+              <Label htmlFor="item-name" className="font-bold">
+                Nama Barang / Mainan *
+              </Label>
               <Input
                 id="item-name"
                 value={name}
@@ -335,17 +385,20 @@ export function ItemFormDialog({
                 placeholder="Contoh: Balance Beam Kayu 6 Bagian"
                 required
                 disabled={isPending}
+                className="bg-white dark:bg-stone-900"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-prefix">Prefix Kode *</Label>
+              <Label htmlFor="item-prefix" className="font-bold">
+                Prefix Kode *
+              </Label>
               <Select
                 value={categoryPrefix}
                 onValueChange={(v) => setCategoryPrefix(v as CodeCategoryPrefix)}
                 disabled={isPending}
               >
-                <SelectTrigger id="item-prefix" className="w-full">
+                <SelectTrigger id="item-prefix" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -359,13 +412,15 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-category">Kategori *</Label>
+              <Label htmlFor="item-category" className="font-bold">
+                Kategori *
+              </Label>
               <Select
                 value={categorySelect}
                 onValueChange={setCategorySelect}
                 disabled={isPending}
               >
-                <SelectTrigger id="item-category" className="w-full">
+                <SelectTrigger id="item-category" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -382,7 +437,7 @@ export function ItemFormDialog({
                   value={customCategory}
                   onChange={(e) => setCustomCategory(e.target.value)}
                   placeholder="Tulis nama kategori"
-                  className="mt-1.5"
+                  className="mt-1.5 bg-white dark:bg-stone-900"
                   required
                   disabled={isPending}
                 />
@@ -390,13 +445,15 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-asset-type">Tipe Aset *</Label>
+              <Label htmlFor="item-asset-type" className="font-bold">
+                Tipe Aset *
+              </Label>
               <Select
                 value={assetType}
                 onValueChange={(v) => setAssetType(v as AssetType)}
                 disabled={isPending}
               >
-                <SelectTrigger id="item-asset-type" className="w-full">
+                <SelectTrigger id="item-asset-type" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -410,13 +467,15 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-room">Lokasi Ruangan *</Label>
+              <Label htmlFor="item-room" className="font-bold">
+                Lokasi Ruangan *
+              </Label>
               <Select
                 value={roomCode}
                 onValueChange={(v) => setRoomCode(v as LocationCode)}
                 disabled={isPending}
               >
-                <SelectTrigger id="item-room" className="w-full">
+                <SelectTrigger id="item-room" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -430,35 +489,43 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-rack">Rak / Laci / Lemari</Label>
+              <Label htmlFor="item-rack" className="font-bold">
+                Rak / Laci / Lemari
+              </Label>
               <Input
                 id="item-rack"
                 value={rackLocation}
                 onChange={(e) => setRackLocation(e.target.value)}
                 placeholder="Contoh: Rak B2"
                 disabled={isPending}
+                className="bg-white dark:bg-stone-900"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-pic">PIC / Penanggung Jawab</Label>
+              <Label htmlFor="item-pic" className="font-bold">
+                PIC / Penanggung Jawab
+              </Label>
               <Input
                 id="item-pic"
                 value={picName}
                 onChange={(e) => setPicName(e.target.value)}
                 placeholder="Nama PIC ruangan"
                 disabled={isPending}
+                className="bg-white dark:bg-stone-900"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-barcode">Format Barcode Label</Label>
+              <Label htmlFor="item-barcode" className="font-bold">
+                Format Barcode Label
+              </Label>
               <Select
                 value={barcodeFormat}
                 onValueChange={(v) => setBarcodeFormat(v as BarcodeFormat)}
                 disabled={isPending}
               >
-                <SelectTrigger id="item-barcode" className="w-full">
+                <SelectTrigger id="item-barcode" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -472,18 +539,23 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-unit">Satuan (Unit Label)</Label>
+              <Label htmlFor="item-unit" className="font-bold">
+                Satuan (Unit Label)
+              </Label>
               <Input
                 id="item-unit"
                 value={unitLabel}
                 onChange={(e) => setUnitLabel(e.target.value)}
                 placeholder="Pcs / Keping / Set / Box"
                 disabled={isPending}
+                className="bg-white dark:bg-stone-900"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-total-parts">Total Part / Kepingan</Label>
+              <Label htmlFor="item-total-parts" className="font-bold">
+                Total Part / Kepingan
+              </Label>
               <Input
                 id="item-total-parts"
                 type="number"
@@ -497,11 +569,14 @@ export function ItemFormDialog({
                   }
                 }}
                 disabled={isPending}
+                className="bg-white dark:bg-stone-900"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-current-parts">Part Tersedia Saat Ini</Label>
+              <Label htmlFor="item-current-parts" className="font-bold">
+                Part Tersedia Saat Ini
+              </Label>
               <Input
                 id="item-current-parts"
                 type="number"
@@ -510,11 +585,14 @@ export function ItemFormDialog({
                 value={currentParts}
                 onChange={(e) => setCurrentParts(e.target.value)}
                 disabled={isPending}
+                className="bg-white dark:bg-stone-900"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-stock">Jumlah Stok</Label>
+              <Label htmlFor="item-stock" className="font-bold">
+                Jumlah Stok
+              </Label>
               <Input
                 id="item-stock"
                 type="number"
@@ -522,11 +600,14 @@ export function ItemFormDialog({
                 value={stockQty}
                 onChange={(e) => setStockQty(e.target.value)}
                 disabled={isPending}
+                className="bg-white dark:bg-stone-900"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-min-stock">Batas Minimum Stok (Alert Low-Stock)</Label>
+              <Label htmlFor="item-min-stock" className="font-bold">
+                Batas Minimum Stok (Alert Low-Stock)
+              </Label>
               <Input
                 id="item-min-stock"
                 type="number"
@@ -534,17 +615,20 @@ export function ItemFormDialog({
                 value={minStockThreshold}
                 onChange={(e) => setMinStockThreshold(e.target.value)}
                 disabled={isPending}
+                className="bg-white dark:bg-stone-900"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-condition">Kondisi</Label>
+              <Label htmlFor="item-condition" className="font-bold">
+                Kondisi
+              </Label>
               <Select
                 value={condition}
                 onValueChange={(v) => setCondition(v as ItemCondition)}
                 disabled={isPending || lockedWrittenOff}
               >
-                <SelectTrigger id="item-condition" className="w-full">
+                <SelectTrigger id="item-condition" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -574,13 +658,15 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-hygiene">Status Sanitasi / Kebersihan</Label>
+              <Label htmlFor="item-hygiene" className="font-bold">
+                Status Sanitasi / Kebersihan
+              </Label>
               <Select
                 value={hygieneStatus}
                 onValueChange={(v) => setHygieneStatus(v as HygieneStatus)}
                 disabled={isPending}
               >
-                <SelectTrigger id="item-hygiene" className="w-full">
+                <SelectTrigger id="item-hygiene" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -594,18 +680,18 @@ export function ItemFormDialog({
             </div>
           </div>
 
-          <div className="rounded-lg border p-3 space-y-3">
+          <div className="space-y-3 rounded-2xl border-2 border-[#2C2623] bg-[#FEF3C7]/45 p-4 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-amber-950/25">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-medium">Nilai Perolehan & Penyusutan Aset</span>
+              <span className="text-sm font-extrabold">Nilai Perolehan & Penyusutan Aset</span>
               {parsedPrice > 0 && (
-                <span className="text-muted-foreground text-xs">
-                  Estimasi Nilai Buku: <strong className="text-foreground">{formatRupiah(liveBookValue)}</strong>
+                <span className="rounded-full border-[1.5px] border-[#2C2623] bg-[#D1FAE5] px-2.5 py-0.5 text-xs font-bold text-[#14532D] dark:border-stone-400 dark:bg-emerald-950/70 dark:text-emerald-200">
+                  Estimasi Nilai Buku: {formatRupiah(liveBookValue)}
                 </span>
               )}
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="space-y-1.5">
-                <Label htmlFor="item-acq-date" className="text-xs">
+                <Label htmlFor="item-acq-date" className="text-xs font-bold">
                   Tanggal Beli
                 </Label>
                 <Input
@@ -614,10 +700,11 @@ export function ItemFormDialog({
                   value={acquisitionDate}
                   onChange={(e) => setAcquisitionDate(e.target.value)}
                   disabled={isPending}
+                  className="bg-white dark:bg-stone-900"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="item-price" className="text-xs">
+                <Label htmlFor="item-price" className="text-xs font-bold">
                   Harga Beli (Rp)
                 </Label>
                 <Input
@@ -627,10 +714,11 @@ export function ItemFormDialog({
                   value={purchasePrice}
                   onChange={(e) => setPurchasePrice(e.target.value)}
                   disabled={isPending}
+                  className="bg-white dark:bg-stone-900"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="item-life" className="text-xs">
+                <Label htmlFor="item-life" className="text-xs font-bold">
                   Umur Manfaat (Bulan)
                 </Label>
                 <Input
@@ -641,10 +729,11 @@ export function ItemFormDialog({
                   value={usefulLifeMonths}
                   onChange={(e) => setUsefulLifeMonths(e.target.value)}
                   disabled={isPending}
+                  className="bg-white dark:bg-stone-900"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="item-residual" className="text-xs">
+                <Label htmlFor="item-residual" className="text-xs font-bold">
                   Nilai Residu (Rp)
                 </Label>
                 <Input
@@ -654,18 +743,19 @@ export function ItemFormDialog({
                   value={residualValue}
                   onChange={(e) => setResidualValue(e.target.value)}
                   disabled={isPending}
+                  className="bg-white dark:bg-stone-900"
                 />
               </div>
             </div>
           </div>
 
-          <div className="rounded-lg border p-3 space-y-3">
-            <Label htmlFor="item-photo-input" className="text-sm font-medium">
+          <div className="space-y-3 rounded-2xl border-2 border-[#2C2623] bg-[#E0F2FE]/45 p-4 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-sky-950/25">
+            <Label htmlFor="item-photo-input" className="text-sm font-extrabold">
               Foto Barang (Bucket Privat inventory-photos)
             </Label>
             <div className="flex flex-wrap items-center gap-3">
               {previewUrl ? (
-                <div className="relative size-20 overflow-hidden rounded-md border">
+                <div className="relative size-20 overflow-hidden rounded-2xl border-2 border-[#2C2623] bg-white shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-400">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={previewUrl}
@@ -674,7 +764,7 @@ export function ItemFormDialog({
                   />
                 </div>
               ) : (
-                <div className="bg-muted text-muted-foreground flex size-20 items-center justify-center rounded-md border text-xs">
+                <div className="flex size-20 items-center justify-center rounded-2xl border-2 border-dashed border-[#2C2623]/40 bg-[#FFFDF7] text-center text-xs font-bold text-muted-foreground dark:border-stone-500 dark:bg-stone-900">
                   Tanpa Foto
                 </div>
               )}
@@ -683,7 +773,7 @@ export function ItemFormDialog({
                 <div className="flex flex-wrap items-center gap-2">
                   <Label
                     htmlFor="item-photo-input"
-                    className="bg-secondary text-secondary-foreground hover:bg-secondary/80 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-xs font-medium"
+                    className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] px-3.5 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-stone-400 dark:bg-stone-900 dark:text-stone-100"
                   >
                     <ImagePlus className="size-3.5" />
                     {previewUrl ? "Ganti Foto" : "Unggah Foto"}
@@ -703,6 +793,7 @@ export function ItemFormDialog({
                       size="sm"
                       onClick={handleRemovePhoto}
                       disabled={isPending}
+                      className="rounded-xl hover:bg-[#FFE4E6] dark:hover:bg-rose-950/60"
                     >
                       <Trash2 className="size-3.5" />
                       Hapus Foto
@@ -717,7 +808,9 @@ export function ItemFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="item-desc">Catatan / Deskripsi</Label>
+            <Label htmlFor="item-desc" className="font-bold">
+              Catatan / Deskripsi
+            </Label>
             <Textarea
               id="item-desc"
               rows={3}
@@ -725,6 +818,7 @@ export function ItemFormDialog({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Detail spesifikasi, cara perawatan, atau catatan lainnya…"
               disabled={isPending}
+              className="rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900"
             />
           </div>
 

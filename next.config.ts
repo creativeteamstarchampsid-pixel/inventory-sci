@@ -26,6 +26,20 @@ const nextConfig: NextConfig = {
     "pdfkit",
     "exceljs",
   ],
+  outputFileTracingIncludes: {
+    "/api/exports/[format]": [
+      "./node_modules/pdfkit/js/standard-fonts/**/*",
+      "./node_modules/pdfkit/js/data/**/*",
+    ],
+    "/api/cron/monthly-backup": [
+      "./node_modules/pdfkit/js/standard-fonts/**/*",
+      "./node_modules/pdfkit/js/data/**/*",
+    ],
+    "/backup": [
+      "./node_modules/pdfkit/js/standard-fonts/**/*",
+      "./node_modules/pdfkit/js/data/**/*",
+    ],
+  },
   experimental: {
     optimizePackageImports: [
       "lucide-react",

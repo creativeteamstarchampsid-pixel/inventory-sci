@@ -9,6 +9,12 @@ import {
   isRole,
   type Role,
 } from "@/lib/rbac";
+import {
+  isValidUuid,
+  sanitizeOptionalText,
+  sanitizeSafeError,
+  sanitizeTextInput,
+} from "@/lib/security";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile, TablesUpdate } from "@/types/database";
@@ -20,6 +26,16 @@ function hasServiceRoleKey(): boolean {
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
       process.env.SUPABASE_SERVICE_ROLE_KEY,
   );
+}
+
+function validatePasswordStrength(password: string): string | null {
+  if (typeof password !== "string" || password.length < 8 || password.trim().length < 8) {
+    return "Kata sandi minimal 8 karakter (tidak boleh hanya spasi).";
+  }
+  if (password.length > 128) {
+    return "Kata sandi maksimal 128 karakter.";
+  }
+  return null;
 }
 
 async function countActiveOwners(
@@ -34,7 +50,11 @@ async function countActiveOwners(
   if (error) {
     return {
       count: 0,
-      error: error.message || "Gagal memverifikasi jumlah Owner aktif.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memverifikasi jumlah Owner aktif.",
+        "settings/countActiveOwners",
+      ),
     };
   }
 
@@ -58,7 +78,7 @@ export async function updateOwnProfileAction(input: {
   jobTitle?: string | null;
 }): Promise<SettingsActionResult<Profile>> {
   const user = await requireAction("settings.profile");
-  const fullName = input.fullName.trim();
+  const fullName = sanitizeTextInput(input.fullName, 120);
   if (fullName.length < 2) {
     return { ok: false, error: "Nama lengkap minimal 2 karakter." };
   }
@@ -68,8 +88,8 @@ export async function updateOwnProfileAction(input: {
     .from("profiles")
     .update({
       full_name: fullName,
-      phone: input.phone?.trim() || null,
-      job_title: input.jobTitle?.trim() || null,
+      phone: sanitizeOptionalText(input.phone, 40),
+      job_title: sanitizeOptionalText(input.jobTitle, 120),
     })
     .eq("id", user.id)
     .select("*")
@@ -78,7 +98,7 @@ export async function updateOwnProfileAction(input: {
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "Gagal memperbarui profil.",
+      error: sanitizeSafeError(error, "Gagal memperbarui profil.", "settings/updateOwnProfile"),
     };
   }
 
@@ -104,8 +124,8 @@ export async function createOrInviteUserAction(input: {
 }): Promise<SettingsActionResult<Profile>> {
   const actor = await requireAction("users.manage");
 
-  const email = input.email.trim().toLowerCase();
-  const fullName = input.fullName.trim();
+  const email = sanitizeTextInput(input.email, 254).toLowerCase();
+  const fullName = sanitizeTextInput(input.fullName, 120);
 
   if (!email || !EMAIL_REGEX.test(email)) {
     return { ok: false, error: "Format email tidak valid." };
@@ -116,6 +136,9 @@ export async function createOrInviteUserAction(input: {
   if (!isRole(input.role)) {
     return { ok: false, error: "Peran pengguna tidak valid." };
   }
+  if (input.mode !== "invite" && input.mode !== "password") {
+    return { ok: false, error: "Mode pembuatan akun tidak valid." };
+  }
   if (!canManageTargetRole(actor.role, input.role)) {
     return {
       ok: false,
@@ -125,12 +148,9 @@ export async function createOrInviteUserAction(input: {
   }
 
   if (input.mode === "password") {
-    const pw = input.password ?? "";
-    if (pw.length < 8) {
-      return {
-        ok: false,
-        error: "Password awal minimal 8 karakter.",
-      };
+    const pwErr = validatePasswordStrength(input.password ?? "");
+    if (pwErr) {
+      return { ok: false, error: pwErr };
     }
   }
 
@@ -139,7 +159,7 @@ export async function createOrInviteUserAction(input: {
       ok: false,
       missingServiceRoleKey: true,
       error:
-        "SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi di environment server (.env.local). Tambahkan key tersebut untuk membuat atau mengundang pengguna baru.",
+        "Layanan manajemen akun server belum aktif. Hubungi administrator sistem untuk mengaktifkan konfigurasi server.",
     };
   }
 
@@ -157,7 +177,11 @@ export async function createOrInviteUserAction(input: {
       if (authErr || !created.user) {
         return {
           ok: false,
-          error: authErr?.message ?? "Gagal membuat akun auth pengguna.",
+          error: sanitizeSafeError(
+            authErr,
+            "Gagal membuat akun pengguna.",
+            "settings/createUser",
+          ),
         };
       }
       createdUserId = created.user.id;
@@ -169,7 +193,11 @@ export async function createOrInviteUserAction(input: {
       if (inviteErr || !invited.user) {
         return {
           ok: false,
-          error: inviteErr?.message ?? "Gagal mengirim undangan email pengguna.",
+          error: sanitizeSafeError(
+            inviteErr,
+            "Gagal mengirim undangan email pengguna.",
+            "settings/inviteUser",
+          ),
         };
       }
       createdUserId = invited.user.id;
@@ -183,8 +211,8 @@ export async function createOrInviteUserAction(input: {
           email,
           full_name: fullName,
           role: input.role,
-          phone: input.phone?.trim() || null,
-          job_title: input.jobTitle?.trim() || null,
+          phone: sanitizeOptionalText(input.phone, 40),
+          job_title: sanitizeOptionalText(input.jobTitle, 120),
           is_active: true,
           offboarded_at: null,
         },
@@ -196,9 +224,11 @@ export async function createOrInviteUserAction(input: {
     if (profileErr || !profile) {
       return {
         ok: false,
-        error:
-          profileErr?.message ??
-          "Akun auth dibuat, namun gagal memperbarui profil peran.",
+        error: sanitizeSafeError(
+          profileErr,
+          "Akun dibuat, namun gagal memperbarui profil peran.",
+          "settings/upsertProfile",
+        ),
       };
     }
 
@@ -227,8 +257,11 @@ export async function createOrInviteUserAction(input: {
   } catch (err) {
     return {
       ok: false,
-      error:
-        err instanceof Error ? err.message : "Gagal menambahkan pengguna baru.",
+      error: sanitizeSafeError(
+        err,
+        "Gagal menambahkan pengguna baru.",
+        "settings/createOrInviteCatch",
+      ),
     };
   }
 }
@@ -244,13 +277,13 @@ export async function updateUserAction(input: {
 }): Promise<SettingsActionResult<Profile>> {
   const actor = await requireAction("users.manage");
 
-  const targetUserId = input.targetUserId.trim();
-  const fullName = input.fullName.trim();
-  const normalizedEmail = input.email.trim().toLowerCase();
-  const phone = input.phone?.trim() || null;
-  const jobTitle = input.jobTitle?.trim() || null;
+  const targetUserId = typeof input.targetUserId === "string" ? input.targetUserId.trim() : "";
+  const fullName = sanitizeTextInput(input.fullName, 120);
+  const normalizedEmail = sanitizeTextInput(input.email, 254).toLowerCase();
+  const phone = sanitizeOptionalText(input.phone, 40);
+  const jobTitle = sanitizeOptionalText(input.jobTitle, 120);
 
-  if (!targetUserId) {
+  if (!isValidUuid(targetUserId)) {
     return { ok: false, error: "ID pengguna tidak valid." };
   }
   if (fullName.length < 2) {
@@ -328,7 +361,7 @@ export async function updateUserAction(input: {
       ok: false,
       missingServiceRoleKey: true,
       error:
-        "SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi di environment server (.env.local). Tambahkan key tersebut untuk mengubah alamat email akun pengguna.",
+        "Layanan manajemen akun server belum aktif. Hubungi administrator sistem untuk mengubah alamat email akun.",
     };
   }
 
@@ -365,9 +398,11 @@ export async function updateUserAction(input: {
         if (emailCheckErr) {
           return {
             ok: false,
-            error:
-              emailCheckErr.message ||
+            error: sanitizeSafeError(
+              emailCheckErr,
               "Gagal memverifikasi ketersediaan email.",
+              "settings/checkEmail",
+            ),
           };
         }
         if (existingWithEmail) {
@@ -388,9 +423,11 @@ export async function updateUserAction(input: {
         if (authErr) {
           return {
             ok: false,
-            error:
-              authErr.message ||
+            error: sanitizeSafeError(
+              authErr,
               "Gagal memperbarui alamat email autentikasi pengguna.",
+              "settings/updateAuthEmail",
+            ),
           };
         }
       } else if (nameChanged) {
@@ -423,7 +460,11 @@ export async function updateUserAction(input: {
         }
         return {
           ok: false,
-          error: error?.message ?? "Gagal memperbarui data pengguna.",
+          error: sanitizeSafeError(
+            error,
+            "Gagal memperbarui data pengguna.",
+            "settings/updateProfileAdmin",
+          ),
         };
       }
       updated = data;
@@ -438,7 +479,11 @@ export async function updateUserAction(input: {
       if (error || !data) {
         return {
           ok: false,
-          error: error?.message ?? "Gagal memperbarui data pengguna.",
+          error: sanitizeSafeError(
+            error,
+            "Gagal memperbarui data pengguna.",
+            "settings/updateProfile",
+          ),
         };
       }
       updated = data;
@@ -493,8 +538,11 @@ export async function updateUserAction(input: {
   } catch (err) {
     return {
       ok: false,
-      error:
-        err instanceof Error ? err.message : "Gagal memperbarui data pengguna.",
+      error: sanitizeSafeError(
+        err,
+        "Gagal memperbarui data pengguna.",
+        "settings/updateUserCatch",
+      ),
     };
   }
 }
@@ -505,14 +553,15 @@ export async function resetUserPasswordAction(input: {
 }): Promise<SettingsActionResult<{ id: string }>> {
   const actor = await requireAction("users.manage");
 
-  const targetUserId = input.targetUserId.trim();
-  const newPassword = input.newPassword ?? "";
+  const targetUserId = typeof input.targetUserId === "string" ? input.targetUserId.trim() : "";
+  const newPassword = typeof input.newPassword === "string" ? input.newPassword : "";
 
-  if (!targetUserId) {
+  if (!isValidUuid(targetUserId)) {
     return { ok: false, error: "ID pengguna tidak valid." };
   }
-  if (newPassword.length < 8 || newPassword.trim().length === 0) {
-    return { ok: false, error: "Kata sandi baru minimal 8 karakter." };
+  const pwErr = validatePasswordStrength(newPassword);
+  if (pwErr) {
+    return { ok: false, error: pwErr };
   }
 
   const supabase = await createClient();
@@ -541,7 +590,7 @@ export async function resetUserPasswordAction(input: {
       ok: false,
       missingServiceRoleKey: true,
       error:
-        "SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi di environment server (.env.local). Tambahkan key tersebut untuk mengatur ulang kata sandi pengguna.",
+        "Layanan manajemen akun server belum aktif. Hubungi administrator sistem untuk mengatur ulang kata sandi.",
     };
   }
 
@@ -555,7 +604,11 @@ export async function resetUserPasswordAction(input: {
     if (authErr) {
       return {
         ok: false,
-        error: authErr.message || "Gagal mengatur ulang kata sandi pengguna.",
+        error: sanitizeSafeError(
+          authErr,
+          "Gagal mengatur ulang kata sandi pengguna.",
+          "settings/resetPassword",
+        ),
       };
     }
 
@@ -583,10 +636,11 @@ export async function resetUserPasswordAction(input: {
   } catch (err) {
     return {
       ok: false,
-      error:
-        err instanceof Error
-          ? err.message
-          : "Gagal mengatur ulang kata sandi pengguna.",
+      error: sanitizeSafeError(
+        err,
+        "Gagal mengatur ulang kata sandi pengguna.",
+        "settings/resetPasswordCatch",
+      ),
     };
   }
 }
@@ -597,8 +651,8 @@ export async function deleteUserAction(input: {
 }): Promise<SettingsActionResult<{ id: string }>> {
   const actor = await requireAction("users.manage");
 
-  const targetUserId = input.targetUserId.trim();
-  if (!targetUserId) {
+  const targetUserId = typeof input.targetUserId === "string" ? input.targetUserId.trim() : "";
+  if (!isValidUuid(targetUserId)) {
     return { ok: false, error: "ID pengguna tidak valid." };
   }
   if (targetUserId === actor.id) {
@@ -645,7 +699,7 @@ export async function deleteUserAction(input: {
       ok: false,
       missingServiceRoleKey: true,
       error:
-        "SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi di environment server (.env.local). Tambahkan key tersebut untuk menghapus akun pengguna secara permanen.",
+        "Layanan manajemen akun server belum aktif. Hubungi administrator sistem untuk menghapus akun secara permanen.",
     };
   }
 
@@ -666,10 +720,11 @@ export async function deleteUserAction(input: {
     if (borrowRes.error || requestRes.error) {
       return {
         ok: false,
-        error:
-          borrowRes.error?.message ??
-          requestRes.error?.message ??
+        error: sanitizeSafeError(
+          borrowRes.error ?? requestRes.error,
           "Gagal memeriksa keterkaitan riwayat pengguna.",
+          "settings/deleteCheckHistory",
+        ),
       };
     }
 
@@ -708,9 +763,11 @@ export async function deleteUserAction(input: {
         if (reassignBorrowErr) {
           return {
             ok: false,
-            error:
-              reassignBorrowErr.message ||
+            error: sanitizeSafeError(
+              reassignBorrowErr,
               "Gagal mengalihkan riwayat peminjaman sebelum penghapusan akun.",
+              "settings/reassignBorrows",
+            ),
           };
         }
       }
@@ -724,9 +781,11 @@ export async function deleteUserAction(input: {
         if (reassignRequestErr) {
           return {
             ok: false,
-            error:
-              reassignRequestErr.message ||
+            error: sanitizeSafeError(
+              reassignRequestErr,
               "Gagal mengalihkan riwayat pengajuan sebelum penghapusan akun.",
+              "settings/reassignRequests",
+            ),
           };
         }
       }
@@ -738,9 +797,11 @@ export async function deleteUserAction(input: {
     if (deleteErr) {
       return {
         ok: false,
-        error:
-          deleteErr.message ||
+        error: sanitizeSafeError(
+          deleteErr,
           "Gagal menghapus akun pengguna dari sistem autentikasi.",
+          "settings/deleteAuthUser",
+        ),
       };
     }
 
@@ -787,10 +848,11 @@ export async function deleteUserAction(input: {
   } catch (err) {
     return {
       ok: false,
-      error:
-        err instanceof Error
-          ? err.message
-          : "Gagal menghapus akun pengguna secara permanen.",
+      error: sanitizeSafeError(
+        err,
+        "Gagal menghapus akun pengguna secara permanen.",
+        "settings/deleteUserCatch",
+      ),
     };
   }
 }
@@ -800,6 +862,9 @@ export async function updateUserRoleAction(input: {
   role: Role;
 }): Promise<SettingsActionResult<Profile>> {
   const actor = await requireAction("users.manage");
+  if (!isValidUuid(input.targetUserId)) {
+    return { ok: false, error: "ID pengguna tidak valid." };
+  }
   if (!isRole(input.role)) {
     return { ok: false, error: "Peran tidak valid." };
   }
@@ -859,7 +924,7 @@ export async function updateUserRoleAction(input: {
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "Gagal mengubah peran pengguna.",
+      error: sanitizeSafeError(error, "Gagal mengubah peran pengguna.", "settings/updateRole"),
     };
   }
 
@@ -877,6 +942,9 @@ export async function toggleUserActiveAction(input: {
   isActive: boolean;
 }): Promise<SettingsActionResult<Profile>> {
   const actor = await requireAction("users.manage");
+  if (!isValidUuid(input.targetUserId)) {
+    return { ok: false, error: "ID pengguna tidak valid." };
+  }
   if (input.targetUserId === actor.id && !input.isActive) {
     return {
       ok: false,
@@ -926,7 +994,11 @@ export async function toggleUserActiveAction(input: {
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "Gagal memperbarui status aktif pengguna.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memperbarui status aktif pengguna.",
+        "settings/toggleActive",
+      ),
     };
   }
 
@@ -946,6 +1018,9 @@ export async function toggleUserOffboardAction(input: {
   offboarded: boolean;
 }): Promise<SettingsActionResult<Profile>> {
   const actor = await requireAction("users.manage");
+  if (!isValidUuid(input.targetUserId)) {
+    return { ok: false, error: "ID pengguna tidak valid." };
+  }
   if (input.targetUserId === actor.id) {
     return {
       ok: false,
@@ -1000,7 +1075,11 @@ export async function toggleUserOffboardAction(input: {
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message ?? "Gagal memperbarui status offboarding pengguna.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memperbarui status offboarding pengguna.",
+        "settings/toggleOffboard",
+      ),
     };
   }
 

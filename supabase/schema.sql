@@ -291,6 +291,7 @@ create or replace function public.next_alpha_suffix(p_index integer)
 returns text
 language plpgsql
 immutable
+set search_path = public
 as $$
 declare
   v_n integer := p_index;
@@ -419,6 +420,7 @@ $$;
 create or replace function public.prevent_code_mutation()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 declare
   v_col text := TG_ARGV[0];
@@ -528,6 +530,7 @@ $$;
 create or replace function public.sync_item_master_state()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 declare
   v_today_wib date := (timezone('Asia/Jakarta', now()))::date;
@@ -1955,7 +1958,7 @@ $$;
 
 -- Safe view for Admins (Owner & Admin Operasional; tanpa secret bytea)
 create or replace view public.subscriptions_vault_directory
-with (security_barrier = true)
+with (security_invoker = true, security_barrier = true)
 as
 select
   s.id,
@@ -2488,14 +2491,57 @@ create policy "audit_logs_insert_active" on public.audit_logs
 -- -----------------------------------------------------------------------------
 -- 11. SUPABASE PRIVATE STORAGE BUCKETS & POLICIES
 -- -----------------------------------------------------------------------------
-insert into storage.buckets (id, name, public, file_size_limit)
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values
-  ('inventory-photos', 'inventory-photos', false, 26214400),
-  ('archives', 'archives', false, 26214400),
-  ('delivery-proofs', 'delivery-proofs', false, 26214400),
-  ('backups', 'backups', false, 26214400)
+  (
+    'inventory-photos',
+    'inventory-photos',
+    false,
+    5242880,
+    array['image/jpeg', 'image/png', 'image/webp']
+  ),
+  (
+    'archives',
+    'archives',
+    false,
+    10485760,
+    array[
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/zip'
+    ]
+  ),
+  (
+    'delivery-proofs',
+    'delivery-proofs',
+    false,
+    5242880,
+    array['image/jpeg', 'image/png', 'image/webp']
+  ),
+  (
+    'backups',
+    'backups',
+    false,
+    15728640,
+    array[
+      'application/json',
+      'text/csv',
+      'text/plain',
+      'application/zip',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/pdf'
+    ]
+  )
 on conflict (id) do update
-  set file_size_limit = excluded.file_size_limit;
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
 
 drop policy if exists "storage_inventory_read" on storage.objects;
 create policy "storage_inventory_read" on storage.objects
@@ -2586,6 +2632,16 @@ create policy "storage_backups_write" on storage.objects
 -- -----------------------------------------------------------------------------
 -- 12. GRANTS & FUNCTION EXECUTION HARDENING
 -- -----------------------------------------------------------------------------
+-- Revoke all anonymous table, view & sequence grants in `public` (and lock defaults)
+revoke all on all tables in schema public from anon;
+revoke all on all sequences in schema public from anon;
+
+alter default privileges in schema public
+  revoke all on tables from anon;
+
+alter default privileges in schema public
+  revoke all on sequences from anon;
+
 revoke all on public.subscriptions_vault_directory from public, anon;
 grant select on public.subscriptions_vault_directory to authenticated, service_role;
 

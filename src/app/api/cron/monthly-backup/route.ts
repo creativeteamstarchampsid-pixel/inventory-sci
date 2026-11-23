@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -11,28 +10,32 @@ import {
 import { generatePdfBuffer } from "@/lib/exports/pdf";
 import { generateXlsxBuffer } from "@/lib/exports/xlsx";
 import { getMonthlyUpdatePeriod } from "@/lib/period";
+import { sanitizeSafeError, timingSafeSecretEqual } from "@/lib/security";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { BackupType, Json } from "@/types/database";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function isAuthorizedCron(request: NextRequest): { ok: true } | { ok: false; status: number; error: string } {
-  const secret = process.env.CRON_SECRET;
+const ALLOWED_MODES = new Set(["pre_update", "monthly_cutoff"]);
+
+function isAuthorizedCron(
+  request: NextRequest,
+): { ok: true } | { ok: false; status: number; error: string } {
+  const secret = process.env.CRON_SECRET?.trim();
   if (!secret) {
+    console.error("[security:cron] CRON_SECRET is not configured on server.");
     return {
       ok: false,
       status: 500,
-      error: "CRON_SECRET belum dikonfigurasi pada environment server.",
+      error: "Layanan cron belum dikonfigurasi pada server.",
     };
   }
 
   const authHeader = request.headers.get("authorization") ?? "";
   const expected = `Bearer ${secret}`;
-  const a = Buffer.from(authHeader);
-  const b = Buffer.from(expected);
 
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+  if (!timingSafeSecretEqual(authHeader, expected)) {
     return { ok: false, status: 401, error: "Unauthorized cron token." };
   }
 
@@ -42,20 +45,32 @@ function isAuthorizedCron(request: NextRequest): { ok: true } | { ok: false; sta
 async function runCronJob(request: NextRequest) {
   const authCheck = isAuthorizedCron(request);
   if (!authCheck.ok) {
-    return NextResponse.json({ error: authCheck.error }, { status: authCheck.status });
-  }
-
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json(
-      { error: "SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi." },
-      { status: 500 },
+      { error: authCheck.error },
+      { status: authCheck.status, headers: { "Cache-Control": "no-store" } },
     );
   }
 
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error("[security:cron] Supabase service role env is missing.");
+    return NextResponse.json(
+      { error: "Konfigurasi koneksi server belum lengkap." },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  const rawMode = request.nextUrl.searchParams.get("mode")?.trim().toLowerCase();
+  if (rawMode && !ALLOWED_MODES.has(rawMode)) {
+    return NextResponse.json(
+      { ok: false, error: "Parameter mode cron tidak valid." },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const modeParam = rawMode;
+  const force = request.nextUrl.searchParams.get("force") === "true";
+
   const admin = createAdminClient();
   const period = getMonthlyUpdatePeriod();
-  const modeParam = request.nextUrl.searchParams.get("mode")?.toLowerCase();
-  const force = request.nextUrl.searchParams.get("force") === "true";
 
   const actionsExecuted: string[] = [];
   const createdBackups: string[] = [];
@@ -67,7 +82,8 @@ async function runCronJob(request: NextRequest) {
       { p_days: 30 },
     );
     if (purgeErr) {
-      actionsExecuted.push(`purge_error: ${purgeErr.message}`);
+      sanitizeSafeError(purgeErr, "Gagal membersihkan Recycle Bin.", "cron/purge");
+      actionsExecuted.push("purge_error");
     } else {
       actionsExecuted.push("purge_expired_recycle_bin(30)");
     }
@@ -215,23 +231,29 @@ async function runCronJob(request: NextRequest) {
       } as unknown as Json,
     });
 
-    return NextResponse.json({
-      ok: true,
-      periodCode: period.periodCode,
-      dayWib: period.day,
-      lastDayWib: period.lastDay,
-      actionsExecuted,
-      createdBackups,
-      purgeResult: purgeResult ?? null,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        periodCode: period.periodCode,
+        dayWib: period.day,
+        lastDayWib: period.lastDay,
+        actionsExecuted,
+        createdBackups,
+        purgeResult: purgeResult ?? null,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (err) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          err instanceof Error ? err.message : "Gagal menjalankan cron backup bulanan.",
+        error: sanitizeSafeError(
+          err,
+          "Gagal menjalankan cron backup bulanan.",
+          "api/cron/monthly-backup",
+        ),
       },
-      { status: 500 },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

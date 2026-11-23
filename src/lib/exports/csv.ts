@@ -17,6 +17,11 @@ import {
 } from "@/lib/constants";
 import { getMonthlyUpdatePeriod } from "@/lib/period";
 import { ROLE_LABELS, can, type Role } from "@/lib/rbac";
+import {
+  isValidPeriodYm,
+  sanitizeCsvFormulaCell,
+  sanitizeSafeError,
+} from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type {
   ArchiveHybrid,
@@ -319,7 +324,10 @@ export async function loadExportDataset(
 ): Promise<ExportDataset> {
   const now = new Date();
   const period = getMonthlyUpdatePeriod(now);
-  const periodCode = options.periodCode ?? period.periodCode;
+  const periodCode =
+    options.periodCode && isValidPeriodYm(options.periodCode)
+      ? options.periodCode.trim()
+      : period.periodCode;
   const todayWib = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Jakarta",
   }).format(now);
@@ -392,16 +400,24 @@ export async function loadExportDataset(
     ]);
 
   if (itemsRes.error) {
-    throw new Error(`Gagal memuat inventaris: ${itemsRes.error.message}`);
+    throw new Error(
+      sanitizeSafeError(itemsRes.error, "Gagal memuat data inventaris.", "exports/items"),
+    );
   }
   if (subsRes.error) {
-    throw new Error(`Gagal memuat subscription vault: ${subsRes.error.message}`);
+    throw new Error(
+      sanitizeSafeError(subsRes.error, "Gagal memuat data langganan.", "exports/subscriptions"),
+    );
   }
   if (archivesRes.error) {
-    throw new Error(`Gagal memuat arsip berkas: ${archivesRes.error.message}`);
+    throw new Error(
+      sanitizeSafeError(archivesRes.error, "Gagal memuat arsip berkas.", "exports/archives"),
+    );
   }
   if (deliveriesRes.error) {
-    throw new Error(`Gagal memuat log pengiriman: ${deliveriesRes.error.message}`);
+    throw new Error(
+      sanitizeSafeError(deliveriesRes.error, "Gagal memuat log pengiriman.", "exports/deliveries"),
+    );
   }
 
   const reconciliation = recRes.data ?? null;
@@ -603,6 +619,21 @@ function mapAuditRows(logs: AuditLog[]) {
   }));
 }
 
+function sanitizeCsvRow<T extends Record<string, string | number>>(row: T): T {
+  const safe = { ...row };
+  for (const key of Object.keys(safe) as Array<keyof T>) {
+    const val = safe[key];
+    if (typeof val === "string") {
+      safe[key] = sanitizeCsvFormulaCell(val) as T[keyof T];
+    }
+  }
+  return safe;
+}
+
+function sanitizeCsvRows<T extends Record<string, string | number>>(rows: T[]): T[] {
+  return rows.map(sanitizeCsvRow);
+}
+
 export function generateCsvString(
   dataset: ExportDataset,
   scope: ExportScope = "all",
@@ -610,25 +641,35 @@ export function generateCsvString(
   const bom = "\uFEFF";
 
   if (scope === "inventory") {
-    return bom + Papa.unparse(mapInventoryRows(dataset.items, dataset.canViewValuation));
+    return (
+      bom +
+      Papa.unparse(
+        sanitizeCsvRows(mapInventoryRows(dataset.items, dataset.canViewValuation)),
+      )
+    );
   }
   if (scope === "subscriptions") {
     if (!dataset.canExportFinancial) return bom;
-    return bom + Papa.unparse(mapSubscriptionRows(dataset));
+    return bom + Papa.unparse(sanitizeCsvRows(mapSubscriptionRows(dataset)));
   }
   if (scope === "archives") {
-    return bom + Papa.unparse(mapArchiveRows(dataset.archives));
+    return bom + Papa.unparse(sanitizeCsvRows(mapArchiveRows(dataset.archives)));
   }
   if (scope === "deliveries") {
     if (!dataset.canExportFinancial) return bom;
-    return bom + Papa.unparse(mapDeliveryRows(dataset.deliveries, dataset.canExportFinancial));
+    return (
+      bom +
+      Papa.unparse(
+        sanitizeCsvRows(mapDeliveryRows(dataset.deliveries, dataset.canExportFinancial)),
+      )
+    );
   }
   if (scope === "anomalies") {
-    return bom + Papa.unparse(mapAnomalyRows(dataset));
+    return bom + Papa.unparse(sanitizeCsvRows(mapAnomalyRows(dataset)));
   }
   if (scope === "audit") {
     if (!dataset.canExportFinancial) return bom;
-    return bom + Papa.unparse(mapAuditRows(dataset.auditLogs));
+    return bom + Papa.unparse(sanitizeCsvRows(mapAuditRows(dataset.auditLogs)));
   }
 
   const actorRoleLabel =
@@ -652,15 +693,15 @@ export function generateCsvString(
   }
 
   const sections: string[] = [];
-  sections.push(Papa.unparse([summaryHeader]));
+  sections.push(Papa.unparse([sanitizeCsvRow(summaryHeader)]));
 
-  const appendSection = (title: string, rows: Record<string, unknown>[]) => {
+  const appendSection = (title: string, rows: Record<string, string | number>[]) => {
     sections.push(`\r\n# ${title}`);
     if (rows.length === 0) {
       sections.push("Tidak ada data");
       return;
     }
-    sections.push(Papa.unparse(rows));
+    sections.push(Papa.unparse(sanitizeCsvRows(rows)));
   };
 
   appendSection(
@@ -780,15 +821,33 @@ export async function captureFullBackupSnapshot(
       .order("period_ym", { ascending: false }),
   ]);
 
-  if (itemsRes.error) throw new Error(itemsRes.error.message);
-  if (kitsRes.error) throw new Error(kitsRes.error.message);
-  if (borrowsRes.error) throw new Error(borrowsRes.error.message);
-  if (subsRes.error) throw new Error(subsRes.error.message);
-  if (archivesRes.error) throw new Error(archivesRes.error.message);
-  if (versionsRes.error) throw new Error(versionsRes.error.message);
-  if (deliveriesRes.error) throw new Error(deliveriesRes.error.message);
-  if (requestsRes.error) throw new Error(requestsRes.error.message);
-  if (recRes.error) throw new Error(recRes.error.message);
+  if (itemsRes.error) {
+    throw new Error(sanitizeSafeError(itemsRes.error, "Gagal mengambil snapshot inventaris.", "backup/items"));
+  }
+  if (kitsRes.error) {
+    throw new Error(sanitizeSafeError(kitsRes.error, "Gagal mengambil snapshot kit.", "backup/kits"));
+  }
+  if (borrowsRes.error) {
+    throw new Error(sanitizeSafeError(borrowsRes.error, "Gagal mengambil snapshot peminjaman.", "backup/borrows"));
+  }
+  if (subsRes.error) {
+    throw new Error(sanitizeSafeError(subsRes.error, "Gagal mengambil snapshot langganan.", "backup/subs"));
+  }
+  if (archivesRes.error) {
+    throw new Error(sanitizeSafeError(archivesRes.error, "Gagal mengambil snapshot arsip.", "backup/archives"));
+  }
+  if (versionsRes.error) {
+    throw new Error(sanitizeSafeError(versionsRes.error, "Gagal mengambil snapshot versi arsip.", "backup/versions"));
+  }
+  if (deliveriesRes.error) {
+    throw new Error(sanitizeSafeError(deliveriesRes.error, "Gagal mengambil snapshot pengiriman.", "backup/deliveries"));
+  }
+  if (requestsRes.error) {
+    throw new Error(sanitizeSafeError(requestsRes.error, "Gagal mengambil snapshot pengajuan.", "backup/requests"));
+  }
+  if (recRes.error) {
+    throw new Error(sanitizeSafeError(recRes.error, "Gagal mengambil snapshot rekonsiliasi.", "backup/rec"));
+  }
 
   return {
     version: 1,
@@ -1019,7 +1078,8 @@ export async function persistBackupBundle(
       upsert: true,
     });
     if (error) {
-      storageWarnings.push(`${path}: ${error.message}`);
+      sanitizeSafeError(error, "Gagal mengunggah berkas backup ke storage.", "backup/upload");
+      storageWarnings.push(`${path.split("/").pop() ?? "file"} gagal diunggah ke storage`);
       return null;
     }
     return path;
@@ -1065,7 +1125,11 @@ export async function persistBackupBundle(
 
   if (insertError || !inserted) {
     throw new Error(
-      `Gagal menyimpan metadata backup: ${insertError?.message ?? "Unknown error"}`,
+      sanitizeSafeError(
+        insertError,
+        "Gagal menyimpan metadata backup ke database.",
+        "backup/persist",
+      ),
     );
   }
 

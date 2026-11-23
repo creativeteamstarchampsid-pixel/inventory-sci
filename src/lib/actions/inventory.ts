@@ -4,6 +4,15 @@ import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
 import { can, type Role } from "@/lib/rbac";
+import {
+  isSafeHttpUrl,
+  isValidIsoDate,
+  isValidUuid,
+  sanitizeOptionalText,
+  sanitizeSafeError,
+  sanitizeStoragePath,
+  sanitizeTextInput,
+} from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type {
   AssetType,
@@ -98,18 +107,13 @@ function getWibDateString(offsetDays = 0): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(date);
 }
 
-function cleanOptionalText(value: string | null | undefined): string | null {
-  if (value === undefined || value === null) return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
 function cleanPhotoPathOrUrl(value: string | null | undefined): string | null {
-  const cleaned = cleanOptionalText(value);
+  const cleaned = sanitizeOptionalText(value, 512);
   if (!cleaned) return null;
-  if (/^https?:\/\//i.test(cleaned)) return cleaned;
-  if (cleaned.includes("..") || /^[a-z]+:/i.test(cleaned)) return null;
-  return cleaned;
+  if (/^https?:\/\//i.test(cleaned)) {
+    return isSafeHttpUrl(cleaned) ? cleaned : null;
+  }
+  return sanitizeStoragePath(cleaned);
 }
 
 function toSafeNumber(value: unknown, fallback = 0): number {
@@ -147,8 +151,8 @@ export async function createItemAction(
 ): Promise<ActionResult<ItemMaster>> {
   const user = await requireAction("inventory.create");
 
-  const name = input.name?.trim() ?? "";
-  const category = input.category?.trim() ?? "";
+  const name = sanitizeTextInput(input.name, 200);
+  const category = sanitizeTextInput(input.category, 100);
   if (!name) {
     return { ok: false, error: "Nama barang wajib diisi." };
   }
@@ -163,6 +167,15 @@ export async function createItemAction(
   }
   if (!VALID_ASSET_TYPES.includes(input.asset_type)) {
     return { ok: false, error: "Tipe aset tidak valid." };
+  }
+
+  const acquisitionDate = sanitizeOptionalText(input.acquisition_date, 20);
+  if (acquisitionDate && !isValidIsoDate(acquisitionDate)) {
+    return { ok: false, error: "Format tanggal perolehan harus YYYY-MM-DD." };
+  }
+
+  if (input.photo_url && !cleanPhotoPathOrUrl(input.photo_url)) {
+    return { ok: false, error: "Path atau tautan foto barang tidak valid." };
   }
 
   const barcodeFormat =
@@ -204,8 +217,11 @@ export async function createItemAction(
 
   const supabase = await createClient();
 
-  const parentId = cleanOptionalText(input.parent_item_id);
+  const parentId = sanitizeOptionalText(input.parent_item_id, 64);
   if (parentId) {
+    if (!isValidUuid(parentId)) {
+      return { ok: false, error: "ID item induk (parent) tidak valid." };
+    }
     const { data: parent, error: parentErr } = await supabase
       .from("items_master")
       .select("id")
@@ -227,21 +243,21 @@ export async function createItemAction(
       parent_item_id: parentId,
       barcode_format: barcodeFormat,
       name,
-      description: cleanOptionalText(input.description),
+      description: sanitizeOptionalText(input.description, 2000, { multiline: true }),
       category_prefix: input.category_prefix,
       category,
       asset_type: input.asset_type,
       room_code: input.room_code,
-      rack_location: cleanOptionalText(input.rack_location),
-      pic_name: cleanOptionalText(input.pic_name),
+      rack_location: sanitizeOptionalText(input.rack_location, 100),
+      pic_name: sanitizeOptionalText(input.pic_name, 120),
       photo_url: cleanPhotoPathOrUrl(input.photo_url),
-      acquisition_date: cleanOptionalText(input.acquisition_date),
+      acquisition_date: acquisitionDate,
       purchase_price: purchasePrice,
       useful_life_months: usefulLifeMonths,
       residual_value: residualValue,
       total_parts: totalParts,
       current_parts: currentParts,
-      unit_label: cleanOptionalText(input.unit_label) ?? "Pcs",
+      unit_label: sanitizeOptionalText(input.unit_label, 40) ?? "Pcs",
       stock_qty: stockQty,
       min_stock_threshold: minStockThreshold,
       condition,
@@ -257,7 +273,11 @@ export async function createItemAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal menyimpan item inventaris baru.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal menyimpan item inventaris baru.",
+        "inventory/create",
+      ),
     };
   }
 
@@ -274,7 +294,7 @@ export async function updateItemAction(
   input: UpdateItemInput,
 ): Promise<ActionResult<ItemMaster>> {
   const user = await requireAction("inventory.update");
-  if (!id) {
+  if (!isValidUuid(id)) {
     return { ok: false, error: "ID item tidak valid." };
   }
 
@@ -290,8 +310,12 @@ export async function updateItemAction(
     return { ok: false, error: "Item inventaris tidak ditemukan." };
   }
 
-  const name = input.name !== undefined ? input.name.trim() : existing.name;
-  const category = input.category !== undefined ? input.category.trim() : existing.category;
+  const name =
+    input.name !== undefined ? sanitizeTextInput(input.name, 200) : existing.name;
+  const category =
+    input.category !== undefined
+      ? sanitizeTextInput(input.category, 100)
+      : existing.category;
   if (!name) {
     return { ok: false, error: "Nama barang wajib diisi." };
   }
@@ -302,6 +326,7 @@ export async function updateItemAction(
   const categoryPrefix = input.category_prefix ?? existing.category_prefix;
   const roomCode = input.room_code ?? existing.room_code;
   const assetType = input.asset_type ?? existing.asset_type;
+  const barcodeFormat = input.barcode_format ?? existing.barcode_format;
   if (!VALID_CATEGORY_PREFIXES.includes(categoryPrefix)) {
     return { ok: false, error: "Prefix kode kategori tidak valid." };
   }
@@ -310,6 +335,26 @@ export async function updateItemAction(
   }
   if (!VALID_ASSET_TYPES.includes(assetType)) {
     return { ok: false, error: "Tipe aset tidak valid." };
+  }
+  if (!VALID_BARCODE_FORMATS.includes(barcodeFormat)) {
+    return { ok: false, error: "Format barcode tidak valid." };
+  }
+
+  const acquisitionDate =
+    input.acquisition_date !== undefined
+      ? sanitizeOptionalText(input.acquisition_date, 20)
+      : existing.acquisition_date;
+  if (acquisitionDate && !isValidIsoDate(acquisitionDate)) {
+    return { ok: false, error: "Format tanggal perolehan harus YYYY-MM-DD." };
+  }
+
+  if (
+    input.photo_url !== undefined &&
+    input.photo_url !== null &&
+    input.photo_url.trim().length > 0 &&
+    !cleanPhotoPathOrUrl(input.photo_url)
+  ) {
+    return { ok: false, error: "Path atau tautan foto barang tidak valid." };
   }
 
   const totalParts =
@@ -353,10 +398,15 @@ export async function updateItemAction(
 
   const parentId =
     input.parent_item_id !== undefined
-      ? cleanOptionalText(input.parent_item_id)
+      ? sanitizeOptionalText(input.parent_item_id, 64)
       : existing.parent_item_id;
-  if (parentId === id) {
-    return { ok: false, error: "Item tidak boleh menjadi induk dari dirinya sendiri." };
+  if (parentId) {
+    if (!isValidUuid(parentId)) {
+      return { ok: false, error: "ID item induk (parent) tidak valid." };
+    }
+    if (parentId === id) {
+      return { ok: false, error: "Item tidak boleh menjadi induk dari dirinya sendiri." };
+    }
   }
 
   const usefulLifeMonths =
@@ -375,11 +425,11 @@ export async function updateItemAction(
     .from("items_master")
     .update({
       parent_item_id: parentId,
-      barcode_format: input.barcode_format ?? existing.barcode_format,
+      barcode_format: barcodeFormat,
       name,
       description:
         input.description !== undefined
-          ? cleanOptionalText(input.description)
+          ? sanitizeOptionalText(input.description, 2000, { multiline: true })
           : existing.description,
       category_prefix: categoryPrefix,
       category,
@@ -387,16 +437,17 @@ export async function updateItemAction(
       room_code: roomCode,
       rack_location:
         input.rack_location !== undefined
-          ? cleanOptionalText(input.rack_location)
+          ? sanitizeOptionalText(input.rack_location, 100)
           : existing.rack_location,
       pic_name:
-        input.pic_name !== undefined ? cleanOptionalText(input.pic_name) : existing.pic_name,
+        input.pic_name !== undefined
+          ? sanitizeOptionalText(input.pic_name, 120)
+          : existing.pic_name,
       photo_url:
-        input.photo_url !== undefined ? cleanPhotoPathOrUrl(input.photo_url) : existing.photo_url,
-      acquisition_date:
-        input.acquisition_date !== undefined
-          ? cleanOptionalText(input.acquisition_date)
-          : existing.acquisition_date,
+        input.photo_url !== undefined
+          ? cleanPhotoPathOrUrl(input.photo_url)
+          : existing.photo_url,
+      acquisition_date: acquisitionDate,
       purchase_price:
         input.purchase_price !== undefined
           ? Math.max(0, toSafeNumber(input.purchase_price, existing.purchase_price))
@@ -410,7 +461,7 @@ export async function updateItemAction(
       current_parts: currentParts,
       unit_label:
         input.unit_label !== undefined
-          ? cleanOptionalText(input.unit_label) ?? "Pcs"
+          ? sanitizeOptionalText(input.unit_label, 40) ?? "Pcs"
           : existing.unit_label,
       stock_qty:
         input.stock_qty !== undefined
@@ -438,7 +489,11 @@ export async function updateItemAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal memperbarui data item inventaris.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memperbarui data item inventaris.",
+        "inventory/update",
+      ),
     };
   }
 
@@ -454,7 +509,7 @@ export async function softDeleteItemAction(
   id: string,
 ): Promise<ActionResult<{ id: string; item_code: string }>> {
   const user = await requireAction("inventory.delete");
-  if (!id) {
+  if (!isValidUuid(id)) {
     return { ok: false, error: "ID item tidak valid." };
   }
 
@@ -489,7 +544,11 @@ export async function softDeleteItemAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal menghapus item atau item tidak ditemukan.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal menghapus item atau item tidak ditemukan.",
+        "inventory/softDelete",
+      ),
     };
   }
 
@@ -506,7 +565,7 @@ export async function updateItemHygieneAction(
   hygieneStatus: HygieneStatus,
 ): Promise<ActionResult<ItemMaster>> {
   const user = await requireAction("inventory.update_hygiene");
-  if (!id) {
+  if (!isValidUuid(id)) {
     return { ok: false, error: "ID item tidak valid." };
   }
   if (!VALID_HYGIENE_STATUSES.includes(hygieneStatus)) {
@@ -542,7 +601,11 @@ export async function updateItemHygieneAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal memperbarui status sanitasi.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memperbarui status sanitasi.",
+        "inventory/updateHygiene",
+      ),
     };
   }
 
@@ -559,7 +622,7 @@ export async function updateItemPartsAction(
   currentParts: number,
 ): Promise<ActionResult<ItemMaster>> {
   const user = await requireAction("inventory.report_issue");
-  if (!id) {
+  if (!isValidUuid(id)) {
     return { ok: false, error: "ID item tidak valid." };
   }
 
@@ -607,7 +670,11 @@ export async function updateItemPartsAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal memperbarui jumlah part/kepingan.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memperbarui jumlah part/kepingan.",
+        "inventory/updateParts",
+      ),
     };
   }
 
@@ -624,7 +691,7 @@ export async function updateItemConditionAction(
   condition: ItemCondition,
 ): Promise<ActionResult<ItemMaster>> {
   const user = await requireAction("inventory.report_issue");
-  if (!id) {
+  if (!isValidUuid(id)) {
     return { ok: false, error: "ID item tidak valid." };
   }
   if (!VALID_CONDITIONS.includes(condition)) {
@@ -673,7 +740,11 @@ export async function updateItemConditionAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal memperbarui kondisi barang.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memperbarui kondisi barang.",
+        "inventory/updateCondition",
+      ),
     };
   }
 
@@ -690,7 +761,7 @@ export async function updateConsumableStockAction(
   stockQty: number,
 ): Promise<ActionResult<ItemMaster>> {
   const user = await requireAction("inventory.update");
-  if (!id) {
+  if (!isValidUuid(id)) {
     return { ok: false, error: "ID item tidak valid." };
   }
 
@@ -714,7 +785,11 @@ export async function updateConsumableStockAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal memperbarui stok barang.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memperbarui stok barang.",
+        "inventory/updateStock",
+      ),
     };
   }
 
@@ -730,23 +805,35 @@ export async function getInventoryPhotoSignedUrlAction(
   photoPath: string,
 ): Promise<ActionResult<string>> {
   await requireAction("inventory.view");
-  const clean = photoPath.trim();
+  const clean = typeof photoPath === "string" ? photoPath.trim() : "";
   if (!clean) {
     return { ok: false, error: "Path foto kosong." };
   }
   if (/^https?:\/\//i.test(clean)) {
+    if (!isSafeHttpUrl(clean)) {
+      return { ok: false, error: "Tautan foto tidak valid." };
+    }
     return { ok: true, data: clean };
+  }
+
+  const safePath = sanitizeStoragePath(clean);
+  if (!safePath) {
+    return { ok: false, error: "Path penyimpanan foto tidak valid." };
   }
 
   const supabase = await createClient();
   const { data, error } = await supabase.storage
     .from("inventory-photos")
-    .createSignedUrl(clean, 3600);
+    .createSignedUrl(safePath, 3600);
 
   if (error || !data?.signedUrl) {
     return {
       ok: false,
-      error: error?.message || "Gagal membuat tautan pratinjau foto.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal membuat tautan pratinjau foto.",
+        "inventory/photoSignedUrl",
+      ),
     };
   }
 

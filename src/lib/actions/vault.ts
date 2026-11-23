@@ -3,6 +3,14 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
+import { isRole } from "@/lib/rbac";
+import {
+  isValidIsoDate,
+  isValidUuid,
+  sanitizeOptionalText,
+  sanitizeSafeError,
+  sanitizeTextInput,
+} from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type { BillingCycle, Json, PaymentMethod, UserRole } from "@/types/database";
 
@@ -70,9 +78,6 @@ export type RotatePasswordInput = {
   remove_user_ids?: string[];
 };
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 const VALID_BILLING_CYCLES: readonly BillingCycle[] = [
   "BULANAN",
   "TAHUNAN",
@@ -88,48 +93,45 @@ const VALID_PAYMENT_METHODS: readonly PaymentMethod[] = [
   "LAINNYA",
 ];
 
-function isValidUuid(value: string): boolean {
-  return UUID_REGEX.test(value.trim());
-}
-
-function normalizeOptionalText(value: string | null | undefined): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
 function getVaultEncryptionKey():
   | { ok: true; key: string }
   | { ok: false; error: string } {
   const raw = process.env.VAULT_ENCRYPTION_KEY;
   if (!raw || raw.trim().length === 0) {
+    console.error("[security:vault] VAULT_ENCRYPTION_KEY is missing.");
     return {
       ok: false,
       error:
-        "Kunci enkripsi vault (VAULT_ENCRYPTION_KEY) belum dikonfigurasi di server. Hubungi administrator sistem untuk mengatur environment variable tersebut.",
+        "Kunci enkripsi vault belum dikonfigurasi di server. Hubungi administrator sistem.",
     };
   }
   const key = raw.trim();
   if (key.length < 16) {
+    console.error("[security:vault] VAULT_ENCRYPTION_KEY length below 16 chars.");
     return {
       ok: false,
       error:
-        "Kunci enkripsi vault (VAULT_ENCRYPTION_KEY) minimal harus 16 karakter agar memenuhi standar AES-256.",
+        "Konfigurasi kunci enkripsi vault belum memenuhi standar keamanan AES-256.",
     };
   }
   return { ok: true, key };
 }
 
-function mapDecryptError(message: string): string {
-  const lower = message.toLowerCase();
+function mapDecryptError(error: { code?: string; message?: string }): string {
+  const lower = (error.message ?? "").toLowerCase();
   if (
     lower.includes("wrong key") ||
     lower.includes("corrupt") ||
     lower.includes("decrypt")
   ) {
-    return "Gagal mendekripsi kredensial. Kunci enkripsi server (VAULT_ENCRYPTION_KEY) tidak cocok dengan data tersimpan.";
+    console.error("[security:vault] Decrypt failed due to key mismatch or corrupt ciphertext.");
+    return "Gagal mendekripsi kredensial. Kunci enkripsi server tidak cocok dengan data tersimpan.";
   }
-  return message;
+  return sanitizeSafeError(
+    error,
+    "Gagal mendekripsi kredensial langganan.",
+    "vault/reveal",
+  );
 }
 
 function sanitizeAssignedUsers(
@@ -140,16 +142,17 @@ function sanitizeAssignedUsers(
   const clean: AssignedVaultUser[] = [];
 
   for (const item of users) {
-    if (!item || typeof item.user_id !== "string" || !isValidUuid(item.user_id)) {
+    if (!item || !isValidUuid(item.user_id)) {
       continue;
     }
-    if (seen.has(item.user_id)) continue;
-    seen.add(item.user_id);
+    const uid = item.user_id.trim();
+    if (seen.has(uid)) continue;
+    seen.add(uid);
     clean.push({
-      user_id: item.user_id,
-      full_name: normalizeOptionalText(item.full_name),
-      email: normalizeOptionalText(item.email),
-      ...(item.role ? { role: item.role } : {}),
+      user_id: uid,
+      full_name: sanitizeOptionalText(item.full_name, 120),
+      email: sanitizeOptionalText(item.email, 254),
+      ...(item.role && isRole(item.role) ? { role: item.role } : {}),
     });
   }
 
@@ -166,10 +169,10 @@ function validateSubscriptionFields(input: {
   max_slots: number;
   assigned_users: AssignedVaultUser[];
 }): string | null {
-  if (!input.service_name || input.service_name.trim().length === 0) {
+  if (!sanitizeTextInput(input.service_name, 150)) {
     return "Nama layanan wajib diisi.";
   }
-  if (!input.login_email || input.login_email.trim().length === 0) {
+  if (!sanitizeTextInput(input.login_email, 254)) {
     return "Email atau username login wajib diisi.";
   }
   if (!VALID_BILLING_CYCLES.includes(input.billing_cycle)) {
@@ -183,15 +186,16 @@ function validateSubscriptionFields(input: {
   }
   if (
     !Number.isInteger(input.max_slots) ||
-    input.max_slots < 1
+    input.max_slots < 1 ||
+    input.max_slots > 1000
   ) {
-    return "Jumlah slot maksimal minimal 1.";
+    return "Jumlah slot maksimal harus antara 1 dan 1000.";
   }
   if (input.assigned_users.length > input.max_slots) {
     return `Jumlah pengguna terassign (${input.assigned_users.length}) melebihi kapasitas slot (${input.max_slots}).`;
   }
-  const renewalDate = normalizeOptionalText(input.renewal_date);
-  if (renewalDate && !/^\d{4}-\d{2}-\d{2}$/.test(renewalDate)) {
+  const renewalDate = sanitizeOptionalText(input.renewal_date, 20);
+  if (renewalDate && !isValidIsoDate(renewalDate)) {
     return "Format tanggal perpanjangan harus YYYY-MM-DD.";
   }
   return null;
@@ -206,7 +210,7 @@ export async function revealSecretAction(
 ): Promise<ActionResult<RevealedSecret>> {
   await requireAction("vault.reveal_secret");
 
-  if (!subId || !isValidUuid(subId)) {
+  if (!isValidUuid(subId)) {
     return { ok: false, error: "ID langganan tidak valid." };
   }
 
@@ -222,7 +226,7 @@ export async function revealSecretAction(
   });
 
   if (error) {
-    return { ok: false, error: mapDecryptError(error.message) };
+    return { ok: false, error: mapDecryptError(error) };
   }
 
   const row = Array.isArray(data) ? data[0] : data;
@@ -268,6 +272,12 @@ export async function createSubscriptionAction(
   if (!input.password_plain || input.password_plain.length === 0) {
     return { ok: false, error: "Kata sandi akun wajib diisi." };
   }
+  if (input.password_plain.length > 500) {
+    return { ok: false, error: "Kata sandi akun melebihi batas maksimal 500 karakter." };
+  }
+  if (input.pin_recovery_plain && input.pin_recovery_plain.length > 500) {
+    return { ok: false, error: "PIN / kode pemulihan melebihi batas maksimal 500 karakter." };
+  }
 
   const keyRes = getVaultEncryptionKey();
   if (!keyRes.ok) {
@@ -287,9 +297,11 @@ export async function createSubscriptionAction(
   if (encPassError || !encryptedPassword) {
     return {
       ok: false,
-      error:
-        encPassError?.message ||
+      error: sanitizeSafeError(
+        encPassError,
         "Gagal mengenkripsi kata sandi akun langganan.",
+        "vault/encryptPassword",
+      ),
     };
   }
 
@@ -305,8 +317,11 @@ export async function createSubscriptionAction(
     if (encPinError) {
       return {
         ok: false,
-        error:
-          encPinError.message || "Gagal mengenkripsi PIN / kode pemulihan.",
+        error: sanitizeSafeError(
+          encPinError,
+          "Gagal mengenkripsi PIN / kode pemulihan.",
+          "vault/encryptPin",
+        ),
       };
     }
     encryptedPin = pinData ?? null;
@@ -316,22 +331,22 @@ export async function createSubscriptionAction(
   const { data, error } = await supabase
     .from("subscriptions_vault")
     .insert({
-      service_name: input.service_name.trim(),
-      plan_name: normalizeOptionalText(input.plan_name),
-      login_email: input.login_email.trim(),
+      service_name: sanitizeTextInput(input.service_name, 150),
+      plan_name: sanitizeOptionalText(input.plan_name, 120),
+      login_email: sanitizeTextInput(input.login_email, 254),
       password_encrypted: encryptedPassword,
       pin_recovery_encrypted: encryptedPin,
       billing_cycle: input.billing_cycle,
       cost: Number(input.cost),
-      currency: normalizeOptionalText(input.currency) ?? "IDR",
+      currency: sanitizeOptionalText(input.currency, 10) ?? "IDR",
       payment_method: input.payment_method,
-      payment_account_label: normalizeOptionalText(input.payment_account_label),
-      renewal_date: normalizeOptionalText(input.renewal_date),
+      payment_account_label: sanitizeOptionalText(input.payment_account_label, 150),
+      renewal_date: sanitizeOptionalText(input.renewal_date, 20),
       auto_renew: Boolean(input.auto_renew),
       max_slots: Number(input.max_slots),
       assigned_users_json: assignedUsers as unknown as Json,
       password_rotated_at: nowIso,
-      notes: normalizeOptionalText(input.notes),
+      notes: sanitizeOptionalText(input.notes, 2000, { multiline: true }),
       is_active: input.is_active ?? true,
       created_by: user.id,
       updated_by: user.id,
@@ -342,7 +357,11 @@ export async function createSubscriptionAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal menyimpan akun langganan ke Vault.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal menyimpan akun langganan ke Vault.",
+        "vault/create",
+      ),
     };
   }
 
@@ -360,7 +379,7 @@ export async function updateSubscriptionAction(
 ): Promise<ActionResult<{ id: string; sub_code: string }>> {
   const user = await requireAction("vault.manage");
 
-  if (!input.id || !isValidUuid(input.id)) {
+  if (!isValidUuid(input.id)) {
     return { ok: false, error: "ID langganan tidak valid." };
   }
 
@@ -386,6 +405,13 @@ export async function updateSubscriptionAction(
     input.pin_recovery_plain && input.pin_recovery_plain.length > 0,
   );
 
+  if (input.password_plain && input.password_plain.length > 500) {
+    return { ok: false, error: "Kata sandi akun melebihi batas maksimal 500 karakter." };
+  }
+  if (input.pin_recovery_plain && input.pin_recovery_plain.length > 500) {
+    return { ok: false, error: "PIN / kode pemulihan melebihi batas maksimal 500 karakter." };
+  }
+
   const supabase = await createClient();
   let encryptedPassword: string | undefined;
   let encryptedPin: string | null | undefined;
@@ -408,8 +434,11 @@ export async function updateSubscriptionAction(
       if (passErr || !passData) {
         return {
           ok: false,
-          error:
-            passErr?.message || "Gagal mengenkripsi kata sandi baru.",
+          error: sanitizeSafeError(
+            passErr,
+            "Gagal mengenkripsi kata sandi baru.",
+            "vault/updateEncryptPass",
+          ),
         };
       }
       encryptedPassword = passData;
@@ -429,7 +458,11 @@ export async function updateSubscriptionAction(
       if (pinErr) {
         return {
           ok: false,
-          error: pinErr.message || "Gagal mengenkripsi PIN / kode pemulihan.",
+          error: sanitizeSafeError(
+            pinErr,
+            "Gagal mengenkripsi PIN / kode pemulihan.",
+            "vault/updateEncryptPin",
+          ),
         };
       }
       encryptedPin = pinData ?? null;
@@ -458,19 +491,19 @@ export async function updateSubscriptionAction(
     password_rotated_at?: string;
     pin_recovery_encrypted?: string | null;
   } = {
-    service_name: input.service_name.trim(),
-    plan_name: normalizeOptionalText(input.plan_name),
-    login_email: input.login_email.trim(),
+    service_name: sanitizeTextInput(input.service_name, 150),
+    plan_name: sanitizeOptionalText(input.plan_name, 120),
+    login_email: sanitizeTextInput(input.login_email, 254),
     billing_cycle: input.billing_cycle,
     cost: Number(input.cost),
-    currency: normalizeOptionalText(input.currency) ?? "IDR",
+    currency: sanitizeOptionalText(input.currency, 10) ?? "IDR",
     payment_method: input.payment_method,
-    payment_account_label: normalizeOptionalText(input.payment_account_label),
-    renewal_date: normalizeOptionalText(input.renewal_date),
+    payment_account_label: sanitizeOptionalText(input.payment_account_label, 150),
+    renewal_date: sanitizeOptionalText(input.renewal_date, 20),
     auto_renew: Boolean(input.auto_renew),
     max_slots: Number(input.max_slots),
     assigned_users_json: assignedUsers as unknown as Json,
-    notes: normalizeOptionalText(input.notes),
+    notes: sanitizeOptionalText(input.notes, 2000, { multiline: true }),
     is_active: Boolean(input.is_active),
     updated_by: user.id,
   };
@@ -496,7 +529,11 @@ export async function updateSubscriptionAction(
   if (error) {
     return {
       ok: false,
-      error: error.message || "Gagal memperbarui akun langganan.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memperbarui akun langganan.",
+        "vault/update",
+      ),
     };
   }
 
@@ -521,11 +558,17 @@ export async function rotateSubscriptionPasswordAction(
 ): Promise<ActionResult<{ id: string; rotatedAt: string }>> {
   const user = await requireAction("vault.manage");
 
-  if (!input.id || !isValidUuid(input.id)) {
+  if (!isValidUuid(input.id)) {
     return { ok: false, error: "ID langganan tidak valid." };
   }
   if (!input.new_password || input.new_password.length === 0) {
     return { ok: false, error: "Kata sandi baru wajib diisi." };
+  }
+  if (input.new_password.length > 500) {
+    return { ok: false, error: "Kata sandi baru melebihi batas maksimal 500 karakter." };
+  }
+  if (input.new_pin_recovery && input.new_pin_recovery.length > 500) {
+    return { ok: false, error: "PIN pemulihan baru melebihi batas maksimal 500 karakter." };
   }
 
   const keyRes = getVaultEncryptionKey();
@@ -542,11 +585,18 @@ export async function rotateSubscriptionPasswordAction(
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (fetchErr || !existing) {
+  if (fetchErr) {
     return {
       ok: false,
-      error: fetchErr?.message || "Akun langganan tidak ditemukan.",
+      error: sanitizeSafeError(
+        fetchErr,
+        "Gagal memuat data akun langganan.",
+        "vault/rotateFetch",
+      ),
     };
+  }
+  if (!existing) {
+    return { ok: false, error: "Akun langganan tidak ditemukan." };
   }
 
   const { data: encryptedPassword, error: encErr } = await supabase.rpc(
@@ -560,7 +610,11 @@ export async function rotateSubscriptionPasswordAction(
   if (encErr || !encryptedPassword) {
     return {
       ok: false,
-      error: encErr?.message || "Gagal mengenkripsi kata sandi baru.",
+      error: sanitizeSafeError(
+        encErr,
+        "Gagal mengenkripsi kata sandi baru.",
+        "vault/rotateEncryptPass",
+      ),
     };
   }
 
@@ -578,7 +632,11 @@ export async function rotateSubscriptionPasswordAction(
     if (pinErr) {
       return {
         ok: false,
-        error: pinErr.message || "Gagal mengenkripsi PIN pemulihan baru.",
+        error: sanitizeSafeError(
+          pinErr,
+          "Gagal mengenkripsi PIN pemulihan baru.",
+          "vault/rotateEncryptPin",
+        ),
       };
     }
     encryptedPin = pinData ?? null;
@@ -586,7 +644,11 @@ export async function rotateSubscriptionPasswordAction(
 
   let nextAssigned: Json | undefined;
   if (Array.isArray(input.remove_user_ids) && input.remove_user_ids.length > 0) {
-    const removeSet = new Set(input.remove_user_ids);
+    const removeSet = new Set(
+      input.remove_user_ids
+        .filter((id): id is string => isValidUuid(id))
+        .map((id) => id.trim()),
+    );
     const currentList = Array.isArray(existing.assigned_users_json)
       ? existing.assigned_users_json
       : [];
@@ -635,7 +697,11 @@ export async function rotateSubscriptionPasswordAction(
   if (updateErr) {
     return {
       ok: false,
-      error: updateErr.message || "Gagal merotasi kata sandi akun.",
+      error: sanitizeSafeError(
+        updateErr,
+        "Gagal merotasi kata sandi akun.",
+        "vault/rotateUpdate",
+      ),
     };
   }
 
@@ -652,7 +718,7 @@ export async function softDeleteSubscriptionAction(
 ): Promise<ActionResult<{ id: string }>> {
   const user = await requireAction("vault.manage");
 
-  if (!subId || !isValidUuid(subId)) {
+  if (!isValidUuid(subId)) {
     return { ok: false, error: "ID langganan tidak valid." };
   }
 
@@ -672,7 +738,11 @@ export async function softDeleteSubscriptionAction(
   if (error) {
     return {
       ok: false,
-      error: error.message || "Gagal menghapus akun langganan.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal menghapus akun langganan.",
+        "vault/softDelete",
+      ),
     };
   }
 

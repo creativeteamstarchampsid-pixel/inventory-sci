@@ -3,6 +3,14 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction, requireRouteAccess } from "@/lib/auth";
+import {
+  isSafeHttpUrl,
+  isValidUuid,
+  sanitizeOptionalText,
+  sanitizeSafeError,
+  sanitizeStoragePath,
+  sanitizeTextInput,
+} from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type { ArchivePhysicalStatus, LocationCode } from "@/types/database";
 
@@ -46,9 +54,6 @@ export type ArchiveVersionItem = {
   created_at: string;
 };
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 const VALID_CABINETS: readonly ArchiveCabinetCode[] = ["L01", "L02", "L03", "L04"];
 
 const VALID_PHYSICAL_STATUSES: readonly ArchivePhysicalStatus[] = [
@@ -57,47 +62,69 @@ const VALID_PHYSICAL_STATUSES: readonly ArchivePhysicalStatus[] = [
   "ARSIP_LAMA",
 ];
 
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
+const BLOCKED_EXTENSIONS = new Set([
+  "html",
+  "htm",
+  "svg",
+  "js",
+  "mjs",
+  "cjs",
+  "exe",
+  "bat",
+  "cmd",
+  "sh",
+  "ps1",
+  "php",
+  "msi",
+  "dll",
+  "scr",
+  "vbs",
+  "jar",
+]);
 
-function isValidUuid(value: string): boolean {
-  return UUID_REGEX.test(value.trim());
-}
-
-function normalizeOptionalText(value: string | null | undefined): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 
 function sanitizeFileName(name: string): string {
   const cleaned = name
     .trim()
     .replace(/\s+/g, "-")
-    .replace(/[^a-zA-Z0-9._-]/g, "");
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .replace(/\.{2,}/g, ".");
   return cleaned.slice(-100) || "dokumen-arsip";
 }
 
-function validateHttpUrl(value: string | null): boolean {
-  if (!value) return true;
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
+function validateDigitalFileReference(
+  raw: string | null | undefined,
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  const cleaned = sanitizeOptionalText(raw, 512);
+  if (!cleaned) return { ok: true, value: null };
+  if (/^https?:\/\//i.test(cleaned)) {
+    if (!isSafeHttpUrl(cleaned)) {
+      return { ok: false, error: "Tautan file digital tidak valid." };
+    }
+    return { ok: true, value: cleaned };
   }
+  const safePath = sanitizeStoragePath(cleaned, "docs/");
+  if (!safePath) {
+    return { ok: false, error: "Path file digital di storage tidak valid." };
+  }
+  return { ok: true, value: safePath };
 }
 
 function validateArchiveFields(input: CreateArchiveInput): string | null {
-  if (!input.title || input.title.trim().length === 0) {
+  const title = sanitizeTextInput(input.title, 200);
+  if (!title) {
     return "Judul dokumen arsip wajib diisi.";
   }
-  if (!input.category || input.category.trim().length === 0) {
+  const category = sanitizeTextInput(input.category, 100);
+  if (!category) {
     return "Kategori dokumen wajib diisi.";
   }
   if (!VALID_CABINETS.includes(input.cabinet_code)) {
     return "Kode lemari arsip harus L01, L02, L03, atau L04.";
   }
-  if (!input.drawer_no || input.drawer_no.trim().length === 0) {
+  const drawerNo = sanitizeTextInput(input.drawer_no, 50);
+  if (!drawerNo) {
     return "Nomor laci wajib diisi.";
   }
   if (!VALID_PHYSICAL_STATUSES.includes(input.physical_status)) {
@@ -110,9 +137,13 @@ function validateArchiveFields(input: CreateArchiveInput): string | null {
   ) {
     return "Peminjam arsip tidak valid.";
   }
-  const driveLink = normalizeOptionalText(input.drive_link);
-  if (driveLink && !validateHttpUrl(driveLink)) {
+  const driveLink = sanitizeOptionalText(input.drive_link, 2048);
+  if (driveLink && !isSafeHttpUrl(driveLink)) {
     return "Tautan Google Drive harus berupa URL valid (https://...).";
+  }
+  const fileRefCheck = validateDigitalFileReference(input.digital_file_url);
+  if (!fileRefCheck.ok) {
+    return fileRefCheck.error;
   }
   return null;
 }
@@ -127,9 +158,18 @@ export async function createArchiveUploadUrlAction(input: {
 }): Promise<ActionResult<{ path: string; token: string; originalName: string }>> {
   await requireAction("archive.manage");
 
-  const originalName = input.fileName?.trim();
+  const originalName = sanitizeTextInput(input.fileName, 255);
   if (!originalName) {
     return { ok: false, error: "Nama file tidak valid." };
+  }
+  const ext = originalName.includes(".")
+    ? originalName.split(".").pop()?.toLowerCase() ?? ""
+    : "";
+  if (ext && BLOCKED_EXTENSIONS.has(ext)) {
+    return {
+      ok: false,
+      error: "Tipe file ini diblokir demi keamanan (skrip/eksekutabel/SVG tidak diizinkan).",
+    };
   }
   if (
     typeof input.fileSize !== "number" ||
@@ -141,7 +181,7 @@ export async function createArchiveUploadUrlAction(input: {
   if (input.fileSize > MAX_UPLOAD_BYTES) {
     return {
       ok: false,
-      error: "Ukuran file melebihi batas maksimal 25 MB.",
+      error: "Ukuran file melebihi batas maksimal 10 MB.",
     };
   }
 
@@ -156,9 +196,11 @@ export async function createArchiveUploadUrlAction(input: {
   if (error || !data) {
     return {
       ok: false,
-      error:
-        error?.message ||
+      error: sanitizeSafeError(
+        error,
         "Gagal menyiapkan unggahan file ke bucket arsip privat.",
+        "archives/createUploadUrl",
+      ),
     };
   }
 
@@ -184,24 +226,32 @@ export async function getArchiveSignedUrlAction(input: {
   const user = await requireRouteAccess("/archives");
   await requireAction("archive.view");
 
-  if (!input.archiveId || !isValidUuid(input.archiveId)) {
+  if (!isValidUuid(input.archiveId)) {
     return { ok: false, error: "ID dokumen arsip tidak valid." };
   }
 
   const supabase = await createClient();
   const { data: archive, error: archiveErr } = await supabase
     .from("archives_hybrid")
-    .select("id, title, digital_file_url, digital_file_name")
+    .select("id, title, digital_file_url, digital_file_name, is_sop_public_to_staff")
     .eq("id", input.archiveId)
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (archiveErr || !archive) {
+  if (archiveErr) {
     return {
       ok: false,
-      error:
-        archiveErr?.message ||
-        "Dokumen arsip tidak ditemukan atau Anda tidak memiliki akses.",
+      error: sanitizeSafeError(
+        archiveErr,
+        "Gagal memuat dokumen arsip.",
+        "archives/getSignedUrl",
+      ),
+    };
+  }
+  if (!archive || (user.role === "STAFF" && !archive.is_sop_public_to_staff)) {
+    return {
+      ok: false,
+      error: "Dokumen arsip tidak ditemukan atau Anda tidak memiliki akses.",
     };
   }
 
@@ -219,11 +269,18 @@ export async function getArchiveSignedUrlAction(input: {
       .eq("archive_id", archive.id)
       .maybeSingle();
 
-    if (verErr || !versionRow) {
+    if (verErr) {
       return {
         ok: false,
-        error: verErr?.message || "Versi arsip tidak ditemukan.",
+        error: sanitizeSafeError(
+          verErr,
+          "Gagal memuat versi arsip.",
+          "archives/getSignedUrlVersion",
+        ),
       };
+    }
+    if (!versionRow) {
+      return { ok: false, error: "Versi arsip tidak ditemukan." };
     }
 
     if (
@@ -248,17 +305,25 @@ export async function getArchiveSignedUrlAction(input: {
     };
   }
 
-  if (targetUrl.startsWith("http://") || targetUrl.startsWith("https://")) {
+  if (/^https?:\/\//i.test(targetUrl)) {
+    if (!isSafeHttpUrl(targetUrl)) {
+      return { ok: false, error: "Tautan file digital tidak valid." };
+    }
     return {
       ok: true,
       data: { signedUrl: targetUrl, fileName: targetName },
     };
   }
 
+  const safePath = sanitizeStoragePath(targetUrl);
+  if (!safePath) {
+    return { ok: false, error: "Path file digital di storage tidak valid." };
+  }
+
   const { data: signedData, error: signErr } = await supabase.storage
     .from("archives")
     .createSignedUrl(
-      targetUrl,
+      safePath,
       120,
       input.download ? { download: targetName || true } : undefined,
     );
@@ -266,9 +331,11 @@ export async function getArchiveSignedUrlAction(input: {
   if (signErr || !signedData?.signedUrl) {
     return {
       ok: false,
-      error:
-        signErr?.message ||
+      error: sanitizeSafeError(
+        signErr,
         "Gagal membuat tautan unduhan sementara dari bucket privat.",
+        "archives/createSignedUrl",
+      ),
     };
   }
 
@@ -291,7 +358,7 @@ export async function getArchiveVersionsAction(
   const user = await requireRouteAccess("/archives");
   await requireAction("archive.view");
 
-  if (!archiveId || !isValidUuid(archiveId)) {
+  if (!isValidUuid(archiveId)) {
     return { ok: false, error: "ID dokumen arsip tidak valid." };
   }
 
@@ -309,7 +376,11 @@ export async function getArchiveVersionsAction(
   if (error) {
     return {
       ok: false,
-      error: error.message || "Gagal memuat riwayat versi dokumen.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memuat riwayat versi dokumen.",
+        "archives/getVersions",
+      ),
     };
   }
 
@@ -354,24 +425,27 @@ export async function createArchiveAction(
     return { ok: false, error: validationError };
   }
 
-  const fileUrl = normalizeOptionalText(input.digital_file_url);
-  const fileName = fileUrl ? normalizeOptionalText(input.digital_file_name) : null;
-  const driveLink = normalizeOptionalText(input.drive_link);
+  const fileRef = validateDigitalFileReference(input.digital_file_url);
+  if (!fileRef.ok) return fileRef;
+
+  const fileUrl = fileRef.value;
+  const fileName = fileUrl ? sanitizeOptionalText(input.digital_file_name, 255) : null;
+  const driveLink = sanitizeOptionalText(input.drive_link, 2048);
   const borrowedBy =
-    input.physical_status === "DIPINJAM"
-      ? normalizeOptionalText(input.borrowed_by)
+    input.physical_status === "DIPINJAM" && isValidUuid(input.borrowed_by)
+      ? input.borrowed_by.trim()
       : null;
 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("archives_hybrid")
     .insert({
-      title: input.title.trim(),
-      category: input.category.trim(),
-      branch_building: normalizeOptionalText(input.branch_building) ?? "Pusat",
+      title: sanitizeTextInput(input.title, 200),
+      category: sanitizeTextInput(input.category, 100),
+      branch_building: sanitizeOptionalText(input.branch_building, 100) ?? "Pusat",
       cabinet_code: input.cabinet_code,
-      drawer_no: input.drawer_no.trim(),
-      folder_code: normalizeOptionalText(input.folder_code),
+      drawer_no: sanitizeTextInput(input.drawer_no, 50),
+      folder_code: sanitizeOptionalText(input.folder_code, 50),
       physical_status: input.physical_status,
       borrowed_by: borrowedBy,
       digital_file_url: fileUrl,
@@ -379,7 +453,7 @@ export async function createArchiveAction(
       drive_link: driveLink,
       version_no: 1,
       is_sop_public_to_staff: Boolean(input.is_sop_public_to_staff),
-      notes: normalizeOptionalText(input.notes),
+      notes: sanitizeOptionalText(input.notes, 2000, { multiline: true }),
       created_by: user.id,
       updated_by: user.id,
     })
@@ -389,7 +463,11 @@ export async function createArchiveAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal menyimpan dokumen arsip.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal menyimpan dokumen arsip.",
+        "archives/create",
+      ),
     };
   }
 
@@ -407,7 +485,7 @@ export async function updateArchiveAction(
 ): Promise<ActionResult<{ id: string; doc_code: string; version_no: number }>> {
   const user = await requireAction("archive.manage");
 
-  if (!input.id || !isValidUuid(input.id)) {
+  if (!isValidUuid(input.id)) {
     return { ok: false, error: "ID dokumen arsip tidak valid." };
   }
 
@@ -415,6 +493,9 @@ export async function updateArchiveAction(
   if (validationError) {
     return { ok: false, error: validationError };
   }
+
+  const fileRef = validateDigitalFileReference(input.digital_file_url);
+  if (!fileRef.ok) return fileRef;
 
   const supabase = await createClient();
   const { data: existing, error: fetchErr } = await supabase
@@ -424,23 +505,31 @@ export async function updateArchiveAction(
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (fetchErr || !existing) {
+  if (fetchErr) {
     return {
       ok: false,
-      error:
-        fetchErr?.message ||
-        "Dokumen arsip tidak ditemukan atau sudah dihapus.",
+      error: sanitizeSafeError(
+        fetchErr,
+        "Gagal memuat dokumen arsip.",
+        "archives/updateFetch",
+      ),
+    };
+  }
+  if (!existing) {
+    return {
+      ok: false,
+      error: "Dokumen arsip tidak ditemukan atau sudah dihapus.",
     };
   }
 
-  const nextFileUrl = normalizeOptionalText(input.digital_file_url);
+  const nextFileUrl = fileRef.value;
   const nextFileName = nextFileUrl
-    ? normalizeOptionalText(input.digital_file_name)
+    ? sanitizeOptionalText(input.digital_file_name, 255)
     : null;
-  const nextDriveLink = normalizeOptionalText(input.drive_link);
+  const nextDriveLink = sanitizeOptionalText(input.drive_link, 2048);
 
-  const prevFileUrl = normalizeOptionalText(existing.digital_file_url);
-  const prevDriveLink = normalizeOptionalText(existing.drive_link);
+  const prevFileUrl = sanitizeOptionalText(existing.digital_file_url, 512);
+  const prevDriveLink = sanitizeOptionalText(existing.drive_link, 2048);
 
   const hasDigitalChange =
     nextFileUrl !== prevFileUrl || nextDriveLink !== prevDriveLink;
@@ -448,7 +537,9 @@ export async function updateArchiveAction(
   let nextVersionNo = existing.version_no;
 
   if (hasDigitalChange) {
-    const rawChangeNote = normalizeOptionalText(input.change_notes);
+    const rawChangeNote = sanitizeOptionalText(input.change_notes, 500, {
+      multiline: true,
+    });
     const { error: verErr } = await supabase.from("archive_versions").insert({
       archive_id: existing.id,
       version_no: existing.version_no,
@@ -463,9 +554,11 @@ export async function updateArchiveAction(
     if (verErr) {
       return {
         ok: false,
-        error:
-          verErr.message ||
+        error: sanitizeSafeError(
+          verErr,
           "Gagal mencatat versi sebelumnya ke riwayat versi.",
+          "archives/insertVersion",
+        ),
       };
     }
 
@@ -473,19 +566,19 @@ export async function updateArchiveAction(
   }
 
   const borrowedBy =
-    input.physical_status === "DIPINJAM"
-      ? normalizeOptionalText(input.borrowed_by)
+    input.physical_status === "DIPINJAM" && isValidUuid(input.borrowed_by)
+      ? input.borrowed_by.trim()
       : null;
 
   const { data: updated, error: updErr } = await supabase
     .from("archives_hybrid")
     .update({
-      title: input.title.trim(),
-      category: input.category.trim(),
-      branch_building: normalizeOptionalText(input.branch_building) ?? "Pusat",
+      title: sanitizeTextInput(input.title, 200),
+      category: sanitizeTextInput(input.category, 100),
+      branch_building: sanitizeOptionalText(input.branch_building, 100) ?? "Pusat",
       cabinet_code: input.cabinet_code,
-      drawer_no: input.drawer_no.trim(),
-      folder_code: normalizeOptionalText(input.folder_code),
+      drawer_no: sanitizeTextInput(input.drawer_no, 50),
+      folder_code: sanitizeOptionalText(input.folder_code, 50),
       physical_status: input.physical_status,
       borrowed_by: borrowedBy,
       digital_file_url: nextFileUrl,
@@ -493,7 +586,7 @@ export async function updateArchiveAction(
       drive_link: nextDriveLink,
       version_no: nextVersionNo,
       is_sop_public_to_staff: Boolean(input.is_sop_public_to_staff),
-      notes: normalizeOptionalText(input.notes),
+      notes: sanitizeOptionalText(input.notes, 2000, { multiline: true }),
       updated_by: user.id,
     })
     .eq("id", existing.id)
@@ -504,7 +597,11 @@ export async function updateArchiveAction(
   if (updErr || !updated) {
     return {
       ok: false,
-      error: updErr?.message || "Gagal memperbarui dokumen arsip.",
+      error: sanitizeSafeError(
+        updErr,
+        "Gagal memperbarui dokumen arsip.",
+        "archives/update",
+      ),
     };
   }
 
@@ -523,7 +620,7 @@ export async function updateArchivePhysicalStatusAction(input: {
 }): Promise<ActionResult<{ id: string }>> {
   const user = await requireAction("archive.manage");
 
-  if (!input.id || !isValidUuid(input.id)) {
+  if (!isValidUuid(input.id)) {
     return { ok: false, error: "ID dokumen arsip tidak valid." };
   }
   if (!VALID_PHYSICAL_STATUSES.includes(input.physical_status)) {
@@ -538,8 +635,8 @@ export async function updateArchivePhysicalStatusAction(input: {
   }
 
   const borrowedBy =
-    input.physical_status === "DIPINJAM"
-      ? normalizeOptionalText(input.borrowed_by)
+    input.physical_status === "DIPINJAM" && isValidUuid(input.borrowed_by)
+      ? input.borrowed_by.trim()
       : null;
 
   const supabase = await createClient();
@@ -558,7 +655,11 @@ export async function updateArchivePhysicalStatusAction(input: {
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal memperbarui status fisik arsip.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal memperbarui status fisik arsip.",
+        "archives/updateStatus",
+      ),
     };
   }
 
@@ -574,7 +675,7 @@ export async function softDeleteArchiveAction(
 ): Promise<ActionResult<{ id: string }>> {
   const user = await requireAction("archive.manage");
 
-  if (!archiveId || !isValidUuid(archiveId)) {
+  if (!isValidUuid(archiveId)) {
     return { ok: false, error: "ID dokumen arsip tidak valid." };
   }
 
@@ -594,7 +695,11 @@ export async function softDeleteArchiveAction(
   if (error) {
     return {
       ok: false,
-      error: error.message || "Gagal menghapus dokumen arsip.",
+      error: sanitizeSafeError(
+        error,
+        "Gagal menghapus dokumen arsip.",
+        "archives/softDelete",
+      ),
     };
   }
 

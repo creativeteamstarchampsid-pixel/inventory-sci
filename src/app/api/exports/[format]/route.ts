@@ -9,6 +9,7 @@ import {
 import { generatePdfBuffer } from "@/lib/exports/pdf";
 import { generateXlsxBuffer } from "@/lib/exports/xlsx";
 import { can, isRole } from "@/lib/rbac";
+import { isValidPeriodYm, sanitizeSafeError } from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -64,7 +65,7 @@ export async function GET(
     !can(profile.role, "export.data")
   ) {
     return NextResponse.json(
-      { error: "Akses ditolak: Anda tidak memiliki izin export.data." },
+      { error: "Akses ditolak: Anda tidak memiliki izin untuk mengekspor data." },
       { status: 403 },
     );
   }
@@ -85,7 +86,15 @@ export async function GET(
     );
   }
 
-  const periodParam = request.nextUrl.searchParams.get("period") ?? undefined;
+  const rawPeriod = request.nextUrl.searchParams.get("period")?.trim();
+  if (rawPeriod && !isValidPeriodYm(rawPeriod)) {
+    return NextResponse.json(
+      { error: "Format periode tidak valid. Gunakan format YYYY-MM." },
+      { status: 400 },
+    );
+  }
+  const periodParam = rawPeriod || undefined;
+
   const actorName =
     profile.full_name?.trim() ||
     profile.email ||
@@ -115,22 +124,27 @@ export async function GET(
       },
     });
 
+    const safePeriod = isValidPeriodYm(dataset.periodCode)
+      ? dataset.periodCode
+      : "latest";
+
     if (format === "csv") {
       const csv = generateCsvString(dataset, scope);
-      const filename = `starops-${scope}-${dataset.periodCode}.csv`;
+      const filename = `starops-${scope}-${safePeriod}.csv`;
       return new NextResponse(csv, {
         status: 200,
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
           "Content-Disposition": `attachment; filename="${filename}"`,
           "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
         },
       });
     }
 
     if (format === "xlsx") {
       const buffer = await generateXlsxBuffer(dataset);
-      const filename = `starops-laporan-${dataset.periodCode}.xlsx`;
+      const filename = `starops-laporan-${safePeriod}.xlsx`;
       return new NextResponse(new Uint8Array(buffer), {
         status: 200,
         headers: {
@@ -138,23 +152,32 @@ export async function GET(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           "Content-Disposition": `attachment; filename="${filename}"`,
           "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
         },
       });
     }
 
     const pdfBuffer = await generatePdfBuffer(dataset);
-    const filename = `starops-laporan-bulanan-${dataset.periodCode}.pdf`;
+    const filename = `starops-laporan-bulanan-${safePeriod}.pdf`;
     return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Gagal memproses ekspor data.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: sanitizeSafeError(
+          err,
+          "Gagal memproses ekspor data.",
+          "api/exports",
+        ),
+      },
+      { status: 500 },
+    );
   }
 }

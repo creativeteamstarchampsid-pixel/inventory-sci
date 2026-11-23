@@ -8,6 +8,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+function sanitizeClientNextPath(raw: string | undefined): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 512) return "";
+  if (/[\u0000-\u001f\u007f\\]/.test(trimmed)) return "";
+  if (!/^\/(?!\/|\\)/.test(trimmed)) return "";
+  if (
+    trimmed === "/" ||
+    trimmed === "/login" ||
+    trimmed.startsWith("/login/") ||
+    trimmed === "/auth" ||
+    trimmed.startsWith("/auth/")
+  ) {
+    return "";
+  }
+  return trimmed;
+}
+
 export function LoginForm({
   next,
   configured,
@@ -24,6 +42,7 @@ export function LoginForm({
   const [focusedField, setFocusedField] = useState<"none" | "email" | "password">("none");
   const [showPassword, setShowPassword] = useState(false);
 
+  const safeNext = sanitizeClientNextPath(next);
   const isCoveringEyes = focusedField === "password";
   const isLookingDown = focusedField === "email";
 
@@ -203,7 +222,7 @@ export function LoginForm({
             </div>
           )}
 
-          <input type="hidden" name="next" value={next ?? ""} />
+          <input type="hidden" name="next" value={safeNext} />
 
           <div className="space-y-1.5">
             <Label htmlFor="email" className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
@@ -214,6 +233,7 @@ export function LoginForm({
               name="email"
               type="email"
               autoComplete="email"
+              maxLength={254}
               placeholder="nama@starchamps.id"
               defaultValue={state.email}
               required
@@ -237,6 +257,7 @@ export function LoginForm({
                 name="password"
                 type={showPassword ? "text" : "password"}
                 autoComplete="current-password"
+                maxLength={128}
                 placeholder="Masukkan kata sandi"
                 required
                 disabled={pending}
@@ -249,6 +270,7 @@ export function LoginForm({
                 onClick={() => setShowPassword((prev) => !prev)}
                 className="absolute top-1/2 right-3 -translate-y-1/2 rounded-md p-1 text-slate-500 hover:bg-slate-200/60 hover:text-slate-900"
                 title={showPassword ? "Sembunyikan kata sandi" : "Lihat kata sandi"}
+                aria-label={showPassword ? "Sembunyikan kata sandi" : "Lihat kata sandi"}
               >
                 {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>

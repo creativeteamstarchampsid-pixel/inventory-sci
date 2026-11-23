@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ImagePlus, Loader2, PackagePlus, Plus, Trash2 } from "lucide-react";
+import { ImagePlus, Loader2, PackagePlus, Plus, ShieldCheck, Trash2 } from "lucide-react";
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -43,6 +43,11 @@ import {
   THERAPY_CATEGORIES,
 } from "@/lib/constants";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
+import {
+  formatBytes,
+  prepareSecureImageUpload,
+  sanitizeStorageFilename,
+} from "@/lib/upload-security";
 import type {
   AssetType,
   CodeCategoryPrefix,
@@ -73,8 +78,6 @@ type DeliveryFormDialogProps = {
     updatedProofSignedUrl?: string | null,
   ) => void;
 };
-
-const MAX_PROOF_BYTES = 5 * 1024 * 1024;
 
 export function DeliveryFormDialog({
   open,
@@ -111,6 +114,8 @@ export function DeliveryFormDialog({
   const [pickerItemId, setPickerItemId] = useState<string>("");
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
+  const [isScanningProof, setIsScanningProof] = useState<boolean>(false);
+  const [proofSecurityNote, setProofSecurityNote] = useState<string | null>(null);
   const [removeExistingProof, setRemoveExistingProof] =
     useState<boolean>(false);
 
@@ -121,6 +126,7 @@ export function DeliveryFormDialog({
     if (!open) return;
     setErrorMsg(null);
     setProofFile(null);
+    setProofSecurityNote(null);
     setRemoveExistingProof(false);
     setPickerItemId("");
 
@@ -178,23 +184,39 @@ export function DeliveryFormDialog({
     };
   }, [proofPreviewUrl]);
 
-  function handleProofFileChange(file: File | null) {
+  async function handleProofFileChange(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const inputEl = event.target;
+    const file = inputEl.files?.[0] ?? null;
     if (!file) return;
-    if (file.size > MAX_PROOF_BYTES) {
-      setErrorMsg("Ukuran foto bukti maksimal 5 MB.");
-      return;
-    }
-    if (!file.type.startsWith("image/")) {
-      setErrorMsg(
-        "File bukti foto harus berupa gambar (JPG, PNG, WebP, GIF).",
-      );
-      return;
-    }
+
     setErrorMsg(null);
-    setProofFile(file);
-    setRemoveExistingProof(false);
-    const localUrl = URL.createObjectURL(file);
-    setProofPreviewUrl(localUrl);
+    setIsScanningProof(true);
+    try {
+      const prepared = await prepareSecureImageUpload(file);
+      if (!prepared.ok) {
+        inputEl.value = "";
+        setErrorMsg(prepared.error);
+        showError({
+          title: "Foto Bukti Ditolak 🛡️",
+          message: prepared.error,
+        });
+        return;
+      }
+
+      setProofFile(prepared.file);
+      setRemoveExistingProof(false);
+      const localUrl = URL.createObjectURL(prepared.file);
+      setProofPreviewUrl(localUrl);
+      const note =
+        prepared.compressedBytes < prepared.originalBytes
+          ? `Lolos scan keamanan · Dikompresi ${formatBytes(prepared.originalBytes)} → ${formatBytes(prepared.compressedBytes)} (EXIF dibersihkan)`
+          : `Lolos scan keamanan · ${formatBytes(prepared.compressedBytes)} (EXIF dibersihkan)`;
+      setProofSecurityNote(note);
+    } finally {
+      setIsScanningProof(false);
+    }
   }
 
   function updatePayloadItem(
@@ -324,10 +346,12 @@ export function DeliveryFormDialog({
       }
 
       if (proofFile) {
+        const safeProofName = sanitizeStorageFilename(proofFile.name, "proof");
+        const safeProofMime = proofFile.type || "image/webp";
         const signRes = await createDeliveryProofUploadUrlAction(
           savedDelivery.id,
-          proofFile.name,
-          proofFile.type,
+          safeProofName,
+          safeProofMime,
         );
         if (!signRes.ok) {
           const msg = `Data pengiriman tersimpan (${savedDelivery.delivery_code}), tetapi gagal mengunggah bukti foto: ${signRes.error}`;
@@ -345,7 +369,7 @@ export function DeliveryFormDialog({
         const { error: uploadErr } = await browserSupabase.storage
           .from("delivery-proofs")
           .uploadToSignedUrl(signRes.data.path, signRes.data.token, proofFile, {
-            contentType: proofFile.type,
+            contentType: safeProofMime,
           });
 
         if (uploadErr) {
@@ -983,23 +1007,36 @@ export function DeliveryFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label className="font-bold">
-                Foto Bukti Pengiriman / Penerimaan (Private Bucket)
-              </Label>
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <Label className="font-bold">
+                  Foto Bukti Pengiriman / Penerimaan (Private Bucket)
+                </Label>
+                <span className="inline-flex items-center gap-1 rounded-full border-[1.5px] border-[#2C2623] bg-[#D1FAE5] px-2 py-0.5 text-[10px] font-extrabold text-[#14532D] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-emerald-400/50 dark:bg-emerald-950/70 dark:text-emerald-200 dark:shadow-none">
+                  <ShieldCheck className="size-3" />
+                  Scan &amp; Kompresi Otomatis
+                </span>
+              </div>
               <div className="flex flex-col gap-2 rounded-2xl border-2 border-dashed border-[#2C2623]/60 bg-[#FAF5FF]/70 p-3.5 dark:border-stone-600 dark:bg-violet-950/15">
                 <div className="flex flex-wrap items-center gap-2">
                   <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#EDE9FE] px-3 py-1.5 text-xs font-bold text-[#4C1D95] shadow-[2px_2px_0px_0px_#2C2623] transition-colors hover:bg-[#DDD6FE] dark:border-violet-400/50 dark:bg-violet-950/60 dark:text-violet-100">
-                    <ImagePlus className="size-3.5" />
+                    {isScanningProof ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <ImagePlus className="size-3.5" />
+                    )}
                     <span>
-                      {proofPreviewUrl ? "Ganti Foto" : "Pilih Foto Bukti"}
+                      {isScanningProof
+                        ? "Memindai & Mengompresi..."
+                        : proofPreviewUrl
+                          ? "Ganti Foto"
+                          : "Pilih Foto Bukti"}
                     </span>
                     <input
                       type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      accept="image/jpeg,image/png,image/webp"
                       className="hidden"
-                      onChange={(e) =>
-                        handleProofFileChange(e.target.files?.[0] ?? null)
-                      }
+                      disabled={submitting || isScanningProof}
+                      onChange={handleProofFileChange}
                     />
                   </label>
                   {proofPreviewUrl && (
@@ -1007,9 +1044,11 @@ export function DeliveryFormDialog({
                       type="button"
                       variant="ghost"
                       size="sm"
+                      disabled={submitting || isScanningProof}
                       onClick={() => {
                         setProofFile(null);
                         setProofPreviewUrl(null);
+                        setProofSecurityNote(null);
                         setRemoveExistingProof(true);
                       }}
                       className="text-destructive h-7 rounded-xl text-xs hover:bg-[#FFE4E6]"
@@ -1018,6 +1057,12 @@ export function DeliveryFormDialog({
                     </Button>
                   )}
                 </div>
+                {proofSecurityNote && (
+                  <p className="inline-flex items-center gap-1 text-[11px] font-bold text-[#14532D] dark:text-emerald-300">
+                    <ShieldCheck className="size-3.5 shrink-0" />
+                    {proofSecurityNote}
+                  </p>
+                )}
                 {proofPreviewUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -1027,8 +1072,9 @@ export function DeliveryFormDialog({
                   />
                 ) : (
                   <p className="text-muted-foreground text-xs">
-                    Format JPG, PNG, WebP, atau GIF (maks. 5 MB). Disimpan aman
-                    di bucket privat <code>delivery-proofs</code>.
+                    Format asli JPG, PNG, atau WebP (maks. 5 MB). Dipindai
+                    magic-byte, EXIF dibersihkan &amp; dikompresi otomatis ke
+                    bucket privat <code>delivery-proofs</code>.
                   </p>
                 )}
               </div>
@@ -1040,16 +1086,16 @@ export function DeliveryFormDialog({
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
-              disabled={submitting}
+              disabled={submitting || isScanningProof}
             >
               Batal
             </Button>
             <Button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || isScanningProof}
               className="rounded-xl border-2 border-[#2C2623] bg-[#FF9E6D] font-extrabold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#FF8C54] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none"
             >
-              {submitting && <Loader2 className="size-4 animate-spin" />}
+              {(submitting || isScanningProof) && <Loader2 className="size-4 animate-spin" />}
               {isEditing ? "Simpan Perubahan" : "Simpan Pengiriman"}
             </Button>
           </DialogFooter>

@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
 import { can } from "@/lib/rbac";
+import {
+  isValidUuid,
+  sanitizeSafeError,
+  sanitizeTextInput,
+} from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type { InternalRequest, RequestType } from "@/types/database";
 
@@ -28,8 +33,6 @@ export type RequestActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 const VALID_REQUEST_TYPES = new Set<RequestType>([
   "PENGADAAN_BARANG",
   "LAPORAN_KERUSAKAN",
@@ -42,7 +45,7 @@ function normalizeUuidOrNull(val: string | null | undefined): string | null {
   if (typeof val !== "string") return null;
   const trimmed = val.trim();
   if (!trimmed) return null;
-  return UUID_RE.test(trimmed) ? trimmed : null;
+  return isValidUuid(trimmed) ? trimmed : null;
 }
 
 function validateEstimatedCost(
@@ -98,12 +101,12 @@ export async function createRequestAction(
     };
   }
 
-  const title = input.title?.trim() ?? "";
+  const title = sanitizeTextInput(input.title, 200);
   if (title.length < 3) {
     return { ok: false, error: "Judul pengajuan minimal 3 karakter." };
   }
 
-  const description = input.description?.trim() ?? "";
+  const description = sanitizeTextInput(input.description, 3000, { multiline: true });
   if (description.length < 5) {
     return { ok: false, error: "Deskripsi / alasan pengajuan minimal 5 karakter." };
   }
@@ -144,7 +147,11 @@ export async function createRequestAction(
     if (error || !data) {
       return {
         ok: false,
-        error: error?.message || "Gagal membuat tiket pengajuan.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal membuat tiket pengajuan.",
+          "requests/create",
+        ),
       };
     }
 
@@ -153,7 +160,7 @@ export async function createRequestAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "requests/createCatch"),
     };
   }
 }
@@ -164,16 +171,16 @@ export async function updateRequestAction(
 ): Promise<RequestActionResult<{ request: InternalRequest }>> {
   const user = await requireAction("request.create");
 
-  if (!UUID_RE.test(requestId)) {
+  if (!isValidUuid(requestId)) {
     return { ok: false, error: "ID tiket tidak valid." };
   }
 
-  const title = input.title?.trim() ?? "";
+  const title = sanitizeTextInput(input.title, 200);
   if (title.length < 3) {
     return { ok: false, error: "Judul pengajuan minimal 3 karakter." };
   }
 
-  const description = input.description?.trim() ?? "";
+  const description = sanitizeTextInput(input.description, 3000, { multiline: true });
   if (description.length < 5) {
     return { ok: false, error: "Deskripsi pengajuan minimal 5 karakter." };
   }
@@ -190,6 +197,9 @@ export async function updateRequestAction(
   const relatedSubId = allowSubLink
     ? normalizeUuidOrNull(input.related_sub_id)
     : undefined;
+  if (allowSubLink && input.related_sub_id && !relatedSubId) {
+    return { ok: false, error: "ID akun langganan terkait tidak valid." };
+  }
 
   try {
     const supabase = await createClient();
@@ -241,7 +251,11 @@ export async function updateRequestAction(
     if (error || !data) {
       return {
         ok: false,
-        error: error?.message || "Gagal memperbarui tiket pengajuan.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal memperbarui tiket pengajuan.",
+          "requests/update",
+        ),
       };
     }
 
@@ -250,7 +264,7 @@ export async function updateRequestAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "requests/updateCatch"),
     };
   }
 }
@@ -261,7 +275,7 @@ export async function approveRequestAction(
 ): Promise<RequestActionResult<{ request: InternalRequest }>> {
   const user = await requireAction("request.approve");
 
-  if (!UUID_RE.test(requestId)) {
+  if (!isValidUuid(requestId)) {
     return { ok: false, error: "ID tiket tidak valid." };
   }
 
@@ -284,7 +298,7 @@ export async function approveRequestAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "requests/approveFetch"),
     };
   }
 
@@ -316,7 +330,11 @@ export async function approveRequestAction(
       if (error || !data) {
         return {
           ok: false,
-          error: error?.message || "Gagal menyetujui tahap Team Leader.",
+          error: sanitizeSafeError(
+            error,
+            "Gagal menyetujui tahap Team Leader.",
+            "requests/approveStage1",
+          ),
         };
       }
 
@@ -370,7 +388,11 @@ export async function approveRequestAction(
       if (error || !data) {
         return {
           ok: false,
-          error: error?.message || "Gagal memverifikasi tiket tahap Admin.",
+          error: sanitizeSafeError(
+            error,
+            "Gagal memverifikasi tiket tahap Admin.",
+            "requests/approveStage2",
+          ),
         };
       }
 
@@ -397,7 +419,11 @@ export async function approveRequestAction(
       if (error || !data) {
         return {
           ok: false,
-          error: error?.message || "Gagal mengesahkan persetujuan akhir Owner.",
+          error: sanitizeSafeError(
+            error,
+            "Gagal mengesahkan persetujuan akhir Owner.",
+            "requests/approveStage3",
+          ),
         };
       }
 
@@ -412,7 +438,7 @@ export async function approveRequestAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "requests/approveCatch"),
     };
   }
 }
@@ -423,11 +449,11 @@ export async function rejectRequestAction(
 ): Promise<RequestActionResult<{ request: InternalRequest }>> {
   const user = await requireAction("request.approve");
 
-  if (!UUID_RE.test(requestId)) {
+  if (!isValidUuid(requestId)) {
     return { ok: false, error: "ID tiket tidak valid." };
   }
 
-  const reason = rejectionReason?.trim() ?? "";
+  const reason = sanitizeTextInput(rejectionReason, 1000, { multiline: true });
   if (reason.length < 3) {
     return {
       ok: false,
@@ -454,7 +480,7 @@ export async function rejectRequestAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "requests/rejectFetch"),
     };
   }
 
@@ -500,7 +526,11 @@ export async function rejectRequestAction(
     if (error || !data) {
       return {
         ok: false,
-        error: error?.message || "Gagal menolak tiket pengajuan.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal menolak tiket pengajuan.",
+          "requests/reject",
+        ),
       };
     }
 
@@ -509,7 +539,7 @@ export async function rejectRequestAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "requests/rejectCatch"),
     };
   }
 }
@@ -519,7 +549,7 @@ export async function completeRequestAction(
 ): Promise<RequestActionResult<{ request: InternalRequest }>> {
   await requireAction("request.complete");
 
-  if (!UUID_RE.test(requestId)) {
+  if (!isValidUuid(requestId)) {
     return { ok: false, error: "ID tiket tidak valid." };
   }
 
@@ -555,7 +585,11 @@ export async function completeRequestAction(
     if (error || !data) {
       return {
         ok: false,
-        error: error?.message || "Gagal menyelesaikan tiket pengajuan.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal menyelesaikan tiket pengajuan.",
+          "requests/complete",
+        ),
       };
     }
 
@@ -564,7 +598,7 @@ export async function completeRequestAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "requests/completeCatch"),
     };
   }
 }
@@ -574,7 +608,7 @@ export async function softDeleteRequestAction(
 ): Promise<RequestActionResult<{ id: string }>> {
   const user = await requireAction("request.delete");
 
-  if (!UUID_RE.test(requestId)) {
+  if (!isValidUuid(requestId)) {
     return { ok: false, error: "ID tiket tidak valid." };
   }
 
@@ -591,11 +625,18 @@ export async function softDeleteRequestAction(
       .select("id")
       .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
       return {
         ok: false,
-        error: error?.message || "Tiket tidak ditemukan atau sudah dihapus.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal menghapus tiket pengajuan.",
+          "requests/softDelete",
+        ),
       };
+    }
+    if (!data) {
+      return { ok: false, error: "Tiket tidak ditemukan atau sudah dihapus." };
     }
 
     revalidateRequestPaths();
@@ -604,7 +645,7 @@ export async function softDeleteRequestAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "requests/softDeleteCatch"),
     };
   }
 }

@@ -4,6 +4,14 @@ import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
 import { can, type Role } from "@/lib/rbac";
+import {
+  isSafeHttpUrl,
+  isValidUuid,
+  sanitizeOptionalText,
+  sanitizeSafeError,
+  sanitizeStoragePath,
+  sanitizeTextInput,
+} from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type {
   BorrowTransaction,
@@ -37,9 +45,6 @@ export type ScanLookupResult =
       recentBorrows: BorrowHistoryEntry[];
       canReturnActiveBorrow: boolean;
     };
-
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const VALID_LOCATIONS: readonly LocationCode[] = [
   "R01",
@@ -78,12 +83,6 @@ function getWibDateString(offsetDays = 0): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(date);
 }
 
-function cleanOptionalText(value: string | null | undefined): string | null {
-  if (value === undefined || value === null) return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
 function sanitizeItemForRole(item: ItemMaster, role: Role): ItemMaster {
   if (can(role, "inventory.view_valuation")) return item;
   return {
@@ -100,7 +99,7 @@ type ParsedScanToken =
   | { mode: "code"; value: string; display: string };
 
 function parseScannedToken(rawInput: string): ParsedScanToken | null {
-  const trimmed = rawInput.replace(/[\r\n\t]+/g, " ").trim();
+  const trimmed = sanitizeTextInput(rawInput, 500);
   if (!trimmed) return null;
 
   // Handle full URLs or relative URLs e.g. https://.../inventory/<uuid> or /inventory/<uuid>
@@ -113,7 +112,7 @@ function parseScannedToken(rawInput: string): ParsedScanToken | null {
       }
 
       const invMatch = parsed.pathname.match(
-        /\/inventory\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+        /\/inventory\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/i,
       );
       if (invMatch?.[1]) {
         return { mode: "item_id", value: invMatch[1].toLowerCase(), display: trimmed };
@@ -122,7 +121,7 @@ function parseScannedToken(rawInput: string): ParsedScanToken | null {
       const segments = parsed.pathname.split("/").filter(Boolean);
       const last = segments[segments.length - 1];
       if (last) {
-        if (UUID_REGEX.test(last)) {
+        if (isValidUuid(String(last))) {
           return { mode: "item_id", value: last.toLowerCase(), display: trimmed };
         }
         return { mode: "code", value: last.toUpperCase(), display: last };
@@ -132,7 +131,7 @@ function parseScannedToken(rawInput: string): ParsedScanToken | null {
     }
   }
 
-  if (UUID_REGEX.test(trimmed)) {
+  if (isValidUuid(String(trimmed))) {
     return { mode: "item_id", value: trimmed.toLowerCase(), display: trimmed };
   }
 
@@ -263,12 +262,17 @@ export async function lookupScanTargetAction(
     let photoSignedUrl: string | null = null;
     if (matchedItem.photo_url) {
       if (/^https?:\/\//i.test(matchedItem.photo_url)) {
-        photoSignedUrl = matchedItem.photo_url;
+        photoSignedUrl = isSafeHttpUrl(matchedItem.photo_url)
+          ? matchedItem.photo_url
+          : null;
       } else {
-        const { data: signed } = await supabase.storage
-          .from("inventory-photos")
-          .createSignedUrl(matchedItem.photo_url, 3600);
-        photoSignedUrl = signed?.signedUrl ?? null;
+        const safePath = sanitizeStoragePath(matchedItem.photo_url);
+        if (safePath) {
+          const { data: signed } = await supabase.storage
+            .from("inventory-photos")
+            .createSignedUrl(safePath, 3600);
+          photoSignedUrl = signed?.signedUrl ?? null;
+        }
       }
     }
 
@@ -331,7 +335,7 @@ export async function lookupScanTargetAction(
 
   return {
     ok: false,
-    error: `Kode "${parsed.display}" tidak ditemukan pada inventaris maupun kit aktif.`,
+    error: `Kode "${parsed.display.slice(0, 80)}" tidak ditemukan pada inventaris maupun kit aktif.`,
   };
 }
 
@@ -342,12 +346,17 @@ export async function borrowItemViaScanAction(input: {
   notes?: string | null;
 }): Promise<ActionResult<{ transaction: BorrowTransaction; item: ItemMaster }>> {
   const user = await requireAction("scan.borrow_return");
-  if (!input.itemId) {
+  if (!isValidUuid(input.itemId)) {
     return { ok: false, error: "ID item tidak valid." };
   }
 
   if (input.roomCode && !VALID_LOCATIONS.includes(input.roomCode)) {
     return { ok: false, error: "Kode ruangan tujuan tidak valid." };
+  }
+
+  const dueAtClean = sanitizeOptionalText(input.dueAt, 40);
+  if (dueAtClean && Number.isNaN(Date.parse(dueAtClean))) {
+    return { ok: false, error: "Format batas waktu pengembalian tidak valid." };
   }
 
   const supabase = await createClient();
@@ -394,8 +403,8 @@ export async function borrowItemViaScanAction(input: {
       parts_before: item.current_parts,
       status: "DIPINJAM",
       borrowed_at: new Date().toISOString(),
-      due_at: cleanOptionalText(input.dueAt),
-      notes: cleanOptionalText(input.notes),
+      due_at: dueAtClean,
+      notes: sanitizeOptionalText(input.notes, 1000, { multiline: true }),
     })
     .select("*")
     .single();
@@ -403,7 +412,11 @@ export async function borrowItemViaScanAction(input: {
   if (trxErr || !transaction) {
     return {
       ok: false,
-      error: trxErr?.message || "Gagal mencatat transaksi peminjaman.",
+      error: sanitizeSafeError(
+        trxErr,
+        "Gagal mencatat transaksi peminjaman.",
+        "scan/borrowItem",
+      ),
     };
   }
 
@@ -424,8 +437,11 @@ export async function returnItemViaScanAction(input: {
   notes?: string | null;
 }): Promise<ActionResult<{ transaction: BorrowTransaction | null; item: ItemMaster }>> {
   const user = await requireAction("scan.borrow_return");
-  if (!input.itemId) {
+  if (!isValidUuid(input.itemId)) {
     return { ok: false, error: "ID item tidak valid." };
+  }
+  if (input.transactionId && !isValidUuid(input.transactionId)) {
+    return { ok: false, error: "ID transaksi peminjaman tidak valid." };
   }
   if (!VALID_HYGIENE_STATUSES.includes(input.hygieneStatus)) {
     return { ok: false, error: "Status sanitasi tidak valid." };
@@ -457,6 +473,7 @@ export async function returnItemViaScanAction(input: {
         .select("*")
         .eq("id", input.transactionId)
         .eq("item_id", item.id)
+        .in("status", ["DIPINJAM", "TERLAMBAT"])
         .maybeSingle()
     : supabase
         .from("borrow_transactions")
@@ -526,13 +543,17 @@ export async function returnItemViaScanAction(input: {
   if (updateItemErr || !updatedItem) {
     return {
       ok: false,
-      error: updateItemErr?.message || "Gagal memperbarui kondisi dan kebersihan item.",
+      error: sanitizeSafeError(
+        updateItemErr,
+        "Gagal memperbarui kondisi dan kebersihan item.",
+        "scan/returnItemUpdate",
+      ),
     };
   }
 
   let updatedBorrow: BorrowTransaction | null = null;
   if (activeBorrow) {
-    const returnNote = cleanOptionalText(input.notes);
+    const returnNote = sanitizeOptionalText(input.notes, 1000, { multiline: true });
     const mergedNotes = returnNote
       ? activeBorrow.notes
         ? `${activeBorrow.notes} | Kembali: ${returnNote}`
@@ -549,13 +570,18 @@ export async function returnItemViaScanAction(input: {
         notes: mergedNotes,
       })
       .eq("id", activeBorrow.id)
+      .in("status", ["DIPINJAM", "TERLAMBAT"])
       .select("*")
       .single();
 
     if (trxErr) {
       return {
         ok: false,
-        error: trxErr.message || "Gagal memperbarui status transaksi pengembalian.",
+        error: sanitizeSafeError(
+          trxErr,
+          "Gagal memperbarui status transaksi pengembalian.",
+          "scan/returnTrxUpdate",
+        ),
       };
     }
     updatedBorrow = trxData;
@@ -583,7 +609,7 @@ export async function quickStockOpnameAction(input: {
   notes?: string | null;
 }): Promise<ActionResult<ItemMaster>> {
   const user = await requireAction("inventory.validate_opname");
-  if (!input.itemId) {
+  if (!isValidUuid(input.itemId)) {
     return { ok: false, error: "ID item tidak valid." };
   }
   if (!VALID_HYGIENE_STATUSES.includes(input.hygieneStatus)) {
@@ -684,11 +710,15 @@ export async function quickStockOpnameAction(input: {
   if (updateErr || !updatedItem) {
     return {
       ok: false,
-      error: updateErr?.message || "Gagal menyimpan hasil Stock Opname.",
+      error: sanitizeSafeError(
+        updateErr,
+        "Gagal menyimpan hasil Stock Opname.",
+        "scan/stockOpname",
+      ),
     };
   }
 
-  const noteText = cleanOptionalText(input.notes);
+  const noteText = sanitizeOptionalText(input.notes, 1000, { multiline: true });
   await supabase.from("audit_logs").insert({
     actor_id: user.id,
     actor_name: user.fullName,

@@ -17,6 +17,7 @@ import {
   formatDateWIB,
 } from "@/lib/constants";
 import { ROLE_LABELS } from "@/lib/rbac";
+import { sanitizeCsvFormulaCell } from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type { LocationCode } from "@/types/database";
 import {
@@ -70,6 +71,16 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
   right: { style: "thin", color: { argb: "FFCBD5E1" } },
 };
 
+function addSafeRow(
+  sheet: ExcelJS.Worksheet,
+  values: Array<string | number | boolean | null | undefined>,
+): ExcelJS.Row {
+  const sanitized = values.map((val) =>
+    typeof val === "string" ? sanitizeCsvFormulaCell(val) : val,
+  );
+  return sheet.addRow(sanitized);
+}
+
 function styleTitleBanner(
   sheet: ExcelJS.Worksheet,
   title: string,
@@ -78,7 +89,7 @@ function styleTitleBanner(
 ) {
   sheet.mergeCells(1, 1, 1, colCount);
   const titleCell = sheet.getCell(1, 1);
-  titleCell.value = title;
+  titleCell.value = sanitizeCsvFormulaCell(title);
   titleCell.font = { bold: true, size: 13, color: { argb: "FFFFFFFF" } };
   titleCell.fill = TITLE_FILL;
   titleCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
@@ -86,7 +97,7 @@ function styleTitleBanner(
 
   sheet.mergeCells(2, 1, 2, colCount);
   const subCell = sheet.getCell(2, 1);
-  subCell.value = subtitle;
+  subCell.value = sanitizeCsvFormulaCell(subtitle);
   subCell.font = { size: 10, italic: true, color: { argb: "FF1E3A5F" } };
   subCell.fill = SUBHEADER_FILL;
   subCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
@@ -214,7 +225,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   ];
 
   kpis.forEach(([metric, value, unit, note, isCurrency], idx) => {
-    const row = sheet.addRow([metric, value, unit, note]);
+    const row = addSafeRow(sheet, [metric, value, unit, note]);
     applyDataRowStyle(row, idx);
     if (isCurrency && typeof value === "number") {
       row.getCell(2).numFmt = '"Rp"#,##0';
@@ -244,7 +255,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
 
   let roomIdx = 0;
   for (const [roomCode, stats] of byRoom.entries()) {
-    const row = sheet.addRow([
+    const row = addSafeRow(sheet, [
       `${roomCode} — ${LOCATION_LABELS[roomCode] ?? roomCode}`,
       stats.count,
       stats.anomaly,
@@ -338,7 +349,7 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
     const isSanitationDue =
       item.asset_type === "THERAPY_TOY" && item.hygiene_status !== "STERIL";
 
-    const row = sheet.addRow([
+    const row = addSafeRow(sheet, [
       item.item_code,
       item.name,
       ASSET_TYPE_LABELS[item.asset_type],
@@ -424,7 +435,7 @@ function addSubscriptionsSheet(workbook: ExcelJS.Workbook, dataset: ExportDatase
   styleTableHeaderRow(header);
 
   dataset.subscriptions.forEach((sub, idx) => {
-    const row = sheet.addRow([
+    const row = addSafeRow(sheet, [
       sub.sub_code,
       sub.service_name,
       sub.plan_name ?? "-",
@@ -502,7 +513,7 @@ function addArchivesSheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   dataset.archives.forEach((doc, idx) => {
     const digitalRef =
       [doc.digital_file_name, doc.drive_link].filter(Boolean).join(" | ") || "-";
-    const row = sheet.addRow([
+    const row = addSafeRow(sheet, [
       doc.doc_code,
       doc.title,
       doc.category,
@@ -575,7 +586,7 @@ function addDeliveriesSheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) 
   styleTableHeaderRow(header);
 
   dataset.deliveries.forEach((del, idx) => {
-    const row = sheet.addRow([
+    const row = addSafeRow(sheet, [
       del.delivery_code,
       DELIVERY_DIRECTION_LABELS[del.direction],
       del.package_type,
@@ -609,7 +620,7 @@ function addDeliveriesSheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) 
 export async function generateXlsxBuffer(dataset: ExportDataset): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "StarOps — Star Champs Indonesia";
-  workbook.lastModifiedBy = dataset.actorName;
+  workbook.lastModifiedBy = sanitizeCsvFormulaCell(dataset.actorName);
   workbook.created = new Date(dataset.generatedAtIso);
   workbook.modified = new Date(dataset.generatedAtIso);
 

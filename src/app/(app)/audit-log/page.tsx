@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { requireRouteAccess } from "@/lib/auth";
 import { ROLE_LABELS } from "@/lib/rbac";
+import { isValidUuid, sanitizePostgrestValue } from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type { AuditLog } from "@/types/database";
 import { AuditLogClient } from "./audit-log-client";
@@ -46,14 +47,17 @@ export default async function AuditLogPage({
   }
   if (actor === "__SYSTEM__") {
     query = query.is("actor_id", null);
-  } else if (actor !== "ALL") {
+  } else if (actor !== "ALL" && isValidUuid(actor)) {
     query = query.eq("actor_id", actor);
   }
   if (search) {
-    const safePattern = `%${search.replaceAll(",", " ").replaceAll("%", "")}%`;
-    query = query.or(
-      `summary.ilike.${safePattern},entity_code.ilike.${safePattern},actor_name.ilike.${safePattern}`,
-    );
+    const safeSearch = sanitizePostgrestValue(search, 100);
+    if (safeSearch) {
+      const safePattern = `%${safeSearch}%`;
+      query = query.or(
+        `summary.ilike.${safePattern},entity_code.ilike.${safePattern},actor_name.ilike.${safePattern}`,
+      );
+    }
   }
 
   const [logsRes, profilesRes] = await Promise.all([

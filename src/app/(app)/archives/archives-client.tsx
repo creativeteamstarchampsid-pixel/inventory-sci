@@ -19,6 +19,7 @@ import {
   Pencil,
   Plus,
   Search,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Upload,
@@ -91,6 +92,13 @@ import {
 } from "@/lib/constants";
 import { ROLE_LABELS } from "@/lib/rbac";
 import { createClient as createBrowserSupabase } from "@/lib/supabase/client";
+import {
+  UPLOAD_SIZE_LIMITS,
+  compressImageFile,
+  formatBytes,
+  sanitizeStorageFilename,
+  scanAndValidateUploadFile,
+} from "@/lib/upload-security";
 import type {
   ArchiveHybrid,
   ArchivePhysicalStatus,
@@ -414,6 +422,8 @@ export function ArchivesClient({
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [form, setForm] = useState<ArchiveFormState>(EMPTY_FORM);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isScanningFile, setIsScanningFile] = useState(false);
+  const [fileSecurityNote, setFileSecurityNote] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -566,6 +576,7 @@ export function ArchivesClient({
     setFormMode("create");
     setForm(EMPTY_FORM);
     setSelectedFile(null);
+    setFileSecurityNote(null);
     setFormError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
     setFormOpen(true);
@@ -596,9 +607,62 @@ export function ArchivesClient({
       change_notes: "",
     });
     setSelectedFile(null);
+    setFileSecurityNote(null);
     setFormError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
     setFormOpen(true);
+  }
+
+  async function handleArchiveFileChange(
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const inputEl = e.target;
+    const rawFile = inputEl.files?.[0] ?? null;
+    if (!rawFile) {
+      setSelectedFile(null);
+      setFileSecurityNote(null);
+      return;
+    }
+
+    setFormError(null);
+    setIsScanningFile(true);
+    try {
+      const scan = await scanAndValidateUploadFile(rawFile, "archive");
+      if (!scan.ok) {
+        inputEl.value = "";
+        setSelectedFile(null);
+        setFileSecurityNote(null);
+        setFormError(scan.error);
+        showError({
+          title: "Berkas Arsip Ditolak 🛡️",
+          message: scan.error,
+        });
+        return;
+      }
+
+      if (scan.detectedMime.startsWith("image/")) {
+        const compressed = await compressImageFile(rawFile);
+        setSelectedFile(compressed);
+        const note =
+          compressed.size < rawFile.size
+            ? `Lolos scan keamanan (${scan.detectedExt.toUpperCase()}) · Dikompresi ${formatBytes(rawFile.size)} → ${formatBytes(compressed.size)} (EXIF dibersihkan)`
+            : `Lolos scan keamanan (${scan.detectedExt.toUpperCase()}) · ${formatBytes(compressed.size)} (EXIF dibersihkan)`;
+        setFileSecurityNote(note);
+      } else {
+        const safeName = sanitizeStorageFilename(rawFile.name, "dokumen-arsip");
+        const safeFile = new File([rawFile], safeName, {
+          type: scan.detectedMime || rawFile.type || "application/octet-stream",
+          lastModified: rawFile.lastModified,
+        });
+        setSelectedFile(safeFile);
+        setFileSecurityNote(
+          `Lolos scan magic-byte & struktur (${scan.detectedExt.toUpperCase()}) · ${formatBytes(safeFile.size)}`,
+        );
+      }
+      setForm((p) => ({ ...p, remove_existing_file: false }));
+    } finally {
+      setIsScanningFile(false);
+    }
   }
 
   async function handleOpenSignedFile(
@@ -769,8 +833,22 @@ export function ArchivesClient({
           : form.existing_file_name;
 
         if (selectedFile) {
+          if (selectedFile.size > UPLOAD_SIZE_LIMITS.archive) {
+            const msg = "Ukuran dokumen arsip melebihi batas maksimal 10 MB.";
+            setFormError(msg);
+            showError({
+              title: "Berkas Arsip Terlalu Besar 🛡️",
+              message: msg,
+            });
+            return;
+          }
+
+          const safeFileName = sanitizeStorageFilename(
+            selectedFile.name,
+            "dokumen-arsip",
+          );
           const uploadTicket = await createArchiveUploadUrlAction({
-            fileName: selectedFile.name,
+            fileName: safeFileName,
             fileSize: selectedFile.size,
           });
 
@@ -2245,33 +2323,51 @@ export function ArchivesClient({
                 )}
 
               <div className="space-y-1.5">
-                <Label
-                  htmlFor="arc-file"
-                  className="flex items-center gap-1.5 text-xs font-bold"
-                >
-                  <Upload className="size-3.5" />
-                  Unggah File ke Bucket Privat (PDF, DOCX, XLSX, Gambar — Maks
-                  25 MB)
-                </Label>
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <Label
+                    htmlFor="arc-file"
+                    className="flex items-center gap-1.5 text-xs font-bold"
+                  >
+                    <Upload className="size-3.5" />
+                    Unggah File ke Bucket Privat (PDF, DOCX, XLSX, ZIP, Gambar —
+                    Maks 10 MB)
+                  </Label>
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-[1.5px] border-[#2C2623] bg-[#D1FAE5] px-2 py-0 text-[10px] font-extrabold text-[#14532D] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-emerald-400/50 dark:bg-emerald-950/70 dark:text-emerald-200 dark:shadow-none"
+                  >
+                    <ShieldCheck className="size-3" />
+                    Scan Magic-Byte &amp; Auto-Kompresi Gambar
+                  </Badge>
+                </div>
                 <Input
                   id="arc-file"
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.png,.jpg,.jpeg,.webp"
+                  disabled={isPending || isScanningFile}
                   className="rounded-xl border-2 border-[#2C2623] bg-white dark:border-border dark:bg-background"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0] ?? null;
-                    setSelectedFile(file);
-                    if (file) {
-                      setForm((p) => ({ ...p, remove_existing_file: false }));
-                    }
-                  }}
+                  onChange={handleArchiveFileChange}
                 />
-                {selectedFile && (
-                  <p className="text-xs font-semibold text-[#115E3B] dark:text-emerald-200">
-                    📎 Dipilih: <strong>{selectedFile.name}</strong> (
-                    {(selectedFile.size / 1024).toFixed(1)} KB)
+                {isScanningFile && (
+                  <p className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0C4A6E] dark:text-sky-300">
+                    <Loader2 className="size-3.5 animate-spin" />
+                    Memindai magic-byte &amp; keamanan file...
                   </p>
+                )}
+                {selectedFile && !isScanningFile && (
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-semibold text-[#115E3B] dark:text-emerald-200">
+                      📎 Dipilih: <strong>{selectedFile.name}</strong> (
+                      {formatBytes(selectedFile.size)})
+                    </p>
+                    {fileSecurityNote && (
+                      <p className="inline-flex items-center gap-1 text-[11px] font-bold text-[#14532D] dark:text-emerald-300">
+                        <ShieldCheck className="size-3.5 shrink-0" />
+                        {fileSecurityNote}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -2372,15 +2468,19 @@ export function ArchivesClient({
               </Button>
               <Button
                 type="submit"
-                disabled={isPending}
+                disabled={isPending || isScanningFile}
                 className="rounded-xl border-2 border-[#2C2623] bg-[#2AB673] font-extrabold text-white shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#239D62] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none"
               >
-                {isPending && <Loader2 className="size-4 animate-spin" />}
-                {isPending
-                  ? "Menyimpan..."
-                  : formMode === "create"
-                    ? "Simpan Dokumen"
-                    : "Simpan Perubahan"}
+                {(isPending || isScanningFile) && (
+                  <Loader2 className="size-4 animate-spin" />
+                )}
+                {isScanningFile
+                  ? "Memindai..."
+                  : isPending
+                    ? "Menyimpan..."
+                    : formMode === "create"
+                      ? "Simpan Dokumen"
+                      : "Simpan Perubahan"}
               </Button>
             </DialogFooter>
           </form>

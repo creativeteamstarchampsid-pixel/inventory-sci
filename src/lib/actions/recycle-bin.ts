@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
+import { isValidUuid, sanitizeSafeError } from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/types/database";
 
@@ -45,10 +46,13 @@ export async function restoreDeletedRecordAction(input: {
   if (!ALLOWED_TABLES.has(input.table)) {
     return { ok: false, error: "Tabel tidak valid untuk pemulihan." };
   }
+  if (!isValidUuid(input.id)) {
+    return { ok: false, error: "ID data tidak valid." };
+  }
 
   const supabase = await createClient();
 
-  let errorMessage: string | null = null;
+  let dbError: unknown = null;
   let restored = false;
 
   switch (input.table) {
@@ -60,7 +64,7 @@ export async function restoreDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       restored = Boolean(data);
       break;
     }
@@ -72,7 +76,7 @@ export async function restoreDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       restored = Boolean(data);
       break;
     }
@@ -84,7 +88,7 @@ export async function restoreDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       restored = Boolean(data);
       break;
     }
@@ -96,7 +100,7 @@ export async function restoreDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       restored = Boolean(data);
       break;
     }
@@ -108,7 +112,7 @@ export async function restoreDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       restored = Boolean(data);
       break;
     }
@@ -120,16 +124,20 @@ export async function restoreDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       restored = Boolean(data);
       break;
     }
   }
 
-  if (errorMessage) {
+  if (dbError) {
     return {
       ok: false,
-      error: `Gagal memulihkan data: ${errorMessage}`,
+      error: sanitizeSafeError(
+        dbError,
+        "Gagal memulihkan data dari Recycle Bin.",
+        `recycle-bin/restore:${input.table}`,
+      ),
     };
   }
 
@@ -164,9 +172,12 @@ export async function purgeDeletedRecordAction(input: {
   if (!ALLOWED_TABLES.has(input.table)) {
     return { ok: false, error: "Tabel tidak valid untuk penghapusan permanen." };
   }
+  if (!isValidUuid(input.id)) {
+    return { ok: false, error: "ID data tidak valid." };
+  }
 
   const supabase = await createClient();
-  let errorMessage: string | null = null;
+  let dbError: unknown = null;
   let purged = false;
 
   switch (input.table) {
@@ -178,7 +189,7 @@ export async function purgeDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       purged = Boolean(data);
       break;
     }
@@ -190,7 +201,7 @@ export async function purgeDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       purged = Boolean(data);
       break;
     }
@@ -202,7 +213,7 @@ export async function purgeDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       purged = Boolean(data);
       break;
     }
@@ -214,7 +225,7 @@ export async function purgeDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       purged = Boolean(data);
       break;
     }
@@ -226,7 +237,7 @@ export async function purgeDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       purged = Boolean(data);
       break;
     }
@@ -238,16 +249,20 @@ export async function purgeDeletedRecordAction(input: {
         .not("deleted_at", "is", null)
         .select("id")
         .maybeSingle();
-      errorMessage = error?.message ?? null;
+      dbError = error;
       purged = Boolean(data);
       break;
     }
   }
 
-  if (errorMessage) {
+  if (dbError) {
     return {
       ok: false,
-      error: `Gagal menghapus permanen: ${errorMessage}`,
+      error: sanitizeSafeError(
+        dbError,
+        "Gagal menghapus data secara permanen.",
+        `recycle-bin/purge:${input.table}`,
+      ),
     };
   }
 
@@ -285,7 +300,11 @@ export async function purgeExpiredRecycleBinAction(): Promise<
   if (error) {
     return {
       ok: false,
-      error: `Gagal membersihkan data kadaluarsa (> 30 hari): ${error.message}`,
+      error: sanitizeSafeError(
+        error,
+        "Gagal membersihkan data kadaluarsa (> 30 hari).",
+        "recycle-bin/purgeExpired",
+      ),
     };
   }
 

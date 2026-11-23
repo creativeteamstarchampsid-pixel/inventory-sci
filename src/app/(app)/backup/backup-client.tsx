@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -8,15 +8,19 @@ import {
   CalendarClock,
   CheckCircle2,
   DatabaseBackup,
+  FileJson,
   FileSpreadsheet,
   FileText,
   GitCompare,
+  Loader2,
   Lock,
   PackageCheck,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  Upload,
+  X,
 } from "lucide-react";
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
@@ -82,6 +86,11 @@ import {
 import type { BackupDiffSummary } from "@/lib/exports/csv";
 import type { MonthlyUpdatePeriod } from "@/lib/period";
 import { ROLE_LABELS } from "@/lib/rbac";
+import {
+  formatBytes,
+  sanitizeStorageFilename,
+  scanAndValidateUploadFile,
+} from "@/lib/upload-security";
 import type {
   Json,
   LocationCode,
@@ -105,6 +114,18 @@ type BackupClientProps = {
   };
   roomStats: RoomSummaryStat[];
   backups: SystemBackup[];
+};
+
+type VerifiedRestoreJsonPreview = {
+  safeFileName: string;
+  fileSize: number;
+  backupCode: string | null;
+  backupType: string | null;
+  periodYm: string | null;
+  capturedAt: string | null;
+  capturedByName: string | null;
+  tableCounts: Record<string, number>;
+  matchedVaultBackup: SystemBackup | null;
 };
 
 function parseOpnameChecklist(json: Json | null | undefined): OpnameChecklistMap {
@@ -195,7 +216,7 @@ export function BackupClient({
   backups,
 }: BackupClientProps) {
   const router = useRouter();
-  const { runWithFeedback } = useCartoonFeedback();
+  const { runWithFeedback, showError, showSuccess } = useCartoonFeedback();
   const { user, role, can } = useRole();
   const canExportFinancial = can("export.financial");
   const canSubmitOpname = can("reconciliation.submit");
@@ -223,6 +244,11 @@ export function BackupClient({
   const [manualDialogOpen, setManualDialogOpen] = useState(false);
   const [ownerLockDialogOpen, setOwnerLockDialogOpen] = useState(false);
   const [ownerNotes, setOwnerNotes] = useState("");
+  const [isScanningRestoreJson, setIsScanningRestoreJson] = useState(false);
+  const [restoreJsonError, setRestoreJsonError] = useState<string | null>(null);
+  const [restoreJsonPreview, setRestoreJsonPreview] =
+    useState<VerifiedRestoreJsonPreview | null>(null);
+  const restoreJsonInputRef = useRef<HTMLInputElement | null>(null);
 
   const checklist = useMemo(
     () => parseOpnameChecklist(reconciliation?.opname_checklist_json),
@@ -506,6 +532,133 @@ export function BackupClient({
       });
       router.refresh();
     });
+  };
+
+  const handleClearRestoreJson = () => {
+    setRestoreJsonPreview(null);
+    setRestoreJsonError(null);
+    if (restoreJsonInputRef.current) {
+      restoreJsonInputRef.current.value = "";
+    }
+  };
+
+  const handleRestoreJsonFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const inputEl = event.target;
+    const file = inputEl.files?.[0] ?? null;
+    if (!file) return;
+
+    setRestoreJsonError(null);
+    setRestoreJsonPreview(null);
+    setIsScanningRestoreJson(true);
+
+    try {
+      const scan = await scanAndValidateUploadFile(file, "backup-json");
+      if (!scan.ok) {
+        inputEl.value = "";
+        setRestoreJsonError(scan.error);
+        showError({
+          title: "File Restore JSON Ditolak 🛡️",
+          message: scan.error,
+        });
+        return;
+      }
+
+      const rawText = (await file.text()).replace(/^\uFEFF/, "").trim();
+      const parsed = JSON.parse(rawText) as Record<string, unknown>;
+      const tablesRaw = parsed.tables;
+
+      if (
+        !tablesRaw ||
+        typeof tablesRaw !== "object" ||
+        Array.isArray(tablesRaw) ||
+        !Array.isArray((tablesRaw as Record<string, unknown>).items_master)
+      ) {
+        const schemaMsg =
+          "File JSON lolos pemindaian keamanan, tetapi tidak memiliki struktur snapshot StarOps (`tables.items_master` tidak ditemukan).";
+        inputEl.value = "";
+        setRestoreJsonError(schemaMsg);
+        showError({
+          title: "Struktur Snapshot Tidak Sesuai",
+          message: schemaMsg,
+        });
+        return;
+      }
+
+      const tableCounts: Record<string, number> = {};
+      for (const [tableName, rows] of Object.entries(
+        tablesRaw as Record<string, unknown>,
+      )) {
+        if (Array.isArray(rows)) {
+          tableCounts[tableName] = rows.length;
+        }
+      }
+
+      const backupCode =
+        typeof parsed.backup_code === "string" && parsed.backup_code.trim()
+          ? parsed.backup_code.trim()
+          : null;
+      const backupType =
+        typeof parsed.backup_type === "string" ? parsed.backup_type : null;
+      const periodYm =
+        typeof parsed.period_ym === "string" ? parsed.period_ym : null;
+      const capturedAt =
+        typeof parsed.captured_at === "string" ? parsed.captured_at : null;
+      const capturedByRaw =
+        parsed.captured_by &&
+        typeof parsed.captured_by === "object" &&
+        !Array.isArray(parsed.captured_by)
+          ? (parsed.captured_by as Record<string, unknown>)
+          : null;
+      const capturedByName =
+        capturedByRaw && typeof capturedByRaw.name === "string"
+          ? capturedByRaw.name
+          : null;
+
+      const matchedVaultBackup = backupCode
+        ? backups.find(
+            (b) => b.backup_code.toUpperCase() === backupCode.toUpperCase(),
+          ) ?? null
+        : null;
+
+      const safeFileName = sanitizeStorageFilename(
+        file.name,
+        "backup-snapshot",
+      );
+
+      setRestoreJsonPreview({
+        safeFileName,
+        fileSize: file.size,
+        backupCode,
+        backupType,
+        periodYm,
+        capturedAt,
+        capturedByName,
+        tableCounts,
+        matchedVaultBackup,
+      });
+
+      showSuccess({
+        title: "File Restore JSON Terverifikasi! 🛡️",
+        message: backupCode
+          ? `Snapshot ${backupCode} lolos pemindaian keamanan (${formatBytes(file.size)}) dan siap ditinjau.`
+          : `Berkas "${safeFileName}" lolos pemindaian keamanan dan siap ditinjau.`,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Gagal memverifikasi file backup JSON.";
+      inputEl.value = "";
+      setRestoreJsonError(msg);
+      showError({
+        title: "Gagal Memindai File Backup",
+        message: msg,
+      });
+    } finally {
+      setIsScanningRestoreJson(false);
+    }
   };
 
   const selectedDiff = diffBackup ? parseDiffSummary(diffBackup.diff_summary_json) : null;
@@ -1126,7 +1279,160 @@ export function BackupClient({
                 : "Riwayat seluruh snapshot cadangan data, bundel laporan, dan perbandingan perubahan (Diff Viewer)."}
             </CardDescription>
           </CardHeader>
-          <CardContent className="pt-5">
+          <CardContent className="space-y-5 pt-5">
+            {/* Secure Local Restore JSON Scanner & Preview (Security Checks #19 & #20) */}
+            <div className="space-y-3 rounded-2xl border-2 border-dashed border-[#2C2623] bg-[#F0F9FF]/80 p-4 shadow-[3px_3px_0px_0px_#2C2623] dark:border-[#F5E9D6]/35 dark:bg-sky-950/25 dark:shadow-none">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-sm font-extrabold">
+                      <FileJson className="size-4 text-[#0284C7] dark:text-sky-300" />
+                      Verifikasi &amp; Pratinjau File Restore (.JSON)
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className="rounded-full border-[1.5px] border-[#2C2623] bg-[#D1FAE5] px-2 py-0 text-[10px] font-extrabold text-[#14532D] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-emerald-400/50 dark:bg-emerald-950/70 dark:text-emerald-200 dark:shadow-none"
+                    >
+                      <ShieldCheck className="size-3" />
+                      Scan UTF-8, Anti-XSS &amp; Maks 15 MB
+                    </Badge>
+                  </div>
+                  <p className="text-muted-foreground text-xs leading-relaxed">
+                    Unggah file cadangan <code>.json</code> lokal untuk dipindai
+                    keamanannya sebelum menampilkan pratinjau isi tabel atau
+                    menjalankan Point-in-Time Restore.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label
+                    htmlFor="restore-json-file"
+                    className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] px-3.5 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/40 dark:bg-background dark:text-foreground dark:shadow-none"
+                  >
+                    {isScanningRestoreJson ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="size-3.5" />
+                    )}
+                    {isScanningRestoreJson
+                      ? "Memindai JSON..."
+                      : "Pilih File Backup .JSON"}
+                  </Label>
+                  <input
+                    id="restore-json-file"
+                    ref={restoreJsonInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    className="sr-only"
+                    disabled={isPending || isScanningRestoreJson}
+                    onChange={handleRestoreJsonFileChange}
+                  />
+                  {restoreJsonPreview && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleClearRestoreJson}
+                      className="h-9 rounded-xl px-2.5 text-xs font-bold hover:bg-[#FFE4E6] dark:hover:bg-rose-950/50"
+                    >
+                      <X className="size-3.5" />
+                      Reset
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {restoreJsonError && (
+                <Alert
+                  variant="destructive"
+                  className="rounded-2xl border-2 border-[#2C2623] bg-[#FFE4E6] dark:border-rose-500/40 dark:bg-rose-950/50"
+                >
+                  <AlertTriangle className="size-4" />
+                  <AlertTitle className="text-xs font-extrabold">
+                    Pemindaian File Restore Gagal
+                  </AlertTitle>
+                  <AlertDescription className="text-xs">
+                    {restoreJsonError}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {restoreJsonPreview && (
+                <div className="space-y-3 rounded-2xl border-2 border-[#2C2623] bg-[#E8FBF1]/90 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-emerald-400/40 dark:bg-emerald-950/30 dark:shadow-none">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <p className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#14532D] dark:text-emerald-200">
+                        <ShieldCheck className="size-4" />
+                        Lolos Scan Keamanan ·{" "}
+                        <span className="font-mono">
+                          {restoreJsonPreview.safeFileName}
+                        </span>{" "}
+                        ({formatBytes(restoreJsonPreview.fileSize)})
+                      </p>
+                      <p className="text-muted-foreground text-[11px]">
+                        Kode:{" "}
+                        <strong className="font-mono text-foreground">
+                          {restoreJsonPreview.backupCode ?? "Tidak tercantum"}
+                        </strong>{" "}
+                        · Periode:{" "}
+                        <strong className="font-mono text-foreground">
+                          {restoreJsonPreview.periodYm ?? "-"}
+                        </strong>
+                        {restoreJsonPreview.capturedAt
+                          ? ` · Dibuat ${formatDateWIB(restoreJsonPreview.capturedAt, true)}`
+                          : ""}
+                        {restoreJsonPreview.capturedByName
+                          ? ` oleh ${restoreJsonPreview.capturedByName}`
+                          : ""}
+                      </p>
+                    </div>
+
+                    {restoreJsonPreview.matchedVaultBackup && canRestoreBackup ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        disabled={isPending}
+                        onClick={() => {
+                          setRestoreBackup(restoreJsonPreview.matchedVaultBackup);
+                          setRestoreConfirmCode("");
+                        }}
+                        className="rounded-xl border-2 border-[#2C2623] font-extrabold shadow-[2px_2px_0px_0px_#2C2623]"
+                      >
+                        <RotateCcw className="mr-1.5 size-3.5" />
+                        Lanjutkan Restore ({restoreJsonPreview.matchedVaultBackup.backup_code})
+                      </Button>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-[#2C2623] bg-[#FFFDF7] text-[10px] font-bold text-[#2C2623] dark:bg-background dark:text-foreground"
+                      >
+                        {restoreJsonPreview.matchedVaultBackup
+                          ? "Cocok di Vault (Restore Khusus Owner)"
+                          : "Pratinjau Offline Terverifikasi"}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:grid-cols-6">
+                    {Object.entries(restoreJsonPreview.tableCounts).map(
+                      ([tbl, count]) => (
+                        <div
+                          key={tbl}
+                          className="flex items-center justify-between gap-1 rounded-xl border border-[#2C2623]/50 bg-[#FFFDF7] px-2.5 py-1.5 dark:border-emerald-500/30 dark:bg-background"
+                        >
+                          <span className="truncate font-mono text-[11px]">
+                            {tbl}
+                          </span>
+                          <span className="font-extrabold">{count}</span>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {backups.length === 0 ? (
               <KawaiiEmptyState
                 mascot="backup"

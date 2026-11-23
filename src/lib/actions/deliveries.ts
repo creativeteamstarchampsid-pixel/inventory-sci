@@ -3,6 +3,14 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
+import { can } from "@/lib/rbac";
+import {
+  isValidUuid,
+  sanitizeOptionalText,
+  sanitizeSafeError,
+  sanitizeStoragePath,
+  sanitizeTextInput,
+} from "@/lib/security";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type {
@@ -79,8 +87,6 @@ export type ConvertedStockItem = {
   stock_qty: number;
 };
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 const VALID_DIRECTIONS = new Set<DeliveryDirection>(["INBOUND", "OUTBOUND"]);
 const VALID_STATUSES = new Set<DeliveryStatus>([
   "DRAFT",
@@ -142,12 +148,7 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set<string>([
   "image/webp",
   "image/gif",
 ]);
-
-function trimOrNull(val: string | null | undefined): string | null {
-  if (typeof val !== "string") return null;
-  const t = val.trim();
-  return t.length > 0 ? t : null;
-}
+const ALLOWED_IMAGE_EXTS = new Set<string>(["jpg", "jpeg", "png", "webp", "gif"]);
 
 function todayWibDate(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(
@@ -155,11 +156,20 @@ function todayWibDate(): string {
   );
 }
 
+function sanitizeTimestampOrNull(val: string | null | undefined): string | null {
+  const cleaned = sanitizeOptionalText(val, 40);
+  if (!cleaned) return null;
+  return Number.isNaN(Date.parse(cleaned)) ? null : cleaned;
+}
+
 function sanitizePayloadItems(
   rawItems: unknown,
 ): { ok: true; items: DeliveryPayloadItem[] } | { ok: false; error: string } {
   if (!Array.isArray(rawItems)) {
     return { ok: false, error: "Daftar isi paket harus berupa array." };
+  }
+  if (rawItems.length > 200) {
+    return { ok: false, error: "Maksimal 200 baris item dalam satu pengiriman." };
   }
 
   const sanitized: DeliveryPayloadItem[] = [];
@@ -169,14 +179,14 @@ function sanitizePayloadItems(
       return { ok: false, error: `Format item ke-${i + 1} tidak valid.` };
     }
     const r = raw as Record<string, unknown>;
-    const name = typeof r.name === "string" ? r.name.trim() : "";
+    const name = typeof r.name === "string" ? sanitizeTextInput(r.name, 200) : "";
     if (!name) {
       return { ok: false, error: `Nama barang pada baris ke-${i + 1} wajib diisi.` };
     }
 
     const qtyNum = Number(r.qty ?? 1);
-    if (!Number.isFinite(qtyNum) || qtyNum < 1) {
-      return { ok: false, error: `Jumlah (qty) pada "${name}" minimal 1.` };
+    if (!Number.isFinite(qtyNum) || qtyNum < 1 || qtyNum > 100_000) {
+      return { ok: false, error: `Jumlah (qty) pada "${name}" tidak valid.` };
     }
     const qty = Math.floor(qtyNum);
 
@@ -239,7 +249,11 @@ function sanitizePayloadItems(
     const minStock = Math.max(0, Math.floor(Number(r.min_stock_threshold ?? 0) || 0));
 
     let usefulLifeMonths: number | null = null;
-    if (r.useful_life_months !== undefined && r.useful_life_months !== null && r.useful_life_months !== "") {
+    if (
+      r.useful_life_months !== undefined &&
+      r.useful_life_months !== null &&
+      r.useful_life_months !== ""
+    ) {
       const parsedLife = Math.floor(Number(r.useful_life_months));
       if (!Number.isFinite(parsedLife) || parsedLife <= 0) {
         return { ok: false, error: `Masa manfaat (bulan) pada "${name}" harus > 0.` };
@@ -248,31 +262,42 @@ function sanitizePayloadItems(
     }
 
     const existingItemId =
-      typeof r.existing_item_id === "string" && UUID_RE.test(r.existing_item_id)
-        ? r.existing_item_id
+      typeof r.existing_item_id === "string" && isValidUuid(r.existing_item_id)
+        ? r.existing_item_id.trim()
         : null;
 
     sanitized.push({
-      id: typeof r.id === "string" && r.id.trim() ? r.id.trim() : `item-${i + 1}`,
+      id:
+        typeof r.id === "string" && sanitizeTextInput(r.id, 64)
+          ? sanitizeTextInput(r.id, 64)
+          : `item-${i + 1}`,
       name,
-      item_code: trimOrNull(typeof r.item_code === "string" ? r.item_code : null),
+      item_code: sanitizeOptionalText(
+        typeof r.item_code === "string" ? r.item_code : null,
+        80,
+      ),
       existing_item_id: existingItemId,
       qty,
       unit_label:
-        typeof r.unit_label === "string" && r.unit_label.trim()
-          ? r.unit_label.trim()
+        typeof r.unit_label === "string" && sanitizeTextInput(r.unit_label, 40)
+          ? sanitizeTextInput(r.unit_label, 40)
           : "Pcs",
       condition,
-      notes: trimOrNull(typeof r.notes === "string" ? r.notes : null),
+      notes: sanitizeOptionalText(
+        typeof r.notes === "string" ? r.notes : null,
+        1000,
+        { multiline: true },
+      ),
       category_prefix: categoryPrefix,
       category:
-        typeof r.category === "string" && r.category.trim()
-          ? r.category.trim()
+        typeof r.category === "string" && sanitizeTextInput(r.category, 100)
+          ? sanitizeTextInput(r.category, 100)
           : "Sensorik",
       asset_type: assetType,
       room_code: roomCode,
-      rack_location: trimOrNull(
+      rack_location: sanitizeOptionalText(
         typeof r.rack_location === "string" ? r.rack_location : null,
+        100,
       ),
       purchase_price: purchasePrice,
       useful_life_months: usefulLifeMonths,
@@ -315,22 +340,22 @@ function validateDeliveryInput(input: DeliveryInput):
     return { ok: false, error: "Arah pengiriman tidak valid." };
   }
 
-  const packageType = input.package_type?.trim() ?? "";
+  const packageType = sanitizeTextInput(input.package_type, 120);
   if (!packageType) {
     return { ok: false, error: "Jenis paket / pengiriman wajib diisi." };
   }
 
-  const courierName = input.courier_name?.trim() ?? "";
+  const courierName = sanitizeTextInput(input.courier_name, 120);
   if (!courierName) {
     return { ok: false, error: "Nama kurir / ekspedisi wajib diisi." };
   }
 
-  const senderName = input.sender_name?.trim() ?? "";
+  const senderName = sanitizeTextInput(input.sender_name, 150);
   if (!senderName) {
     return { ok: false, error: "Nama pengirim / pihak pertama wajib diisi." };
   }
 
-  const receiverName = input.receiver_name?.trim() ?? "";
+  const receiverName = sanitizeTextInput(input.receiver_name, 150);
   if (!receiverName) {
     return { ok: false, error: "Nama penerima / pihak kedua wajib diisi." };
   }
@@ -356,19 +381,19 @@ function validateDeliveryInput(input: DeliveryInput):
       direction: input.direction,
       package_type: packageType,
       courier_name: courierName,
-      tracking_number: trimOrNull(input.tracking_number),
+      tracking_number: sanitizeOptionalText(input.tracking_number, 120),
       shipping_cost: shippingCost,
       sender_name: senderName,
-      sender_address: trimOrNull(input.sender_address),
+      sender_address: sanitizeOptionalText(input.sender_address, 500, { multiline: true }),
       receiver_name: receiverName,
-      receiver_address: trimOrNull(input.receiver_address),
-      pic_name: trimOrNull(input.pic_name),
+      receiver_address: sanitizeOptionalText(input.receiver_address, 500, { multiline: true }),
+      pic_name: sanitizeOptionalText(input.pic_name, 120),
       is_fragile: input.is_fragile ?? true,
       items_payload_json: payloadCheck.items,
       status,
-      shipped_at: trimOrNull(input.shipped_at),
-      received_at: trimOrNull(input.received_at),
-      notes: trimOrNull(input.notes),
+      shipped_at: sanitizeTimestampOrNull(input.shipped_at),
+      received_at: sanitizeTimestampOrNull(input.received_at),
+      notes: sanitizeOptionalText(input.notes, 2000, { multiline: true }),
     },
   };
 }
@@ -450,7 +475,11 @@ export async function createDeliveryAction(
     if (error || !data) {
       return {
         ok: false,
-        error: error?.message || "Gagal membuat catatan pengiriman.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal membuat catatan pengiriman.",
+          "deliveries/create",
+        ),
       };
     }
 
@@ -459,7 +488,7 @@ export async function createDeliveryAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "deliveries/createCatch"),
     };
   }
 }
@@ -470,7 +499,7 @@ export async function updateDeliveryAction(
 ): Promise<DeliveryActionResult<{ delivery: DeliveryLog }>> {
   const user = await requireAction("delivery.manage");
 
-  if (!UUID_RE.test(deliveryId)) {
+  if (!isValidUuid(deliveryId)) {
     return { ok: false, error: "ID pengiriman tidak valid." };
   }
 
@@ -541,7 +570,11 @@ export async function updateDeliveryAction(
     if (error || !data) {
       return {
         ok: false,
-        error: error?.message || "Gagal memperbarui data pengiriman.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal memperbarui data pengiriman.",
+          "deliveries/update",
+        ),
       };
     }
 
@@ -550,7 +583,7 @@ export async function updateDeliveryAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "deliveries/updateCatch"),
     };
   }
 }
@@ -561,7 +594,7 @@ export async function updateDeliveryStatusAction(
 ): Promise<DeliveryActionResult<{ delivery: DeliveryLog }>> {
   const user = await requireAction("delivery.manage");
 
-  if (!UUID_RE.test(deliveryId)) {
+  if (!isValidUuid(deliveryId)) {
     return { ok: false, error: "ID pengiriman tidak valid." };
   }
   if (!VALID_STATUSES.has(nextStatus)) {
@@ -610,7 +643,11 @@ export async function updateDeliveryStatusAction(
     if (error || !data) {
       return {
         ok: false,
-        error: error?.message || "Gagal memperbarui status pengiriman.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal memperbarui status pengiriman.",
+          "deliveries/updateStatus",
+        ),
       };
     }
 
@@ -619,7 +656,7 @@ export async function updateDeliveryStatusAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "deliveries/statusCatch"),
     };
   }
 }
@@ -629,7 +666,7 @@ export async function softDeleteDeliveryAction(
 ): Promise<DeliveryActionResult<{ id: string }>> {
   const user = await requireAction("delivery.manage");
 
-  if (!UUID_RE.test(deliveryId)) {
+  if (!isValidUuid(deliveryId)) {
     return { ok: false, error: "ID pengiriman tidak valid." };
   }
 
@@ -647,10 +684,20 @@ export async function softDeleteDeliveryAction(
       .select("id")
       .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
       return {
         ok: false,
-        error: error?.message || "Data pengiriman tidak ditemukan atau sudah dihapus.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal menghapus data pengiriman.",
+          "deliveries/softDelete",
+        ),
+      };
+    }
+    if (!data) {
+      return {
+        ok: false,
+        error: "Data pengiriman tidak ditemukan atau sudah dihapus.",
       };
     }
 
@@ -660,7 +707,7 @@ export async function softDeleteDeliveryAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "deliveries/deleteCatch"),
     };
   }
 }
@@ -672,16 +719,27 @@ export async function createDeliveryProofUploadUrlAction(
 ): Promise<DeliveryActionResult<{ path: string; token: string; signedUrl: string }>> {
   await requireAction("delivery.manage");
 
-  if (!UUID_RE.test(deliveryId)) {
+  if (!isValidUuid(deliveryId)) {
     return { ok: false, error: "ID pengiriman tidak valid." };
   }
 
-  if (!ALLOWED_IMAGE_MIME_TYPES.has(contentType.toLowerCase())) {
+  const normalizedMime = typeof contentType === "string" ? contentType.toLowerCase().trim() : "";
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(normalizedMime)) {
     return {
       ok: false,
       error: "Format foto harus JPG, PNG, WebP, atau GIF.",
     };
   }
+
+  const rawFileName = sanitizeTextInput(fileName, 120);
+  if (!rawFileName) {
+    return { ok: false, error: "Nama file bukti foto tidak valid." };
+  }
+
+  const ext = rawFileName.includes(".")
+    ? rawFileName.split(".").pop()?.toLowerCase() ?? ""
+    : "";
+  const safeExt = ALLOWED_IMAGE_EXTS.has(ext) ? ext : "jpg";
 
   try {
     const supabase = await createClient();
@@ -696,12 +754,14 @@ export async function createDeliveryProofUploadUrlAction(
       return { ok: false, error: "Data pengiriman tidak ditemukan." };
     }
 
-    const safeName = fileName
+    const baseName = rawFileName
       .toLowerCase()
-      .replace(/[^a-z0-9.\-_]/g, "-")
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^a-z0-9\-_]/g, "-")
       .replace(/-+/g, "-")
-      .slice(-60) || "proof.jpg";
-    const storagePath = `deliveries/${deliveryId}/${Date.now()}-${safeName}`;
+      .replace(/^-|-$/g, "")
+      .slice(-48) || "proof";
+    const storagePath = `deliveries/${deliveryId}/${Date.now()}-${baseName}.${safeExt}`;
 
     const { data, error } = await supabase.storage
       .from("delivery-proofs")
@@ -710,7 +770,11 @@ export async function createDeliveryProofUploadUrlAction(
     if (error || !data) {
       return {
         ok: false,
-        error: error?.message || "Gagal membuat URL unggah bukti foto.",
+        error: sanitizeSafeError(
+          error,
+          "Gagal membuat URL unggah bukti foto.",
+          "deliveries/createProofUploadUrl",
+        ),
       };
     }
 
@@ -725,7 +789,7 @@ export async function createDeliveryProofUploadUrlAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "deliveries/proofUrlCatch"),
     };
   }
 }
@@ -736,12 +800,13 @@ export async function saveDeliveryProofPhotoAction(
 ): Promise<DeliveryActionResult<{ proofPhotoPath: string; signedUrl: string | null }>> {
   const user = await requireAction("delivery.manage");
 
-  if (!UUID_RE.test(deliveryId)) {
+  if (!isValidUuid(deliveryId)) {
     return { ok: false, error: "ID pengiriman tidak valid." };
   }
 
   const expectedPrefix = `deliveries/${deliveryId}/`;
-  if (!storagePath.startsWith(expectedPrefix) || storagePath.includes("..")) {
+  const safePath = sanitizeStoragePath(storagePath, expectedPrefix);
+  if (!safePath) {
     return { ok: false, error: "Path penyimpanan bukti foto tidak valid." };
   }
 
@@ -761,7 +826,7 @@ export async function saveDeliveryProofPhotoAction(
     const { error: updateError } = await supabase
       .from("deliveries_log")
       .update({
-        proof_photo_url: storagePath,
+        proof_photo_url: safePath,
         updated_by: user.id,
       })
       .eq("id", deliveryId)
@@ -770,32 +835,37 @@ export async function saveDeliveryProofPhotoAction(
     if (updateError) {
       return {
         ok: false,
-        error: updateError.message || "Gagal menyimpan path bukti foto.",
+        error: sanitizeSafeError(
+          updateError,
+          "Gagal menyimpan path bukti foto.",
+          "deliveries/saveProof",
+        ),
       };
     }
 
-    if (existing.proof_photo_url && existing.proof_photo_url !== storagePath) {
-      await supabase.storage
-        .from("delivery-proofs")
-        .remove([existing.proof_photo_url]);
+    if (existing.proof_photo_url && existing.proof_photo_url !== safePath) {
+      const oldSafe = sanitizeStoragePath(existing.proof_photo_url);
+      if (oldSafe) {
+        await supabase.storage.from("delivery-proofs").remove([oldSafe]);
+      }
     }
 
     const { data: signedData } = await supabase.storage
       .from("delivery-proofs")
-      .createSignedUrl(storagePath, 3600);
+      .createSignedUrl(safePath, 3600);
 
     revalidateLogisticsPaths();
     return {
       ok: true,
       data: {
-        proofPhotoPath: storagePath,
+        proofPhotoPath: safePath,
         signedUrl: signedData?.signedUrl ?? null,
       },
     };
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "deliveries/saveProofCatch"),
     };
   }
 }
@@ -805,7 +875,7 @@ export async function removeDeliveryProofPhotoAction(
 ): Promise<DeliveryActionResult<{ id: string }>> {
   const user = await requireAction("delivery.manage");
 
-  if (!UUID_RE.test(deliveryId)) {
+  if (!isValidUuid(deliveryId)) {
     return { ok: false, error: "ID pengiriman tidak valid." };
   }
 
@@ -834,14 +904,19 @@ export async function removeDeliveryProofPhotoAction(
     if (updateError) {
       return {
         ok: false,
-        error: updateError.message || "Gagal menghapus bukti foto.",
+        error: sanitizeSafeError(
+          updateError,
+          "Gagal menghapus bukti foto.",
+          "deliveries/removeProof",
+        ),
       };
     }
 
     if (existing.proof_photo_url) {
-      await supabase.storage
-        .from("delivery-proofs")
-        .remove([existing.proof_photo_url]);
+      const safePath = sanitizeStoragePath(existing.proof_photo_url);
+      if (safePath) {
+        await supabase.storage.from("delivery-proofs").remove([safePath]);
+      }
     }
 
     revalidateLogisticsPaths();
@@ -849,7 +924,7 @@ export async function removeDeliveryProofPhotoAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "deliveries/removeProofCatch"),
     };
   }
 }
@@ -859,7 +934,7 @@ export async function getDeliveryProofSignedUrlAction(
 ): Promise<DeliveryActionResult<{ signedUrl: string | null }>> {
   await requireAction("delivery.view");
 
-  if (!UUID_RE.test(deliveryId)) {
+  if (!isValidUuid(deliveryId)) {
     return { ok: false, error: "ID pengiriman tidak valid." };
   }
 
@@ -880,14 +955,23 @@ export async function getDeliveryProofSignedUrlAction(
       return { ok: true, data: { signedUrl: null } };
     }
 
+    const safePath = sanitizeStoragePath(existing.proof_photo_url);
+    if (!safePath) {
+      return { ok: false, error: "Path bukti foto tidak valid." };
+    }
+
     const { data: signedData, error: signError } = await supabase.storage
       .from("delivery-proofs")
-      .createSignedUrl(existing.proof_photo_url, 3600);
+      .createSignedUrl(safePath, 3600);
 
     if (signError) {
       return {
         ok: false,
-        error: signError.message || "Gagal membuat tautan pratinjau foto.",
+        error: sanitizeSafeError(
+          signError,
+          "Gagal membuat tautan pratinjau foto.",
+          "deliveries/getProofUrl",
+        ),
       };
     }
 
@@ -895,7 +979,7 @@ export async function getDeliveryProofSignedUrlAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "deliveries/getProofCatch"),
     };
   }
 }
@@ -910,7 +994,7 @@ export async function convertInboundToStockAction(
 > {
   const user = await requireAction("delivery.convert_to_stock");
 
-  if (!UUID_RE.test(deliveryId)) {
+  if (!isValidUuid(deliveryId)) {
     return { ok: false, error: "ID pengiriman tidak valid." };
   }
 
@@ -957,6 +1041,16 @@ export async function convertInboundToStockAction(
       return {
         ok: false,
         error: "Daftar barang (payload) masih kosong. Tambahkan minimal 1 item sebelum konversi.",
+      };
+    }
+
+    if (
+      payloadCheck.items.some((item) => item.condition === "DIHAPUSBUKU") &&
+      !can(user.role, "writeoff.approve")
+    ) {
+      return {
+        ok: false,
+        error: "Hanya Owner yang dapat menetapkan status Dihapusbuku saat konversi stok.",
       };
     }
 
@@ -1032,9 +1126,11 @@ export async function convertInboundToStockAction(
     if (insertError || !insertedItems || insertedItems.length === 0) {
       return {
         ok: false,
-        error:
-          insertError?.message ||
+        error: sanitizeSafeError(
+          insertError,
           "Gagal memasukkan item ke master inventaris.",
+          "deliveries/convertInsert",
+        ),
       };
     }
 
@@ -1085,8 +1181,6 @@ export async function convertInboundToStockAction(
 
     if (updateError || !updatedDelivery) {
       // Compensating rollback so items are not orphaned without conversion stamp.
-      // Hard delete is OWNER-only in RLS; for Admin Operasional, use service-role admin client
-      // if configured, otherwise fall back to soft-delete so active inventory stays clean.
       const insertedIds = insertedItems.map((i) => i.id);
       if (user.role === "OWNER") {
         await supabase.from("items_master").delete().in("id", insertedIds);
@@ -1105,9 +1199,11 @@ export async function convertInboundToStockAction(
       }
       return {
         ok: false,
-        error:
-          updateError?.message ||
+        error: sanitizeSafeError(
+          updateError,
           "Gagal menandai pengiriman telah dikonversi ke stok.",
+          "deliveries/convertStamp",
+        ),
       };
     }
 
@@ -1140,7 +1236,7 @@ export async function convertInboundToStockAction(
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Terjadi kesalahan sistem.",
+      error: sanitizeSafeError(err, "Terjadi kesalahan sistem.", "deliveries/convertCatch"),
     };
   }
 }

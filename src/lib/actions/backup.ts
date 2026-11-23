@@ -15,6 +15,13 @@ import {
 import { generatePdfBuffer } from "@/lib/exports/pdf";
 import { generateXlsxBuffer } from "@/lib/exports/xlsx";
 import { getJakartaDateParts, getMonthlyUpdatePeriod } from "@/lib/period";
+import {
+  isValidPeriodYm,
+  isValidUuid,
+  sanitizeOptionalText,
+  sanitizeSafeError,
+  sanitizeStoragePath,
+} from "@/lib/security";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type {
@@ -39,6 +46,14 @@ export type RoomOpnameEntry = {
 };
 
 export type OpnameChecklistMap = Partial<Record<LocationCode, RoomOpnameEntry>>;
+
+const VALID_BACKUP_TYPES = new Set<BackupType>([
+  "MANUAL",
+  "PRE_UPDATE",
+  "MONTHLY_CUTOFF",
+]);
+
+const VALID_FILE_TYPES = new Set(["json", "xlsx", "csv", "pdf"]);
 
 function parseChecklist(json: Json | null | undefined): OpnameChecklistMap {
   if (!json || typeof json !== "object" || Array.isArray(json)) {
@@ -73,10 +88,13 @@ export async function toggleOpnameRoomChecklist(input: {
 }): Promise<ActionResult<MonthlyReconciliation>> {
   const user = await requireAction("reconciliation.submit");
 
+  if (!isValidPeriodYm(input.periodYm)) {
+    return { ok: false, error: "Format periode opname tidak valid (gunakan YYYY-MM)." };
+  }
   if (!OPNAME_ROOM_CODES.includes(input.roomCode)) {
     return {
       ok: false,
-      error: `Kode ruangan opname tidak valid: ${input.roomCode}`,
+      error: "Kode ruangan opname tidak valid.",
     };
   }
 
@@ -89,7 +107,14 @@ export async function toggleOpnameRoomChecklist(input: {
     .maybeSingle();
 
   if (fetchErr) {
-    return { ok: false, error: fetchErr.message };
+    return {
+      ok: false,
+      error: sanitizeSafeError(
+        fetchErr,
+        "Gagal memuat data rekonsiliasi bulanan.",
+        "backup/toggleChecklistFetch",
+      ),
+    };
   }
 
   if (existing?.locked_at) {
@@ -118,13 +143,14 @@ export async function toggleOpnameRoomChecklist(input: {
         item.stock_qty <= item.min_stock_threshold),
   ).length;
 
+  const cleanNotes = sanitizeOptionalText(input.notes, 500, { multiline: true });
   const checklist = parseChecklist(existing?.opname_checklist_json);
   checklist[input.roomCode] = {
-    checked: input.checked,
+    checked: Boolean(input.checked),
     checked_by_id: user.id,
     checked_by_name: user.fullName,
     checked_at: new Date().toISOString(),
-    notes: input.notes?.trim() || checklist[input.roomCode]?.notes,
+    notes: cleanNotes ?? checklist[input.roomCode]?.notes,
     anomaly_count: anomalyCount,
   };
 
@@ -145,7 +171,16 @@ export async function toggleOpnameRoomChecklist(input: {
       .eq("id", existing.id)
       .select("*")
       .single();
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          error,
+          "Gagal memperbarui checklist opname.",
+          "backup/toggleChecklistUpdate",
+        ),
+      };
+    }
     saved = data;
   } else {
     const { data, error } = await supabase
@@ -157,7 +192,16 @@ export async function toggleOpnameRoomChecklist(input: {
       })
       .select("*")
       .single();
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          error,
+          "Gagal menyimpan checklist opname.",
+          "backup/toggleChecklistInsert",
+        ),
+      };
+    }
     saved = data;
   }
 
@@ -175,8 +219,20 @@ export async function approveReconciliationStage(input: {
   stage: "leader" | "admin" | "owner";
   notes?: string;
 }): Promise<ActionResult<MonthlyReconciliation>> {
+  await requireAction("reconciliation.submit");
+  if (!isValidPeriodYm(input.periodYm)) {
+    return { ok: false, error: "Format periode rekonsiliasi tidak valid (YYYY-MM)." };
+  }
+  if (input.stage !== "leader" && input.stage !== "admin" && input.stage !== "owner") {
+    return { ok: false, error: "Tahap persetujuan rekonsiliasi tidak valid." };
+  }
+
   const supabase = await createClient();
   const nowIso = new Date().toISOString();
+  const cleanNotes =
+    input.notes !== undefined
+      ? sanitizeOptionalText(input.notes, 1000, { multiline: true })
+      : undefined;
 
   if (input.stage === "owner") {
     const user = await requireAction("reconciliation.approve_final");
@@ -186,7 +242,16 @@ export async function approveReconciliationStage(input: {
       .eq("period_ym", input.periodYm)
       .maybeSingle();
 
-    if (fetchErr) return { ok: false, error: fetchErr.message };
+    if (fetchErr) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          fetchErr,
+          "Gagal memuat data rekonsiliasi.",
+          "backup/approveOwnerFetch",
+        ),
+      };
+    }
     if (existing?.locked_at) {
       return { ok: false, error: "Periode rekonsiliasi ini sudah dikunci." };
     }
@@ -198,12 +263,21 @@ export async function approveReconciliationStage(input: {
           approved_by_owner: user.id,
           approved_by_owner_at: nowIso,
           locked_at: nowIso,
-          ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}),
+          ...(cleanNotes !== undefined ? { notes: cleanNotes } : {}),
         })
         .eq("id", existing.id)
         .select("*")
         .single();
-      if (error) return { ok: false, error: error.message };
+      if (error) {
+        return {
+          ok: false,
+          error: sanitizeSafeError(
+            error,
+            "Gagal mengesahkan laporan bulanan.",
+            "backup/approveOwnerUpdate",
+          ),
+        };
+      }
       revalidatePath("/backup");
       revalidatePath("/dashboard");
       revalidatePath("/audit-log");
@@ -221,11 +295,20 @@ export async function approveReconciliationStage(input: {
         approved_by_owner: user.id,
         approved_by_owner_at: nowIso,
         locked_at: nowIso,
-        notes: input.notes?.trim() || null,
+        notes: cleanNotes ?? null,
       })
       .select("*")
       .single();
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          error,
+          "Gagal mengesahkan laporan bulanan.",
+          "backup/approveOwnerInsert",
+        ),
+      };
+    }
     revalidatePath("/backup");
     revalidatePath("/dashboard");
     revalidatePath("/audit-log");
@@ -244,7 +327,16 @@ export async function approveReconciliationStage(input: {
       .eq("period_ym", input.periodYm)
       .maybeSingle();
 
-    if (fetchErr) return { ok: false, error: fetchErr.message };
+    if (fetchErr) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          fetchErr,
+          "Gagal memuat data rekonsiliasi.",
+          "backup/approveAdminFetch",
+        ),
+      };
+    }
     if (existing?.locked_at) {
       return {
         ok: false,
@@ -255,7 +347,7 @@ export async function approveReconciliationStage(input: {
     const patch = {
       verified_by_admin: user.id,
       verified_by_admin_at: nowIso,
-      ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}),
+      ...(cleanNotes !== undefined ? { notes: cleanNotes } : {}),
     };
 
     let saved: MonthlyReconciliation | null = null;
@@ -266,7 +358,16 @@ export async function approveReconciliationStage(input: {
         .eq("id", existing.id)
         .select("*")
         .single();
-      if (error) return { ok: false, error: error.message };
+      if (error) {
+        return {
+          ok: false,
+          error: sanitizeSafeError(
+            error,
+            "Gagal mencatat verifikasi Admin Operasional.",
+            "backup/approveAdminUpdate",
+          ),
+        };
+      }
       saved = data;
     } else {
       const { data, error } = await supabase
@@ -277,7 +378,16 @@ export async function approveReconciliationStage(input: {
         })
         .select("*")
         .single();
-      if (error) return { ok: false, error: error.message };
+      if (error) {
+        return {
+          ok: false,
+          error: sanitizeSafeError(
+            error,
+            "Gagal mencatat verifikasi Admin Operasional.",
+            "backup/approveAdminInsert",
+          ),
+        };
+      }
       saved = data;
     }
 
@@ -306,7 +416,16 @@ export async function approveReconciliationStage(input: {
     .eq("period_ym", input.periodYm)
     .maybeSingle();
 
-  if (fetchErr) return { ok: false, error: fetchErr.message };
+  if (fetchErr) {
+    return {
+      ok: false,
+      error: sanitizeSafeError(
+        fetchErr,
+        "Gagal memuat data rekonsiliasi.",
+        "backup/approveLeaderFetch",
+      ),
+    };
+  }
   if (existing?.locked_at) {
     return {
       ok: false,
@@ -317,7 +436,7 @@ export async function approveReconciliationStage(input: {
   const patch = {
     approved_by_leader: user.id,
     approved_by_leader_at: nowIso,
-    ...(input.notes !== undefined ? { notes: input.notes.trim() || null } : {}),
+    ...(cleanNotes !== undefined ? { notes: cleanNotes } : {}),
   };
 
   let saved: MonthlyReconciliation | null = null;
@@ -328,7 +447,16 @@ export async function approveReconciliationStage(input: {
       .eq("id", existing.id)
       .select("*")
       .single();
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          error,
+          "Gagal mencatat persetujuan Kepala Terapis.",
+          "backup/approveLeaderUpdate",
+        ),
+      };
+    }
     saved = data;
   } else {
     const { data, error } = await supabase
@@ -339,7 +467,16 @@ export async function approveReconciliationStage(input: {
       })
       .select("*")
       .single();
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          error,
+          "Gagal mencatat persetujuan Kepala Terapis.",
+          "backup/approveLeaderInsert",
+        ),
+      };
+    }
     saved = data;
   }
 
@@ -359,9 +496,17 @@ export async function createBackupSnapshotAction(input: {
   notes?: string;
 }): Promise<ActionResult<{ backup: SystemBackup; storageWarnings: string[] }>> {
   const user = await requireAction("backup.run_manual");
+  if (!VALID_BACKUP_TYPES.has(input.backupType)) {
+    return { ok: false, error: "Jenis backup tidak valid." };
+  }
+  if (input.periodYm && !isValidPeriodYm(input.periodYm)) {
+    return { ok: false, error: "Format periode backup tidak valid (YYYY-MM)." };
+  }
+
   const supabase = await createClient();
   const period = getMonthlyUpdatePeriod();
   const periodYm = input.periodYm ?? period.periodCode;
+  const cleanNotes = sanitizeOptionalText(input.notes, 1000, { multiline: true });
 
   try {
     const { count } = await supabase
@@ -406,7 +551,7 @@ export async function createBackupSnapshotAction(input: {
         actorId: user.id,
         actorName: user.fullName,
         actorRole: user.role,
-        notes: input.notes ?? null,
+        notes: cleanNotes,
       }),
     ]);
 
@@ -426,7 +571,7 @@ export async function createBackupSnapshotAction(input: {
       csvContent,
       xlsxBuffer,
       pdfBuffer,
-      notes: input.notes ?? null,
+      notes: cleanNotes,
     });
 
     // Link backup to monthly_reconciliations if unlocked
@@ -470,7 +615,11 @@ export async function createBackupSnapshotAction(input: {
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Gagal membuat backup snapshot.",
+      error: sanitizeSafeError(
+        err,
+        "Gagal membuat backup snapshot.",
+        "backup/createSnapshot",
+      ),
     };
   }
 }
@@ -480,6 +629,13 @@ export async function getBackupDownloadUrlAction(input: {
   fileType: "json" | "xlsx" | "csv" | "pdf";
 }): Promise<ActionResult<{ url: string; isFallback: boolean }>> {
   await requireAction("backup.download");
+  if (!isValidUuid(input.backupId)) {
+    return { ok: false, error: "ID backup tidak valid." };
+  }
+  if (!VALID_FILE_TYPES.has(input.fileType)) {
+    return { ok: false, error: "Format berkas unduhan tidak valid." };
+  }
+
   const supabase = await createClient();
 
   const { data: backup, error } = await supabase
@@ -499,11 +655,12 @@ export async function getBackupDownloadUrlAction(input: {
     pdf: backup.export_pdf_url,
   };
 
-  const storagePath = pathMap[input.fileType];
-  if (storagePath) {
+  const rawStoragePath = pathMap[input.fileType];
+  const safeStoragePath = sanitizeStoragePath(rawStoragePath);
+  if (safeStoragePath) {
     const { data: signed, error: signErr } = await supabase.storage
       .from("backups")
-      .createSignedUrl(storagePath, 60, { download: true });
+      .createSignedUrl(safeStoragePath, 60, { download: true });
 
     if (!signErr && signed?.signedUrl) {
       return { ok: true, data: { url: signed.signedUrl, isFallback: false } };
@@ -556,6 +713,10 @@ export async function restoreBackupPointInTimeAction(input: {
   }>
 > {
   const user = await requireAction("backup.restore");
+  if (!isValidUuid(input.backupId)) {
+    return { ok: false, error: "ID backup tidak valid." };
+  }
+
   const userClient = await createClient();
 
   const { data: target, error: targetErr } = await userClient
@@ -569,28 +730,36 @@ export async function restoreBackupPointInTimeAction(input: {
     return { ok: false, error: "Backup target tidak ditemukan." };
   }
 
-  if (input.confirmCode.trim().toUpperCase() !== target.backup_code.toUpperCase()) {
+  if (
+    typeof input.confirmCode !== "string" ||
+    input.confirmCode.trim().toUpperCase() !== target.backup_code.toUpperCase()
+  ) {
     return {
       ok: false,
       error: `Kode konfirmasi tidak cocok. Ketik persis: ${target.backup_code}`,
     };
   }
 
-  if (!target.snapshot_json_url) {
+  const safeSnapshotPath = sanitizeStoragePath(target.snapshot_json_url);
+  if (!safeSnapshotPath) {
     return {
       ok: false,
-      error: "Backup ini tidak memiliki file snapshot.json untuk dipulihkan.",
+      error: "Backup ini tidak memiliki file snapshot.json yang valid untuk dipulihkan.",
     };
   }
 
   const { data: blob, error: dlErr } = await userClient.storage
     .from("backups")
-    .download(target.snapshot_json_url);
+    .download(safeSnapshotPath);
 
   if (dlErr || !blob) {
     return {
       ok: false,
-      error: `Gagal mengunduh snapshot JSON: ${dlErr?.message ?? "File tidak ditemukan"}`,
+      error: sanitizeSafeError(
+        dlErr,
+        "Gagal mengunduh file snapshot JSON backup.",
+        "backup/restoreDownload",
+      ),
     };
   }
 
@@ -598,12 +767,13 @@ export async function restoreBackupPointInTimeAction(input: {
   try {
     snapshot = JSON.parse(await blob.text()) as BackupSnapshotPayload;
     if (!snapshot?.tables?.items_master) {
-      throw new Error("Struktur snapshot JSON tidak valid.");
+      return { ok: false, error: "Struktur snapshot JSON tidak valid." };
     }
   } catch (err) {
+    sanitizeSafeError(err, "Format snapshot JSON rusak.", "backup/restoreParse");
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Format snapshot JSON rusak.",
+      error: "Format snapshot JSON rusak atau tidak dapat dibaca.",
     };
   }
 
@@ -653,7 +823,11 @@ export async function restoreBackupPointInTimeAction(input: {
   } catch (err) {
     return {
       ok: false,
-      error: `Gagal membuat pre-restore safety backup. Pemulihan dibatalkan: ${err instanceof Error ? err.message : "Unknown error"}`,
+      error: sanitizeSafeError(
+        err,
+        "Gagal membuat pre-restore safety backup. Pemulihan dibatalkan.",
+        "backup/restoreSafetyBackup",
+      ),
     };
   }
 
@@ -683,12 +857,16 @@ export async function restoreBackupPointInTimeAction(input: {
           .from("items_master")
           .update({ ...mutable, updated_by: user.id })
           .eq("id", row.id);
-        if (error) warnings.push(`items_master ${row.item_code}: ${error.message}`);
-        else summary.items_master += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal diperbarui", "restore/items_master");
+          warnings.push(`Inventaris ${row.item_code}: ${msg}`);
+        } else summary.items_master += 1;
       } else {
         const { error } = await db.from("items_master").insert(row);
-        if (error) warnings.push(`items_master insert ${row.item_code}: ${error.message}`);
-        else summary.items_master += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal dipulihkan", "restore/items_master");
+          warnings.push(`Inventaris ${row.item_code}: ${msg}`);
+        } else summary.items_master += 1;
       }
     }
 
@@ -716,12 +894,16 @@ export async function restoreBackupPointInTimeAction(input: {
           .from("item_kits")
           .update({ ...mutable, updated_by: user.id })
           .eq("id", row.id);
-        if (error) warnings.push(`item_kits ${row.kit_code}: ${error.message}`);
-        else summary.item_kits += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal diperbarui", "restore/item_kits");
+          warnings.push(`Kit ${row.kit_code}: ${msg}`);
+        } else summary.item_kits += 1;
       } else {
         const { error } = await db.from("item_kits").insert(row);
-        if (error) warnings.push(`item_kits insert ${row.kit_code}: ${error.message}`);
-        else summary.item_kits += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal dipulihkan", "restore/item_kits");
+          warnings.push(`Kit ${row.kit_code}: ${msg}`);
+        } else summary.item_kits += 1;
       }
     }
 
@@ -749,12 +931,16 @@ export async function restoreBackupPointInTimeAction(input: {
           .from("archives_hybrid")
           .update({ ...mutable, updated_by: user.id })
           .eq("id", row.id);
-        if (error) warnings.push(`archives_hybrid ${row.doc_code}: ${error.message}`);
-        else summary.archives_hybrid += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal diperbarui", "restore/archives_hybrid");
+          warnings.push(`Arsip ${row.doc_code}: ${msg}`);
+        } else summary.archives_hybrid += 1;
       } else {
         const { error } = await db.from("archives_hybrid").insert(row);
-        if (error) warnings.push(`archives_hybrid insert ${row.doc_code}: ${error.message}`);
-        else summary.archives_hybrid += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal dipulihkan", "restore/archives_hybrid");
+          warnings.push(`Arsip ${row.doc_code}: ${msg}`);
+        } else summary.archives_hybrid += 1;
       }
     }
 
@@ -782,13 +968,16 @@ export async function restoreBackupPointInTimeAction(input: {
           .from("deliveries_log")
           .update({ ...mutable, updated_by: user.id })
           .eq("id", row.id);
-        if (error) warnings.push(`deliveries_log ${row.delivery_code}: ${error.message}`);
-        else summary.deliveries_log += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal diperbarui", "restore/deliveries_log");
+          warnings.push(`Pengiriman ${row.delivery_code}: ${msg}`);
+        } else summary.deliveries_log += 1;
       } else {
         const { error } = await db.from("deliveries_log").insert(row);
-        if (error)
-          warnings.push(`deliveries_log insert ${row.delivery_code}: ${error.message}`);
-        else summary.deliveries_log += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal dipulihkan", "restore/deliveries_log");
+          warnings.push(`Pengiriman ${row.delivery_code}: ${msg}`);
+        } else summary.deliveries_log += 1;
       }
     }
 
@@ -836,8 +1025,10 @@ export async function restoreBackupPointInTimeAction(input: {
             updated_by: user.id,
           })
           .eq("id", row.id);
-        if (error) warnings.push(`subscriptions_vault ${row.sub_code}: ${error.message}`);
-        else summary.subscriptions_vault += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal diperbarui", "restore/subscriptions_vault");
+          warnings.push(`Langganan ${row.sub_code}: ${msg}`);
+        } else summary.subscriptions_vault += 1;
       } else {
         skippedHardDeleted += 1;
       }
@@ -875,13 +1066,16 @@ export async function restoreBackupPointInTimeAction(input: {
           .from("internal_requests")
           .update(mutable)
           .eq("id", row.id);
-        if (error) warnings.push(`internal_requests ${row.request_code}: ${error.message}`);
-        else summary.internal_requests += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal diperbarui", "restore/internal_requests");
+          warnings.push(`Pengajuan ${row.request_code}: ${msg}`);
+        } else summary.internal_requests += 1;
       } else {
         const { error } = await db.from("internal_requests").insert(row);
-        if (error)
-          warnings.push(`internal_requests insert ${row.request_code}: ${error.message}`);
-        else summary.internal_requests += 1;
+        if (error) {
+          const msg = sanitizeSafeError(error, "gagal dipulihkan", "restore/internal_requests");
+          warnings.push(`Pengajuan ${row.request_code}: ${msg}`);
+        } else summary.internal_requests += 1;
       }
     }
 

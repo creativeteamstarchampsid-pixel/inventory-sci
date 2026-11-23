@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
+import {
+  isValidUuid,
+  sanitizeOptionalText,
+  sanitizeSafeError,
+  sanitizeTextInput,
+} from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type {
   BorrowTransaction,
@@ -64,14 +70,15 @@ function getWibDateString(offsetDays = 0): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(date);
 }
 
-function cleanOptionalText(value: string | null | undefined): string | null {
-  if (value === undefined || value === null) return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function deduplicateIds(ids: string[]): string[] {
-  return Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+function deduplicateValidUuids(ids: unknown): string[] {
+  if (!Array.isArray(ids)) return [];
+  return Array.from(
+    new Set(
+      ids
+        .filter((id): id is string => isValidUuid(id))
+        .map((id) => id.trim()),
+    ),
+  );
 }
 
 function revalidateKitPaths() {
@@ -87,14 +94,18 @@ export async function createKitAction(
 ): Promise<ActionResult<ItemKit>> {
   const user = await requireAction("kits.manage");
 
-  const kitName = input.kit_name?.trim() ?? "";
+  const kitName = sanitizeTextInput(input.kit_name, 150);
   if (!kitName) {
     return { ok: false, error: "Nama kit wajib diisi." };
   }
 
-  const bundledIds = deduplicateIds(input.bundled_item_ids ?? []);
-  if (bundledIds.length === 0) {
-    return { ok: false, error: "Pilih minimal satu item inventaris untuk dimasukkan ke dalam kit." };
+  const rawIds = Array.isArray(input.bundled_item_ids) ? input.bundled_item_ids : [];
+  if (rawIds.length > 100) {
+    return { ok: false, error: "Maksimal 100 item dapat dimasukkan dalam satu kit." };
+  }
+  const bundledIds = deduplicateValidUuids(rawIds);
+  if (bundledIds.length === 0 || bundledIds.length !== new Set(rawIds.map((v) => String(v).trim()).filter(Boolean)).size) {
+    return { ok: false, error: "Pilih minimal satu item inventaris yang valid untuk kit." };
   }
 
   const assignedRoom = input.assigned_room ?? null;
@@ -133,7 +144,7 @@ export async function createKitAction(
     .from("item_kits")
     .insert({
       kit_name: kitName,
-      description: cleanOptionalText(input.description),
+      description: sanitizeOptionalText(input.description, 1000, { multiline: true }),
       bundled_item_ids: bundledIds,
       assigned_room: assignedRoom,
       status: initialStatus,
@@ -146,7 +157,7 @@ export async function createKitAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal membuat kit baru.",
+      error: sanitizeSafeError(error, "Gagal membuat kit baru.", "kits/create"),
     };
   }
 
@@ -163,18 +174,22 @@ export async function updateKitAction(
   input: UpdateKitInput,
 ): Promise<ActionResult<ItemKit>> {
   const user = await requireAction("kits.manage");
-  if (!id) {
+  if (!isValidUuid(id)) {
     return { ok: false, error: "ID kit tidak valid." };
   }
 
-  const kitName = input.kit_name?.trim() ?? "";
+  const kitName = sanitizeTextInput(input.kit_name, 150);
   if (!kitName) {
     return { ok: false, error: "Nama kit wajib diisi." };
   }
 
-  const bundledIds = deduplicateIds(input.bundled_item_ids ?? []);
-  if (bundledIds.length === 0) {
-    return { ok: false, error: "Kit harus memiliki minimal satu item inventaris." };
+  const rawIds = Array.isArray(input.bundled_item_ids) ? input.bundled_item_ids : [];
+  if (rawIds.length > 100) {
+    return { ok: false, error: "Maksimal 100 item dapat dimasukkan dalam satu kit." };
+  }
+  const bundledIds = deduplicateValidUuids(rawIds);
+  if (bundledIds.length === 0 || bundledIds.length !== new Set(rawIds.map((v) => String(v).trim()).filter(Boolean)).size) {
+    return { ok: false, error: "Kit harus memiliki minimal satu item inventaris yang valid." };
   }
 
   const assignedRoom = input.assigned_room ?? null;
@@ -216,7 +231,7 @@ export async function updateKitAction(
     .from("item_kits")
     .update({
       kit_name: kitName,
-      description: cleanOptionalText(input.description),
+      description: sanitizeOptionalText(input.description, 1000, { multiline: true }),
       bundled_item_ids: bundledIds,
       assigned_room: assignedRoom,
       status,
@@ -230,7 +245,7 @@ export async function updateKitAction(
   if (error || !data) {
     return {
       ok: false,
-      error: error?.message || "Gagal memperbarui data kit.",
+      error: sanitizeSafeError(error, "Gagal memperbarui data kit.", "kits/update"),
     };
   }
 
@@ -246,7 +261,7 @@ export async function softDeleteKitAction(
   id: string,
 ): Promise<ActionResult<{ id: string; kit_code: string }>> {
   const user = await requireAction("kits.manage");
-  if (!id) {
+  if (!isValidUuid(id)) {
     return { ok: false, error: "ID kit tidak valid." };
   }
 
@@ -282,7 +297,10 @@ export async function softDeleteKitAction(
     .single();
 
   if (error || !data) {
-    return { ok: false, error: error?.message || "Gagal menghapus kit." };
+    return {
+      ok: false,
+      error: sanitizeSafeError(error, "Gagal menghapus kit.", "kits/softDelete"),
+    };
   }
 
   revalidateKitPaths();
@@ -301,8 +319,11 @@ export async function checkoutKitAction(
   },
 ): Promise<ActionResult<{ kit: ItemKit; transaction: BorrowTransaction }>> {
   const user = await requireAction("kits.checkout");
-  if (!kitId) {
+  if (!isValidUuid(kitId)) {
     return { ok: false, error: "ID kit tidak valid." };
+  }
+  if (options?.roomCode && !VALID_LOCATIONS.includes(options.roomCode)) {
+    return { ok: false, error: "Kode ruangan tujuan tidak valid." };
   }
 
   const supabase = await createClient();
@@ -361,7 +382,7 @@ export async function checkoutKitAction(
       parts_before: partsBefore,
       status: "DIPINJAM",
       borrowed_at: new Date().toISOString(),
-      notes: cleanOptionalText(options?.notes),
+      notes: sanitizeOptionalText(options?.notes, 1000, { multiline: true }),
     })
     .select("*")
     .single();
@@ -369,7 +390,11 @@ export async function checkoutKitAction(
   if (trxErr || !transaction) {
     return {
       ok: false,
-      error: trxErr?.message || "Gagal mencatat transaksi check-out kit.",
+      error: sanitizeSafeError(
+        trxErr,
+        "Gagal mencatat transaksi check-out kit.",
+        "kits/checkoutTrx",
+      ),
     };
   }
 
@@ -387,7 +412,11 @@ export async function checkoutKitAction(
   if (updateErr || !updatedKit) {
     return {
       ok: false,
-      error: updateErr?.message || "Transaksi tercatat, tetapi gagal memperbarui status kit.",
+      error: sanitizeSafeError(
+        updateErr,
+        "Transaksi tercatat, tetapi gagal memperbarui status kit.",
+        "kits/checkoutUpdate",
+      ),
     };
   }
 
@@ -409,7 +438,7 @@ export async function returnKitAction(
   },
 ): Promise<ActionResult<{ kit: ItemKit; transaction: BorrowTransaction | null }>> {
   const user = await requireAction("kits.checkout");
-  if (!kitId) {
+  if (!isValidUuid(kitId)) {
     return { ok: false, error: "ID kit tidak valid." };
   }
 
@@ -453,7 +482,9 @@ export async function returnKitAction(
 
   const itemUpdateMap = new Map<string, KitReturnItemUpdate>();
   for (const upd of options?.itemUpdates ?? []) {
-    itemUpdateMap.set(upd.itemId, upd);
+    if (isValidUuid(upd.itemId)) {
+      itemUpdateMap.set(upd.itemId, upd);
+    }
   }
 
   const requestedHygiene =
@@ -473,10 +504,11 @@ export async function returnKitAction(
 
     for (const item of bundledItems ?? []) {
       const override = itemUpdateMap.get(item.id);
-      const nextParts =
-        override !== undefined
-          ? Math.min(item.total_parts, Math.max(0, Math.trunc(override.currentParts)))
+      const rawParts =
+        override !== undefined && Number.isFinite(Number(override.currentParts))
+          ? Math.trunc(Number(override.currentParts))
           : item.current_parts;
+      const nextParts = Math.min(item.total_parts, Math.max(0, rawParts));
 
       partsAfter += nextParts;
       if (item.total_parts > 1 && nextParts < item.total_parts) {
@@ -535,7 +567,7 @@ export async function returnKitAction(
 
   let updatedBorrow: BorrowTransaction | null = null;
   if (activeBorrow) {
-    const returnNote = cleanOptionalText(options?.notes);
+    const returnNote = sanitizeOptionalText(options?.notes, 1000, { multiline: true });
     const mergedNotes = returnNote
       ? activeBorrow.notes
         ? `${activeBorrow.notes} | Kembali: ${returnNote}`
@@ -558,7 +590,11 @@ export async function returnKitAction(
     if (trxErr) {
       return {
         ok: false,
-        error: trxErr.message || "Gagal memperbarui transaksi pengembalian kit.",
+        error: sanitizeSafeError(
+          trxErr,
+          "Gagal memperbarui transaksi pengembalian kit.",
+          "kits/returnTrx",
+        ),
       };
     }
     updatedBorrow = trxData;
@@ -579,7 +615,11 @@ export async function returnKitAction(
   if (kitUpdateErr || !updatedKit) {
     return {
       ok: false,
-      error: kitUpdateErr?.message || "Gagal memperbarui status kit setelah pengembalian.",
+      error: sanitizeSafeError(
+        kitUpdateErr,
+        "Gagal memperbarui status kit setelah pengembalian.",
+        "kits/returnUpdate",
+      ),
     };
   }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { ImagePlus, Loader2, Sparkles, Trash2 } from "lucide-react";
+import { ImagePlus, Loader2, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
 import { useRole } from "@/components/rbac/role-provider";
@@ -43,6 +43,11 @@ import {
   formatRupiah,
 } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
+import {
+  formatBytes,
+  prepareSecureImageUpload,
+  sanitizeStorageFilename,
+} from "@/lib/upload-security";
 import type {
   AssetType,
   BarcodeFormat,
@@ -55,7 +60,6 @@ import type {
 
 const NO_PARENT_VALUE = "__NONE__";
 const CUSTOM_CATEGORY_VALUE = "__CUSTOM__";
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 type ItemFormDialogProps = {
   open: boolean;
@@ -77,7 +81,7 @@ export function ItemFormDialog({
   onSaved,
 }: ItemFormDialogProps) {
   const { can } = useRole();
-  const { runWithFeedback } = useCartoonFeedback();
+  const { runWithFeedback, showError } = useCartoonFeedback();
   const canApproveWriteoff = can("writeoff.approve");
   const isEditing = Boolean(editingItem);
   const lockedWrittenOff = editingItem?.condition === "DIHAPUSBUKU" && !canApproveWriteoff;
@@ -141,6 +145,8 @@ export function ItemFormDialog({
   const [photoPath, setPhotoPath] = useState<string | null>(editingItem?.photo_url ?? null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(initialSignedPhotoUrl);
+  const [isScanningPhoto, setIsScanningPhoto] = useState(false);
+  const [photoSecurityNote, setPhotoSecurityNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -169,26 +175,48 @@ export function ItemFormDialog({
     }
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const inputEl = event.target;
+    const file = inputEl.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setError("File harus berupa gambar (JPG, PNG, WEBP).");
-      return;
-    }
-    if (file.size > MAX_PHOTO_BYTES) {
-      setError("Ukuran foto maksimal 5 MB.");
-      return;
-    }
+
     setError(null);
-    setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    setIsScanningPhoto(true);
+    try {
+      const prepared = await prepareSecureImageUpload(file);
+      if (!prepared.ok) {
+        inputEl.value = "";
+        setError(prepared.error);
+        showError({
+          title: "Foto Ditolak Pemindai Keamanan 🛡️",
+          message: prepared.error,
+        });
+        return;
+      }
+
+      if (previewUrl && previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(previewUrl);
+      }
+      setSelectedFile(prepared.file);
+      setPreviewUrl(URL.createObjectURL(prepared.file));
+      const note =
+        prepared.compressedBytes < prepared.originalBytes
+          ? `Lolos scan keamanan · Dikompresi ${formatBytes(prepared.originalBytes)} → ${formatBytes(prepared.compressedBytes)} (EXIF dibersihkan)`
+          : `Lolos scan keamanan · ${formatBytes(prepared.compressedBytes)} (EXIF dibersihkan)`;
+      setPhotoSecurityNote(note);
+    } finally {
+      setIsScanningPhoto(false);
+    }
   };
 
   const handleRemovePhoto = () => {
+    if (previewUrl && previewUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(previewUrl);
+    }
     setSelectedFile(null);
     setPhotoPath(null);
     setPreviewUrl(null);
+    setPhotoSecurityNote(null);
   };
 
   const parsedPrice = Math.max(0, Number(purchasePrice) || 0);
@@ -248,12 +276,13 @@ export function ItemFormDialog({
 
             if (selectedFile) {
               const supabase = createClient();
-              const ext = selectedFile.name.split(".").pop()?.toLowerCase() || "jpg";
+              const safeName = sanitizeStorageFilename(selectedFile.name, "item-photo");
+              const ext = safeName.split(".").pop()?.toLowerCase() || "webp";
               const uploadPath = `items/${crypto.randomUUID()}.${ext}`;
               const { error: uploadError } = await supabase.storage
                 .from("inventory-photos")
                 .upload(uploadPath, selectedFile, {
-                  contentType: selectedFile.type,
+                  contentType: selectedFile.type || "image/webp",
                   upsert: true,
                 });
 
@@ -750,9 +779,18 @@ export function ItemFormDialog({
           </div>
 
           <div className="space-y-3 rounded-2xl border-2 border-[#2C2623] bg-[#E0F2FE]/45 p-4 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-sky-950/25">
-            <Label htmlFor="item-photo-input" className="text-sm font-extrabold">
-              Foto Barang (Bucket Privat inventory-photos)
-            </Label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label htmlFor="item-photo-input" className="text-sm font-extrabold">
+                Foto Barang (Bucket Privat inventory-photos)
+              </Label>
+              <Badge
+                variant="outline"
+                className="rounded-full border-[1.5px] border-[#2C2623] bg-[#D1FAE5] px-2.5 py-0.5 text-[10px] font-extrabold text-[#14532D] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-emerald-400/50 dark:bg-emerald-950/70 dark:text-emerald-200 dark:shadow-none"
+              >
+                <ShieldCheck className="size-3" />
+                Scan Keamanan &amp; Kompresi Otomatis
+              </Badge>
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               {previewUrl ? (
                 <div className="relative size-20 overflow-hidden rounded-2xl border-2 border-[#2C2623] bg-white shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-400">
@@ -775,16 +813,24 @@ export function ItemFormDialog({
                     htmlFor="item-photo-input"
                     className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] px-3.5 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-stone-400 dark:bg-stone-900 dark:text-stone-100"
                   >
-                    <ImagePlus className="size-3.5" />
-                    {previewUrl ? "Ganti Foto" : "Unggah Foto"}
+                    {isScanningPhoto ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <ImagePlus className="size-3.5" />
+                    )}
+                    {isScanningPhoto
+                      ? "Memindai & Mengompresi..."
+                      : previewUrl
+                        ? "Ganti Foto"
+                        : "Unggah Foto"}
                   </Label>
                   <input
                     id="item-photo-input"
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp"
                     className="sr-only"
                     onChange={handleFileChange}
-                    disabled={isPending}
+                    disabled={isPending || isScanningPhoto}
                   />
                   {previewUrl && (
                     <Button
@@ -792,7 +838,7 @@ export function ItemFormDialog({
                       variant="ghost"
                       size="sm"
                       onClick={handleRemovePhoto}
-                      disabled={isPending}
+                      disabled={isPending || isScanningPhoto}
                       className="rounded-xl hover:bg-[#FFE4E6] dark:hover:bg-rose-950/60"
                     >
                       <Trash2 className="size-3.5" />
@@ -800,8 +846,15 @@ export function ItemFormDialog({
                     </Button>
                   )}
                 </div>
+                {photoSecurityNote && (
+                  <p className="inline-flex items-center gap-1 text-xs font-bold text-[#14532D] dark:text-emerald-300">
+                    <ShieldCheck className="size-3.5 shrink-0" />
+                    {photoSecurityNote}
+                  </p>
+                )}
                 <p className="text-muted-foreground text-xs">
-                  Format JPG/PNG/WEBP, maksimal 5 MB. Disimpan aman dengan Signed URL.
+                  Format asli JPG/PNG/WEBP, maksimal 5 MB. Dipindai magic-byte,
+                  EXIF dibersihkan &amp; dikompresi otomatis sebelum diunggah.
                 </p>
               </div>
             </div>
@@ -831,8 +884,8 @@ export function ItemFormDialog({
             >
               Batal
             </Button>
-            <Button type="submit" disabled={isPending}>
-              {isPending && <Loader2 className="size-4 animate-spin" />}
+            <Button type="submit" disabled={isPending || isScanningPhoto}>
+              {(isPending || isScanningPhoto) && <Loader2 className="size-4 animate-spin" />}
               {isEditing ? "Simpan Perubahan" : "Simpan Item"}
             </Button>
           </DialogFooter>

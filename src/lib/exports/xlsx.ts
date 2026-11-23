@@ -133,6 +133,25 @@ function applyDataRowStyle(
   });
 }
 
+function addEmptyStateRow(sheet: ExcelJS.Worksheet, colCount: number) {
+  const row = addSafeRow(
+    sheet,
+    Array.from({ length: colCount }, (_, idx) =>
+      idx === 0 ? "Tidak ada data pada periode ini." : "",
+    ),
+  );
+  row.eachCell((cell) => {
+    cell.border = THIN_BORDER;
+  });
+  if (colCount > 1) {
+    sheet.mergeCells(row.number, 1, row.number, colCount);
+  }
+  const cell = row.getCell(1);
+  cell.font = { italic: true, size: 10, color: { argb: "FF64748B" } };
+  cell.alignment = { vertical: "middle", horizontal: "center" };
+  row.height = 24;
+}
+
 function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   const sheet = workbook.addWorksheet("Ringkasan");
   sheet.columns = [
@@ -181,7 +200,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   const actorRoleLabel =
     dataset.actorRole === "SYSTEM"
       ? "Sistem"
-      : ROLE_LABELS[dataset.actorRole].title;
+      : (ROLE_LABELS[dataset.actorRole]?.title ?? dataset.actorRole ?? "Sistem");
 
   const kpis: Array<[string, string | number, string, string, boolean?]> = [
     ["Periode Laporan", `${dataset.periodLabel} (${dataset.periodCode})`, "Zona Waktu WIB", dataset.generatedAtWib],
@@ -253,23 +272,27 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
     byRoom.set(item.room_code, current);
   }
 
-  let roomIdx = 0;
-  for (const [roomCode, stats] of byRoom.entries()) {
-    const row = addSafeRow(sheet, [
-      `${roomCode} — ${LOCATION_LABELS[roomCode] ?? roomCode}`,
-      stats.count,
-      stats.anomaly,
-      dataset.canViewValuation
-        ? stats.value
-        : stats.anomaly > 0
-          ? "Perlu Tindak Lanjut"
-          : "Aman",
-    ]);
-    applyDataRowStyle(row, roomIdx, stats.anomaly > 0 ? "warn" : undefined);
-    if (dataset.canViewValuation) {
-      row.getCell(4).numFmt = '"Rp"#,##0';
+  if (byRoom.size === 0) {
+    addEmptyStateRow(sheet, 4);
+  } else {
+    let roomIdx = 0;
+    for (const [roomCode, stats] of byRoom.entries()) {
+      const row = addSafeRow(sheet, [
+        `${roomCode} — ${LOCATION_LABELS[roomCode] ?? roomCode ?? "-"}`,
+        stats.count,
+        stats.anomaly,
+        dataset.canViewValuation
+          ? stats.value
+          : stats.anomaly > 0
+            ? "Perlu Tindak Lanjut"
+            : "Aman",
+      ]);
+      applyDataRowStyle(row, roomIdx, stats.anomaly > 0 ? "warn" : undefined);
+      if (dataset.canViewValuation) {
+        row.getCell(4).numFmt = '"Rp"#,##0';
+      }
+      roomIdx += 1;
     }
-    roomIdx += 1;
   }
 
   sheet.views = [{ state: "frozen", ySplit: 4 }];
@@ -330,57 +353,61 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   ]);
   styleTableHeaderRow(header);
 
-  dataset.items.forEach((item, idx) => {
-    const bookValue = showVal
-      ? calculateBookValue(
-          item.purchase_price,
-          item.acquisition_date,
-          item.useful_life_months,
-          item.residual_value,
-        )
-      : 0;
-    const isPartKurang =
-      item.condition === "PART_KURANG" ||
-      (item.total_parts > 1 && item.current_parts < item.total_parts);
-    const isLowStock =
-      item.asset_type === "CONSUMABLE" &&
-      item.min_stock_threshold > 0 &&
-      item.stock_qty <= item.min_stock_threshold;
-    const isSanitationDue =
-      item.asset_type === "THERAPY_TOY" && item.hygiene_status !== "STERIL";
+  if (dataset.items.length === 0) {
+    addEmptyStateRow(sheet, cols.length);
+  } else {
+    dataset.items.forEach((item, idx) => {
+      const bookValue = showVal
+        ? calculateBookValue(
+            item.purchase_price,
+            item.acquisition_date,
+            item.useful_life_months,
+            item.residual_value,
+          )
+        : 0;
+      const isPartKurang =
+        item.condition === "PART_KURANG" ||
+        (item.total_parts > 1 && item.current_parts < item.total_parts);
+      const isLowStock =
+        item.asset_type === "CONSUMABLE" &&
+        item.min_stock_threshold > 0 &&
+        item.stock_qty <= item.min_stock_threshold;
+      const isSanitationDue =
+        item.asset_type === "THERAPY_TOY" && item.hygiene_status !== "STERIL";
 
-    const row = addSafeRow(sheet, [
-      item.item_code,
-      item.name,
-      ASSET_TYPE_LABELS[item.asset_type],
-      item.category,
-      item.category_prefix,
-      item.room_code,
-      item.rack_location ?? "-",
-      item.pic_name ?? "-",
-      CONDITION_LABELS[item.condition],
-      HYGIENE_LABELS[item.hygiene_status],
-      item.next_sanitization_due ?? "-",
-      `${item.current_parts}/${item.total_parts}`,
-      item.stock_qty,
-      item.min_stock_threshold,
-      item.unit_label,
-      item.acquisition_date ?? "-",
-      ...(showVal ? [item.purchase_price, bookValue] : []),
-      item.description ?? "",
-    ]);
+      const row = addSafeRow(sheet, [
+        item.item_code,
+        item.name,
+        ASSET_TYPE_LABELS[item.asset_type] ?? item.asset_type ?? "-",
+        item.category,
+        item.category_prefix,
+        item.room_code,
+        item.rack_location ?? "-",
+        item.pic_name ?? "-",
+        CONDITION_LABELS[item.condition] ?? item.condition ?? "-",
+        HYGIENE_LABELS[item.hygiene_status] ?? item.hygiene_status ?? "-",
+        item.next_sanitization_due ?? "-",
+        `${item.current_parts}/${item.total_parts}`,
+        item.stock_qty,
+        item.min_stock_threshold,
+        item.unit_label,
+        item.acquisition_date ?? "-",
+        ...(showVal ? [item.purchase_price, bookValue] : []),
+        item.description ?? "",
+      ]);
 
-    const highlight = isPartKurang
-      ? "alert"
-      : isLowStock || isSanitationDue
-        ? "warn"
-        : undefined;
-    applyDataRowStyle(row, idx, highlight);
-    if (showVal) {
-      row.getCell(17).numFmt = '"Rp"#,##0';
-      row.getCell(18).numFmt = '"Rp"#,##0';
-    }
-  });
+      const highlight = isPartKurang
+        ? "alert"
+        : isLowStock || isSanitationDue
+          ? "warn"
+          : undefined;
+      applyDataRowStyle(row, idx, highlight);
+      if (showVal) {
+        row.getCell(17).numFmt = '"Rp"#,##0';
+        row.getCell(18).numFmt = '"Rp"#,##0';
+      }
+    });
+  }
 
   sheet.views = [{ state: "frozen", ySplit: 4 }];
 }
@@ -434,35 +461,39 @@ function addSubscriptionsSheet(workbook: ExcelJS.Workbook, dataset: ExportDatase
   ]);
   styleTableHeaderRow(header);
 
-  dataset.subscriptions.forEach((sub, idx) => {
-    const row = addSafeRow(sheet, [
-      sub.sub_code,
-      sub.service_name,
-      sub.plan_name ?? "-",
-      sub.login_email,
-      "******** (Terenkripsi AES-256)",
-      BILLING_CYCLE_LABELS[sub.billing_cycle],
-      dataset.canViewBilling && sub.cost !== null ? sub.cost : "Terbatas",
-      dataset.canViewBilling && sub.currency ? sub.currency : "Terbatas",
-      dataset.canViewBilling && sub.payment_method
-        ? PAYMENT_METHOD_LABELS[sub.payment_method]
-        : "Terbatas",
-      dataset.canViewBilling && sub.payment_account_label
-        ? sub.payment_account_label
-        : "Terbatas",
-      sub.renewal_date ?? "-",
-      sub.auto_renew ? "Ya" : "Tidak",
-      `${countAssignedSlots(sub.assigned_users_json)}/${sub.max_slots}`,
-      formatAssignedUsers(sub.assigned_users_json),
-      formatDateWIB(sub.password_rotated_at, true),
-      sub.is_active ? "Aktif" : "Nonaktif",
-    ]);
+  if (dataset.subscriptions.length === 0) {
+    addEmptyStateRow(sheet, 16);
+  } else {
+    dataset.subscriptions.forEach((sub, idx) => {
+      const row = addSafeRow(sheet, [
+        sub.sub_code,
+        sub.service_name,
+        sub.plan_name ?? "-",
+        sub.login_email,
+        "******** (Terenkripsi AES-256)",
+        BILLING_CYCLE_LABELS[sub.billing_cycle] ?? sub.billing_cycle ?? "-",
+        dataset.canViewBilling && sub.cost !== null ? sub.cost : "Terbatas",
+        dataset.canViewBilling && sub.currency ? sub.currency : "Terbatas",
+        dataset.canViewBilling && sub.payment_method
+          ? (PAYMENT_METHOD_LABELS[sub.payment_method] ?? sub.payment_method)
+          : "Terbatas",
+        dataset.canViewBilling && sub.payment_account_label
+          ? sub.payment_account_label
+          : "Terbatas",
+        sub.renewal_date ?? "-",
+        sub.auto_renew ? "Ya" : "Tidak",
+        `${countAssignedSlots(sub.assigned_users_json)}/${sub.max_slots}`,
+        formatAssignedUsers(sub.assigned_users_json),
+        formatDateWIB(sub.password_rotated_at, true),
+        sub.is_active ? "Aktif" : "Nonaktif",
+      ]);
 
-    applyDataRowStyle(row, idx, !sub.is_active ? "warn" : undefined);
-    if (dataset.canViewBilling && typeof sub.cost === "number") {
-      row.getCell(7).numFmt = '"Rp"#,##0';
-    }
-  });
+      applyDataRowStyle(row, idx, !sub.is_active ? "warn" : undefined);
+      if (dataset.canViewBilling && typeof sub.cost === "number") {
+        row.getCell(7).numFmt = '"Rp"#,##0';
+      }
+    });
+  }
 
   sheet.views = [{ state: "frozen", ySplit: 4 }];
 }
@@ -510,30 +541,34 @@ function addArchivesSheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   ]);
   styleTableHeaderRow(header);
 
-  dataset.archives.forEach((doc, idx) => {
-    const digitalRef =
-      [doc.digital_file_name, doc.drive_link].filter(Boolean).join(" | ") || "-";
-    const row = addSafeRow(sheet, [
-      doc.doc_code,
-      doc.title,
-      doc.category,
-      doc.branch_building,
-      doc.cabinet_code,
-      doc.drawer_no,
-      doc.folder_code ?? "-",
-      ARCHIVE_STATUS_LABELS[doc.physical_status],
-      `v${doc.version_no}`,
-      doc.is_sop_public_to_staff ? "Ya" : "Tidak",
-      digitalRef,
-      doc.notes ?? "",
-      formatDateWIB(doc.updated_at, true),
-    ]);
-    applyDataRowStyle(
-      row,
-      idx,
-      doc.physical_status === "DIPINJAM" ? "warn" : undefined,
-    );
-  });
+  if (dataset.archives.length === 0) {
+    addEmptyStateRow(sheet, 13);
+  } else {
+    dataset.archives.forEach((doc, idx) => {
+      const digitalRef =
+        [doc.digital_file_name, doc.drive_link].filter(Boolean).join(" | ") || "-";
+      const row = addSafeRow(sheet, [
+        doc.doc_code,
+        doc.title,
+        doc.category,
+        doc.branch_building,
+        doc.cabinet_code,
+        doc.drawer_no,
+        doc.folder_code ?? "-",
+        ARCHIVE_STATUS_LABELS[doc.physical_status] ?? doc.physical_status ?? "-",
+        `v${doc.version_no}`,
+        doc.is_sop_public_to_staff ? "Ya" : "Tidak",
+        digitalRef,
+        doc.notes ?? "",
+        formatDateWIB(doc.updated_at, true),
+      ]);
+      applyDataRowStyle(
+        row,
+        idx,
+        doc.physical_status === "DIPINJAM" ? "warn" : undefined,
+      );
+    });
+  }
 
   sheet.views = [{ state: "frozen", ySplit: 4 }];
 }
@@ -585,34 +620,38 @@ function addDeliveriesSheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) 
   ]);
   styleTableHeaderRow(header);
 
-  dataset.deliveries.forEach((del, idx) => {
-    const row = addSafeRow(sheet, [
-      del.delivery_code,
-      DELIVERY_DIRECTION_LABELS[del.direction],
-      del.package_type,
-      del.courier_name,
-      del.tracking_number ?? "-",
-      del.shipping_cost,
-      del.sender_name,
-      del.receiver_name,
-      del.pic_name ?? "-",
-      del.is_fragile ? "Ya" : "Tidak",
-      DELIVERY_STATUS_LABELS[del.status],
-      del.converted_to_stock_at
-        ? formatDateWIB(del.converted_to_stock_at, true)
-        : "Belum",
-      formatDateWIB(del.shipped_at, true),
-      formatDateWIB(del.received_at, true),
-      del.notes ?? "",
-    ]);
+  if (dataset.deliveries.length === 0) {
+    addEmptyStateRow(sheet, 15);
+  } else {
+    dataset.deliveries.forEach((del, idx) => {
+      const row = addSafeRow(sheet, [
+        del.delivery_code,
+        DELIVERY_DIRECTION_LABELS[del.direction] ?? del.direction ?? "-",
+        del.package_type,
+        del.courier_name,
+        del.tracking_number ?? "-",
+        del.shipping_cost,
+        del.sender_name,
+        del.receiver_name,
+        del.pic_name ?? "-",
+        del.is_fragile ? "Ya" : "Tidak",
+        DELIVERY_STATUS_LABELS[del.status] ?? del.status ?? "-",
+        del.converted_to_stock_at
+          ? formatDateWIB(del.converted_to_stock_at, true)
+          : "Belum",
+        formatDateWIB(del.shipped_at, true),
+        formatDateWIB(del.received_at, true),
+        del.notes ?? "",
+      ]);
 
-    applyDataRowStyle(
-      row,
-      idx,
-      del.status === "DIBATALKAN" ? "alert" : undefined,
-    );
-    row.getCell(6).numFmt = '"Rp"#,##0';
-  });
+      applyDataRowStyle(
+        row,
+        idx,
+        del.status === "DIBATALKAN" ? "alert" : undefined,
+      );
+      row.getCell(6).numFmt = '"Rp"#,##0';
+    });
+  }
 
   sheet.views = [{ state: "frozen", ySplit: 4 }];
 }
@@ -635,7 +674,9 @@ export async function generateXlsxBuffer(dataset: ExportDataset): Promise<Buffer
   }
 
   const rawBuffer = await workbook.xlsx.writeBuffer();
-  return Buffer.from(rawBuffer as ArrayBuffer);
+  return Buffer.isBuffer(rawBuffer)
+    ? rawBuffer
+    : Buffer.from(new Uint8Array(rawBuffer as ArrayBuffer));
 }
 
 export async function exportXlsxWithAuth(): Promise<{

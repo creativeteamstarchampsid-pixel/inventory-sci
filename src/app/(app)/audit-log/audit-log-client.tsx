@@ -202,12 +202,49 @@ function redactAuditSecrets(log: AuditLog): AuditLog {
   };
 }
 
+function parseContentDispositionFilename(
+  disposition: string,
+  fallbackFilename: string,
+): string {
+  const utf8Match =
+    /filename\*\s*=\s*(?:[^';\r\n]*'[^';\r\n]*')?([^;\r\n]+)/i.exec(
+      disposition,
+    );
+  if (utf8Match?.[1]) {
+    const raw = utf8Match[1].trim().replace(/^["']|["']$/g, "");
+    try {
+      const decoded = decodeURIComponent(raw).trim();
+      if (decoded) return decoded;
+    } catch {
+      if (raw) return raw;
+    }
+  }
+
+  const quotedMatch = /filename\s*=\s*"([^"]+)"/i.exec(disposition);
+  if (quotedMatch?.[1]?.trim()) {
+    return quotedMatch[1].trim();
+  }
+
+  const plainMatch = /filename\s*=\s*([^;\r\n]+)/i.exec(disposition);
+  if (plainMatch?.[1]?.trim()) {
+    const cleaned = plainMatch[1].trim().replace(/^["']|["']$/g, "");
+    if (cleaned) return cleaned;
+  }
+
+  return fallbackFilename;
+}
+
 async function downloadAuditCsv() {
   const response = await fetch("/api/exports/csv?scope=audit", {
     credentials: "same-origin",
   });
+  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+
   if (!response.ok) {
-    let message = `Gagal mengunduh ekspor audit (HTTP ${response.status}).`;
+    let message =
+      response.status === 401 || response.redirected
+        ? "Sesi Anda telah berakhir. Silakan muat ulang halaman dan masuk kembali."
+        : `Gagal mengunduh ekspor audit (HTTP ${response.status}).`;
     try {
       const body = (await response.json()) as { error?: string };
       if (body?.error) message = body.error;
@@ -216,19 +253,39 @@ async function downloadAuditCsv() {
     }
     throw new Error(message);
   }
+
+  if (response.redirected || contentType.includes("text/html")) {
+    throw new Error(
+      "Sesi Anda telah berakhir. Silakan muat ulang halaman dan masuk kembali.",
+    );
+  }
+
   const blob = await response.blob();
+  if (blob.size === 0) {
+    throw new Error("Berkas ekspor kosong. Silakan coba lagi.");
+  }
+  if (blob.type.toLowerCase().includes("text/html")) {
+    throw new Error(
+      "Sesi Anda telah berakhir. Silakan muat ulang halaman dan masuk kembali.",
+    );
+  }
+
   const disposition = response.headers.get("content-disposition") ?? "";
-  const match = /filename="?([^";]+)"?/i.exec(disposition);
-  const filename = match?.[1] || "starops-audit.csv";
+  const filename = parseContentDispositionFilename(
+    disposition,
+    "starops-audit.csv",
+  );
 
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = objectUrl;
   link.download = filename;
+  link.rel = "noopener";
+  link.style.display = "none";
   document.body.appendChild(link);
   link.click();
   link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
   return filename;
 }
 

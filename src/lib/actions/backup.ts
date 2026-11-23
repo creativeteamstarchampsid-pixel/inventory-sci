@@ -12,8 +12,6 @@ import {
   persistBackupBundle,
   type BackupSnapshotPayload,
 } from "@/lib/exports/csv";
-import { generatePdfBuffer } from "@/lib/exports/pdf";
-import { generateXlsxBuffer } from "@/lib/exports/xlsx";
 import { getJakartaDateParts, getMonthlyUpdatePeriod } from "@/lib/period";
 import {
   isValidPeriodYm,
@@ -89,7 +87,10 @@ export async function toggleOpnameRoomChecklist(input: {
   const user = await requireAction("reconciliation.submit");
 
   if (!isValidPeriodYm(input.periodYm)) {
-    return { ok: false, error: "Format periode opname tidak valid (gunakan YYYY-MM)." };
+    return {
+      ok: false,
+      error: "Format periode opname tidak valid (gunakan YYYYMM atau YYYY-MM).",
+    };
   }
   if (!OPNAME_ROOM_CODES.includes(input.roomCode)) {
     return {
@@ -221,7 +222,10 @@ export async function approveReconciliationStage(input: {
 }): Promise<ActionResult<MonthlyReconciliation>> {
   await requireAction("reconciliation.submit");
   if (!isValidPeriodYm(input.periodYm)) {
-    return { ok: false, error: "Format periode rekonsiliasi tidak valid (YYYY-MM)." };
+    return {
+      ok: false,
+      error: "Format periode rekonsiliasi tidak valid (gunakan YYYYMM atau YYYY-MM).",
+    };
   }
   if (input.stage !== "leader" && input.stage !== "admin" && input.stage !== "owner") {
     return { ok: false, error: "Tahap persetujuan rekonsiliasi tidak valid." };
@@ -500,7 +504,10 @@ export async function createBackupSnapshotAction(input: {
     return { ok: false, error: "Jenis backup tidak valid." };
   }
   if (input.periodYm && !isValidPeriodYm(input.periodYm)) {
-    return { ok: false, error: "Format periode backup tidak valid (YYYY-MM)." };
+    return {
+      ok: false,
+      error: "Format periode backup tidak valid (gunakan YYYYMM atau YYYY-MM).",
+    };
   }
 
   const supabase = await createClient();
@@ -541,6 +548,10 @@ export async function createBackupSnapshotAction(input: {
     });
 
     const csvContent = generateCsvString(dataset, "all");
+    const [{ generateXlsxBuffer }, { generatePdfBuffer }] = await Promise.all([
+      import("@/lib/exports/xlsx"),
+      import("@/lib/exports/pdf"),
+    ]);
     const [xlsxBuffer, pdfBuffer, snapshot] = await Promise.all([
       generateXlsxBuffer(dataset),
       generatePdfBuffer(dataset),
@@ -789,6 +800,10 @@ export async function restoreBackupPointInTimeAction(input: {
       actorRole: user.role,
     });
     const csvContent = generateCsvString(dataset, "all");
+    const [{ generateXlsxBuffer }, { generatePdfBuffer }] = await Promise.all([
+      import("@/lib/exports/xlsx"),
+      import("@/lib/exports/pdf"),
+    ]);
     const [xlsxBuffer, pdfBuffer, currentSnapshot] = await Promise.all([
       generateXlsxBuffer(dataset),
       generatePdfBuffer(dataset),

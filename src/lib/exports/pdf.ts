@@ -139,7 +139,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#CBD5E1",
     borderRadius: 3,
-    overflow: "hidden",
     marginBottom: 14,
   },
   tableHeader: {
@@ -271,6 +270,28 @@ const styles = StyleSheet.create({
   },
 });
 
+function safePdfText(value: unknown, fallback = "-"): string {
+  if (value === null || value === undefined) return fallback;
+  const normalized = String(value)
+    .replace(/\u2014|\u2013/g, "-")
+    .replace(/\u00B7/g, "|")
+    .replace(/\u2022/g, "-")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/\u2026/g, "...")
+    .replace(/\u00A0/g, " ")
+    // Strip surrogate pairs (emojis / astral plane), zero-width chars, control chars
+    .replace(/[\uD800-\uDFFF]/g, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+    // Keep WinAnsi-compatible ASCII & Latin-1 printable chars plus \t and \n
+    .replace(/[^\x09\x0A\x20-\x7E\xA0-\xFF]/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  return normalized.length > 0 ? normalized : fallback;
+}
+
 function buildMonthlyReportDocument(dataset: ExportDataset) {
   const anomalies = getStockAnomalies(dataset.items, dataset.todayWib);
 
@@ -306,7 +327,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
   const actorRoleLabel =
     dataset.actorRole === "SYSTEM"
       ? "Sistem"
-      : ROLE_LABELS[dataset.actorRole].title;
+      : (ROLE_LABELS[dataset.actorRole]?.title ?? dataset.actorRole ?? "Sistem");
 
   const statCards: Array<{
     label: string;
@@ -317,7 +338,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
     {
       label: "TOTAL INVENTARIS AKTIF",
       value: `${dataset.items.length} Item`,
-      sub: `${toyCount} Mainan · ${fixedCount} Aset · ${consumableCount} Habis Pakai`,
+      sub: `${toyCount} Mainan | ${fixedCount} Aset | ${consumableCount} Habis Pakai`,
     },
     ...(dataset.canViewValuation
       ? [
@@ -355,7 +376,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
       label: dataset.canExportFinancial ? "ARSIP & LOGISTIK" : "ARSIP BERKAS",
       value: `${dataset.archives.length} Berkas`,
       sub: dataset.canExportFinancial
-        ? `${dataset.deliveries.length} log pengiriman · Opname ${opnamePct}%`
+        ? `${dataset.deliveries.length} log pengiriman | Opname ${opnamePct}%`
         : `Progres Opname Ruangan: ${opnamePct}%`,
     },
   ];
@@ -367,9 +388,9 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
   return e(
     Document,
     {
-      title: `Laporan Bulanan StarOps ${dataset.periodLabel}`,
-      author: "StarOps — Star Champs Indonesia",
-      subject: `Rekonsiliasi & Ringkasan Inventaris ${dataset.periodCode}`,
+      title: safePdfText(`Laporan Bulanan StarOps ${dataset.periodLabel}`, "Laporan Bulanan StarOps"),
+      author: "StarOps - Star Champs Indonesia",
+      subject: safePdfText(`Rekonsiliasi & Ringkasan Inventaris ${dataset.periodCode}`, "Rekonsiliasi & Ringkasan Inventaris"),
     },
     e(
       Page,
@@ -381,7 +402,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
         e(
           View,
           { style: styles.brandBlock },
-          e(Text, { style: styles.brandEyebrow }, "STAR CHAMPS INDONESIA · STAROPS"),
+          e(Text, { style: styles.brandEyebrow }, "STAR CHAMPS INDONESIA | STAROPS"),
           e(Text, { style: styles.brandTitle }, "LAPORAN RESMI OPERASIONAL BULANAN"),
           e(
             Text,
@@ -398,15 +419,15 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
           e(
             Text,
             { style: styles.metaValue },
-            `${dataset.periodLabel} (${dataset.periodCode})`,
+            safePdfText(`${dataset.periodLabel} (${dataset.periodCode})`),
           ),
           e(Text, { style: styles.metaLabel }, "Dicetak Pada"),
-          e(Text, { style: styles.metaValue }, dataset.generatedAtWib),
+          e(Text, { style: styles.metaValue }, safePdfText(dataset.generatedAtWib)),
           e(Text, { style: styles.metaLabel }, "Petugas"),
           e(
             Text,
             { style: styles.metaValue },
-            `${dataset.actorName} (${actorRoleLabel})`,
+            safePdfText(`${dataset.actorName} (${actorRoleLabel})`),
           ),
         ),
       ),
@@ -423,13 +444,13 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
               key: `stat-${idx}`,
               style: card.alert ? styles.statCardAlert : styles.statCard,
             },
-            e(Text, { style: styles.statLabel }, card.label),
+            e(Text, { style: styles.statLabel }, safePdfText(card.label)),
             e(
               Text,
               { style: card.alert ? styles.statValueAlert : styles.statValue },
-              card.value,
+              safePdfText(card.value),
             ),
-            e(Text, { style: styles.statSub }, card.sub),
+            e(Text, { style: styles.statSub }, safePdfText(card.sub)),
           ),
         ),
       ),
@@ -442,7 +463,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
           View,
           { style: styles.recCol },
           e(Text, { style: styles.metaLabel }, "Progres Stock Opname"),
-          e(Text, { style: styles.metaValue }, `${opnamePct}% Selesai`),
+          e(Text, { style: styles.metaValue }, safePdfText(`${opnamePct}% Selesai`)),
         ),
         e(
           View,
@@ -458,7 +479,7 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
           View,
           { style: styles.recCol },
           e(Text, { style: styles.metaLabel }, "Total Anomali Terdeteksi"),
-          e(Text, { style: styles.metaValue }, `${anomalies.rows.length} Item`),
+          e(Text, { style: styles.metaValue }, safePdfText(`${anomalies.rows.length} Item`)),
         ),
       ),
 
@@ -500,15 +521,15 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
                   wrap: false,
                 },
                 e(Text, { style: styles.colNo }, String(idx + 1)),
-                e(Text, { style: styles.colCode }, row.item.item_code),
+                e(Text, { style: styles.colCode }, safePdfText(row.item.item_code)),
                 e(
                   Text,
                   { style: styles.colName },
-                  `${row.item.name} (${row.item.room_code})`,
+                  safePdfText(`${row.item.name} (${row.item.room_code})`),
                 ),
-                e(Text, { style: styles.colType }, row.reasons.join(", ")),
-                e(Text, { style: styles.colDetail }, row.detail),
-                e(Text, { style: styles.colPic }, row.item.pic_name ?? "-"),
+                e(Text, { style: styles.colType }, safePdfText(row.reasons.join(", "))),
+                e(Text, { style: styles.colDetail }, safePdfText(row.detail)),
+                e(Text, { style: styles.colPic }, safePdfText(row.item.pic_name, "-")),
               ),
             ),
           ),
@@ -549,13 +570,18 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
               e(
                 Text,
                 { style: styles.signatureName },
-                dataset.approverNames.adminName ?? "( .............................. )",
+                safePdfText(
+                  dataset.approverNames.adminName,
+                  "( .............................. )",
+                ),
               ),
               dataset.reconciliation?.verified_by_admin_at
                 ? e(
                     Text,
                     { style: styles.signatureStamp },
-                    `E-Verified: ${formatDateWIB(dataset.reconciliation.verified_by_admin_at, true)}`,
+                    safePdfText(
+                      `E-Verified: ${formatDateWIB(dataset.reconciliation.verified_by_admin_at, true)}`,
+                    ),
                   )
                 : e(Text, { style: styles.signaturePending }, "Menunggu verifikasi"),
             ),
@@ -576,13 +602,18 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
               e(
                 Text,
                 { style: styles.signatureName },
-                dataset.approverNames.leaderName ?? "( .............................. )",
+                safePdfText(
+                  dataset.approverNames.leaderName,
+                  "( .............................. )",
+                ),
               ),
               dataset.reconciliation?.approved_by_leader_at
                 ? e(
                     Text,
                     { style: styles.signatureStamp },
-                    `E-Approved: ${formatDateWIB(dataset.reconciliation.approved_by_leader_at, true)}`,
+                    safePdfText(
+                      `E-Approved: ${formatDateWIB(dataset.reconciliation.approved_by_leader_at, true)}`,
+                    ),
                   )
                 : e(Text, { style: styles.signaturePending }, "Menunggu pemeriksaan"),
             ),
@@ -603,13 +634,18 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
               e(
                 Text,
                 { style: styles.signatureName },
-                dataset.approverNames.ownerName ?? "( .............................. )",
+                safePdfText(
+                  dataset.approverNames.ownerName,
+                  "( .............................. )",
+                ),
               ),
               dataset.reconciliation?.approved_by_owner_at
                 ? e(
                     Text,
                     { style: styles.signatureStamp },
-                    `E-Signed: ${formatDateWIB(dataset.reconciliation.approved_by_owner_at, true)}`,
+                    safePdfText(
+                      `E-Signed: ${formatDateWIB(dataset.reconciliation.approved_by_owner_at, true)}`,
+                    ),
                   )
                 : e(Text, { style: styles.signaturePending }, "Menunggu pengesahan Owner"),
             ),
@@ -625,8 +661,8 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
           Text,
           null,
           dataset.canExportFinancial
-            ? "StarOps · Star Champs Indonesia · Dokumen Audit Internal (Kredensial Vault Termasking)"
-            : "StarOps · Star Champs Indonesia · Dokumen Operasional Internal",
+            ? "StarOps | Star Champs Indonesia | Dokumen Audit Internal (Kredensial Vault Termasking)"
+            : "StarOps | Star Champs Indonesia | Dokumen Operasional Internal",
         ),
         e(Text, {
           render: ({ pageNumber, totalPages }: { pageNumber: number; totalPages: number }) =>
@@ -639,7 +675,8 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
 
 export async function generatePdfBuffer(dataset: ExportDataset): Promise<Buffer> {
   const doc = buildMonthlyReportDocument(dataset);
-  return renderToBuffer(doc);
+  const buf = await renderToBuffer(doc);
+  return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
 }
 
 export async function exportPdfWithAuth(): Promise<{

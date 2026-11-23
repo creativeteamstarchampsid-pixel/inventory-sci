@@ -6,8 +6,6 @@ import {
   loadExportDataset,
   type ExportScope,
 } from "@/lib/exports/csv";
-import { generatePdfBuffer } from "@/lib/exports/pdf";
-import { generateXlsxBuffer } from "@/lib/exports/xlsx";
 import { can, isRole } from "@/lib/rbac";
 import { isValidPeriodYm, sanitizeSafeError } from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
@@ -89,7 +87,7 @@ export async function GET(
   const rawPeriod = request.nextUrl.searchParams.get("period")?.trim();
   if (rawPeriod && !isValidPeriodYm(rawPeriod)) {
     return NextResponse.json(
-      { error: "Format periode tidak valid. Gunakan format YYYY-MM." },
+      { error: "Format periode tidak valid. Gunakan format YYYYMM atau YYYY-MM." },
       { status: 400 },
     );
   }
@@ -109,23 +107,33 @@ export async function GET(
       periodCode: periodParam,
     });
 
-    await supabase.from("audit_logs").insert({
-      actor_id: profile.id,
-      actor_name: actorName,
-      actor_role: profile.role,
-      action: "EXPORT_DATA",
-      entity_type: "system_exports",
-      entity_code: `${format.toUpperCase()}-${scope.toUpperCase()}`,
-      summary: `Mengunduh ekspor ${format.toUpperCase()} (cakupan: ${scope}) periode ${dataset.periodCode}`,
-      metadata: {
-        format,
-        scope,
-        period_ym: dataset.periodCode,
-      },
-    });
+    try {
+      const { error: auditError } = await supabase.from("audit_logs").insert({
+        actor_id: profile.id,
+        actor_name: actorName,
+        actor_role: profile.role,
+        action: "EXPORT_DATA",
+        entity_type: "system_exports",
+        entity_code: `${format.toUpperCase()}-${scope.toUpperCase()}`,
+        summary: `Mengunduh ekspor ${format.toUpperCase()} (cakupan: ${scope}) periode ${dataset.periodCode}`,
+        metadata: {
+          format,
+          scope,
+          period_ym: dataset.periodCode,
+        },
+      });
+      if (auditError) {
+        console.error(
+          "[api/exports] Failed to insert audit_logs entry:",
+          auditError.message,
+        );
+      }
+    } catch (auditErr) {
+      console.error("[api/exports] Unexpected audit_logs error:", auditErr);
+    }
 
     const safePeriod = isValidPeriodYm(dataset.periodCode)
-      ? dataset.periodCode
+      ? dataset.periodCode.trim()
       : "latest";
 
     if (format === "csv") {
@@ -136,6 +144,7 @@ export async function GET(
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
           "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Length": String(Buffer.byteLength(csv, "utf8")),
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
         },
@@ -143,31 +152,44 @@ export async function GET(
     }
 
     if (format === "xlsx") {
+      const { generateXlsxBuffer } = await import("@/lib/exports/xlsx");
       const buffer = await generateXlsxBuffer(dataset);
+      const bytes = new Uint8Array(buffer);
       const filename = `starops-laporan-${safePeriod}.xlsx`;
-      return new NextResponse(new Uint8Array(buffer), {
+      return new NextResponse(bytes, {
         status: 200,
         headers: {
           "Content-Type":
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Length": String(bytes.byteLength),
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
         },
       });
     }
 
-    const pdfBuffer = await generatePdfBuffer(dataset);
-    const filename = `starops-laporan-bulanan-${safePeriod}.pdf`;
-    return new NextResponse(new Uint8Array(pdfBuffer), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Cache-Control": "no-store",
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
+    if (format === "pdf") {
+      const { generatePdfBuffer } = await import("@/lib/exports/pdf");
+      const pdfBuffer = await generatePdfBuffer(dataset);
+      const bytes = new Uint8Array(pdfBuffer);
+      const filename = `starops-laporan-bulanan-${safePeriod}.pdf`;
+      return new NextResponse(bytes, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Length": String(bytes.byteLength),
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
+
+    return NextResponse.json(
+      { error: "Format ekspor tidak didukung. Gunakan csv, xlsx, atau pdf." },
+      { status: 400 },
+    );
   } catch (err) {
     return NextResponse.json(
       {

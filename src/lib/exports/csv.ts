@@ -264,7 +264,9 @@ export function getStockAnomalies(
         item.next_sanitization_due && item.next_sanitization_due <= todayWib
           ? `, jadwal ${item.next_sanitization_due}`
           : "";
-      details.push(`Sanitasi: ${HYGIENE_LABELS[item.hygiene_status]}${dueNote}`);
+      const hygieneLabel =
+        HYGIENE_LABELS[item.hygiene_status] ?? item.hygiene_status ?? "-";
+      details.push(`Sanitasi: ${hygieneLabel}${dueNote}`);
     }
 
     const isDamaged =
@@ -274,8 +276,10 @@ export function getStockAnomalies(
     if (isDamaged) {
       damaged.push(item);
       tags.push("RUSAK");
-      reasons.push(CONDITION_LABELS[item.condition]);
-      details.push(`Kondisi: ${CONDITION_LABELS[item.condition]}`);
+      const conditionLabel =
+        CONDITION_LABELS[item.condition] ?? item.condition ?? "-";
+      reasons.push(conditionLabel);
+      details.push(`Kondisi: ${conditionLabel}`);
     }
 
     if (reasons.length > 0) {
@@ -343,7 +347,8 @@ export async function loadExportDataset(
     .from("items_master")
     .select("*")
     .is("deleted_at", null)
-    .order("item_code", { ascending: true });
+    .order("item_code", { ascending: true })
+    .limit(5000);
 
   const subscriptionsPromise = !canExportFinancial
     ? Promise.resolve({ data: [] as ExportSubscriptionRow[], error: null })
@@ -364,7 +369,8 @@ export async function loadExportDataset(
     .from("archives_hybrid")
     .select("*")
     .is("deleted_at", null)
-    .order("doc_code", { ascending: true });
+    .order("doc_code", { ascending: true })
+    .limit(5000);
 
   const deliveriesPromise = !canExportFinancial
     ? Promise.resolve({ data: [] as DeliveryLog[], error: null })
@@ -372,7 +378,8 @@ export async function loadExportDataset(
         .from("deliveries_log")
         .select("*")
         .is("deleted_at", null)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(5000);
 
   const reconciliationPromise = supabase
     .from("monthly_reconciliations")
@@ -485,19 +492,121 @@ export async function loadExportDataset(
   };
 }
 
+function getInventoryCsvFields(canViewValuation: boolean): string[] {
+  return [
+    "Kode_Item",
+    "Nama_Barang",
+    "Tipe_Aset",
+    "Prefix_Kategori",
+    "Kategori",
+    "Lokasi_Ruang",
+    "Rak_Lokasi",
+    "PIC",
+    "Kondisi",
+    "Status_Sanitasi",
+    "Jadwal_Sanitasi_Berikutnya",
+    "Kepingan_Saat_Ini",
+    "Total_Kepingan",
+    "Stok",
+    "Batas_Stok_Min",
+    "Satuan",
+    "Tanggal_Perolehan",
+    ...(canViewValuation ? ["Harga_Beli_IDR", "Nilai_Buku_IDR"] : []),
+    "Catatan",
+  ];
+}
+
+const SUBSCRIPTION_CSV_FIELDS = [
+  "Kode_Sub",
+  "Nama_Layanan",
+  "Paket",
+  "Email_Login",
+  "Kredensial_Vault",
+  "Siklus_Tagihan",
+  "Biaya",
+  "Mata_Uang",
+  "Metode_Bayar",
+  "Akun_Pembayaran",
+  "Jatuh_Tempo",
+  "Auto_Renew",
+  "Slot_Terpakai",
+  "Slot_Maksimal",
+  "Pengguna_Terdaftar",
+  "Rotasi_Password_Terakhir",
+  "Status",
+];
+
+const ARCHIVE_CSV_FIELDS = [
+  "Kode_Dokumen",
+  "Judul",
+  "Kategori",
+  "Gedung_Cabang",
+  "Lemari",
+  "Laci",
+  "Kode_Map",
+  "Status_Fisik",
+  "Versi",
+  "SOP_Publik_Staff",
+  "Nama_File_Digital",
+  "Tautan_Drive",
+  "Catatan",
+  "Diperbarui",
+];
+
+function getDeliveryCsvFields(canExportFinancial: boolean): string[] {
+  return [
+    "Kode_Pengiriman",
+    "Arah",
+    "Jenis_Paket",
+    "Kurir",
+    "No_Resi",
+    ...(canExportFinancial ? ["Biaya_Ongkir_IDR"] : []),
+    "Pengirim",
+    "Penerima",
+    "PIC",
+    "Barang_Pecah_Belah",
+    "Status",
+    "Konversi_Stok",
+    "Tanggal_Kirim",
+    "Tanggal_Terima",
+    "Catatan",
+  ];
+}
+
+const ANOMALY_CSV_FIELDS = [
+  "No",
+  "Kode_Item",
+  "Nama_Barang",
+  "Ruang",
+  "Jenis_Anomali",
+  "Detail",
+  "PIC",
+];
+
+const AUDIT_CSV_FIELDS = [
+  "Waktu_WIB",
+  "Aktor",
+  "Peran",
+  "Aksi",
+  "Entitas",
+  "Kode_Entitas",
+  "Ringkasan",
+];
+
 function mapInventoryRows(items: ItemMaster[], canViewValuation: boolean) {
   return items.map((item) => {
     const base: Record<string, string | number> = {
       Kode_Item: item.item_code,
       Nama_Barang: item.name,
-      Tipe_Aset: ASSET_TYPE_LABELS[item.asset_type],
+      Tipe_Aset: ASSET_TYPE_LABELS[item.asset_type] ?? item.asset_type ?? "-",
       Prefix_Kategori: item.category_prefix,
       Kategori: item.category,
       Lokasi_Ruang: item.room_code,
       Rak_Lokasi: item.rack_location ?? "",
       PIC: item.pic_name ?? "",
-      Kondisi: CONDITION_LABELS[item.condition],
-      Status_Sanitasi: HYGIENE_LABELS[item.hygiene_status],
+      Kondisi: CONDITION_LABELS[item.condition] ?? item.condition ?? "-",
+      Status_Sanitasi:
+        HYGIENE_LABELS[item.hygiene_status] ?? item.hygiene_status ?? "-",
       Jadwal_Sanitasi_Berikutnya: item.next_sanitization_due ?? "",
       Kepingan_Saat_Ini: item.current_parts,
       Total_Kepingan: item.total_parts,
@@ -529,7 +638,8 @@ function mapSubscriptionRows(dataset: ExportDataset) {
     Paket: sub.plan_name ?? "",
     Email_Login: sub.login_email,
     Kredensial_Vault: "******** (Terenkripsi AES-256)",
-    Siklus_Tagihan: BILLING_CYCLE_LABELS[sub.billing_cycle],
+    Siklus_Tagihan:
+      BILLING_CYCLE_LABELS[sub.billing_cycle] ?? sub.billing_cycle ?? "-",
     Biaya: dataset.canViewBilling && sub.cost !== null ? sub.cost : "Terbatas",
     Mata_Uang: dataset.canViewBilling && sub.currency ? sub.currency : "Terbatas",
     Metode_Bayar:
@@ -557,7 +667,8 @@ function mapArchiveRows(archives: ArchiveHybrid[]) {
     Lemari: doc.cabinet_code,
     Laci: doc.drawer_no,
     Kode_Map: doc.folder_code ?? "",
-    Status_Fisik: ARCHIVE_STATUS_LABELS[doc.physical_status],
+    Status_Fisik:
+      ARCHIVE_STATUS_LABELS[doc.physical_status] ?? doc.physical_status ?? "-",
     Versi: doc.version_no,
     SOP_Publik_Staff: doc.is_sop_public_to_staff ? "Ya" : "Tidak",
     Nama_File_Digital: doc.digital_file_name ?? "",
@@ -571,7 +682,12 @@ function mapDeliveryRows(deliveries: DeliveryLog[], canExportFinancial: boolean)
   return deliveries.map((del) => {
     const base: Record<string, string | number> = {
       Kode_Pengiriman: del.delivery_code,
-      Arah: del.direction === "INBOUND" ? "Masuk (Inbound)" : "Keluar (Outbound)",
+      Arah:
+        del.direction === "INBOUND"
+          ? "Masuk (Inbound)"
+          : del.direction === "OUTBOUND"
+            ? "Keluar (Outbound)"
+            : String(del.direction ?? "-"),
       Jenis_Paket: del.package_type,
       Kurir: del.courier_name,
       No_Resi: del.tracking_number ?? "",
@@ -583,7 +699,7 @@ function mapDeliveryRows(deliveries: DeliveryLog[], canExportFinancial: boolean)
     base.Penerima = del.receiver_name;
     base.PIC = del.pic_name ?? "";
     base.Barang_Pecah_Belah = del.is_fragile ? "Ya" : "Tidak";
-    base.Status = DELIVERY_STATUS_LABELS[del.status];
+    base.Status = DELIVERY_STATUS_LABELS[del.status] ?? del.status ?? "-";
     base.Konversi_Stok = del.converted_to_stock_at
       ? formatDateWIB(del.converted_to_stock_at, true)
       : "Belum";
@@ -611,7 +727,9 @@ function mapAuditRows(logs: AuditLog[]) {
   return logs.map((log) => ({
     Waktu_WIB: formatDateWIB(log.created_at, true),
     Aktor: log.actor_name ?? "Sistem",
-    Peran: log.actor_role ? ROLE_LABELS[log.actor_role].title : "Sistem",
+    Peran: log.actor_role
+      ? (ROLE_LABELS[log.actor_role]?.title ?? log.actor_role)
+      : "Sistem",
     Aksi: log.action,
     Entitas: log.entity_type,
     Kode_Entitas: log.entity_code ?? "",
@@ -634,6 +752,16 @@ function sanitizeCsvRows<T extends Record<string, string | number>>(rows: T[]): 
   return rows.map(sanitizeCsvRow);
 }
 
+function unparseCsvWithHeaders<T extends Record<string, string | number>>(
+  rows: T[],
+  fields: string[],
+): string {
+  if (rows.length === 0) {
+    return Papa.unparse({ fields, data: [] });
+  }
+  return Papa.unparse(sanitizeCsvRows(rows));
+}
+
 export function generateCsvString(
   dataset: ExportDataset,
   scope: ExportScope = "all",
@@ -643,39 +771,59 @@ export function generateCsvString(
   if (scope === "inventory") {
     return (
       bom +
-      Papa.unparse(
-        sanitizeCsvRows(mapInventoryRows(dataset.items, dataset.canViewValuation)),
+      unparseCsvWithHeaders(
+        mapInventoryRows(dataset.items, dataset.canViewValuation),
+        getInventoryCsvFields(dataset.canViewValuation),
       )
     );
   }
   if (scope === "subscriptions") {
     if (!dataset.canExportFinancial) return bom;
-    return bom + Papa.unparse(sanitizeCsvRows(mapSubscriptionRows(dataset)));
+    return (
+      bom +
+      unparseCsvWithHeaders(
+        mapSubscriptionRows(dataset),
+        SUBSCRIPTION_CSV_FIELDS,
+      )
+    );
   }
   if (scope === "archives") {
-    return bom + Papa.unparse(sanitizeCsvRows(mapArchiveRows(dataset.archives)));
+    return (
+      bom +
+      unparseCsvWithHeaders(
+        mapArchiveRows(dataset.archives),
+        ARCHIVE_CSV_FIELDS,
+      )
+    );
   }
   if (scope === "deliveries") {
     if (!dataset.canExportFinancial) return bom;
     return (
       bom +
-      Papa.unparse(
-        sanitizeCsvRows(mapDeliveryRows(dataset.deliveries, dataset.canExportFinancial)),
+      unparseCsvWithHeaders(
+        mapDeliveryRows(dataset.deliveries, dataset.canExportFinancial),
+        getDeliveryCsvFields(dataset.canExportFinancial),
       )
     );
   }
   if (scope === "anomalies") {
-    return bom + Papa.unparse(sanitizeCsvRows(mapAnomalyRows(dataset)));
+    return (
+      bom +
+      unparseCsvWithHeaders(mapAnomalyRows(dataset), ANOMALY_CSV_FIELDS)
+    );
   }
   if (scope === "audit") {
     if (!dataset.canExportFinancial) return bom;
-    return bom + Papa.unparse(sanitizeCsvRows(mapAuditRows(dataset.auditLogs)));
+    return (
+      bom +
+      unparseCsvWithHeaders(mapAuditRows(dataset.auditLogs), AUDIT_CSV_FIELDS)
+    );
   }
 
   const actorRoleLabel =
     dataset.actorRole === "SYSTEM"
       ? "Sistem"
-      : ROLE_LABELS[dataset.actorRole].title;
+      : (ROLE_LABELS[dataset.actorRole]?.title ?? dataset.actorRole ?? "Sistem");
 
   const summaryHeader: Record<string, string | number> = {
     Organisasi: "Star Champs Indonesia",

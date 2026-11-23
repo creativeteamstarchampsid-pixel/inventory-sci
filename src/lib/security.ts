@@ -6,7 +6,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
  * - PostgREST filter sanitization (anti filter/SQL injection)
  * - Strict relative redirect validation (anti open redirect)
  * - Text & storage-path sanitization (anti path traversal & control-char injection)
- * - Strict UUID v1–v5 and YYYY-MM period validators
+ * - Strict UUID v1–v5 and YYYYMM / YYYY-MM period validators
  * - CSV/XLSX formula-injection neutralization
  * - Constant-time secret comparison via `crypto.timingSafeEqual`
  */
@@ -14,7 +14,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 const UUID_V1_TO_V5_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const PERIOD_YM_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
+const PERIOD_YM_REGEX = /^20\d{2}-?(0[1-9]|1[0-2])$/;
 
 const ISO_DATE_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
@@ -187,7 +187,7 @@ export function isValidUuid(value: unknown): value is string {
 }
 
 /**
- * Validates `YYYY-MM` period codes (e.g., `2026-11`).
+ * Validates `YYYYMM` (e.g., `202611`) and `YYYY-MM` (e.g., `2026-11`) period codes.
  */
 export function isValidPeriodYm(value: unknown): value is string {
   return typeof value === "string" && PERIOD_YM_REGEX.test(value.trim());

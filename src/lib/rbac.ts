@@ -66,7 +66,12 @@ export const ROUTE_PERMISSIONS: Record<string, readonly Role[]> = {
 };
 
 /** Routes that never require a session. */
-export const PUBLIC_ROUTES = ["/login", "/auth"] as const;
+export const PUBLIC_ROUTES = [
+  "/login",
+  "/auth",
+  "/forgot-password",
+  "/reset-password",
+] as const;
 
 /** Routes that require a session but no particular role. */
 export const AUTH_ONLY_ROUTES = ["/forbidden"] as const;

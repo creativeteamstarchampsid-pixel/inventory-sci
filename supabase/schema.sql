@@ -190,13 +190,19 @@ as $$
 declare
   v_name text;
   v_is_first_user boolean;
+  v_provider text;
+  v_is_oauth_stranger boolean;
 begin
   v_name := coalesce(
     nullif(btrim(new.raw_user_meta_data ->> 'full_name'), ''),
+    nullif(btrim(new.raw_user_meta_data ->> 'name'), ''),
     split_part(coalesce(new.email, ''), '@', 1)
   );
 
   select not exists (select 1 from public.profiles) into v_is_first_user;
+
+  v_provider := lower(coalesce(new.raw_app_meta_data ->> 'provider', 'email'));
+  v_is_oauth_stranger := (not v_is_first_user) and (v_provider <> 'email');
 
   insert into public.profiles (id, full_name, email, role, is_active)
   values (
@@ -204,7 +210,7 @@ begin
     v_name,
     lower(new.email),
     case when v_is_first_user then 'OWNER'::public.user_role else 'STAFF'::public.user_role end,
-    true
+    not v_is_oauth_stranger
   )
   on conflict (id) do update
     set email = excluded.email,

@@ -61,8 +61,31 @@ async function countActiveOwners(
   return { count: count ?? 0, error: null };
 }
 
+async function forceGlobalSignOut(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<void> {
+  try {
+    const { error } = await supabase.auth.signOut({ scope: "global" });
+    if (error) {
+      await supabase.auth.signOut({ scope: "local" });
+    }
+  } catch {
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch {
+      // Best-effort session cookie cleanup.
+    }
+  }
+}
+
 export type SettingsActionResult<T = unknown> =
-  | { ok: true; data: T; message: string }
+  | {
+      ok: true;
+      data: T;
+      message: string;
+      requireRelogin?: boolean;
+      redirectTo?: string;
+    }
   | {
       ok: false;
       error: string;
@@ -111,6 +134,314 @@ export async function updateOwnProfileAction(input: {
     data,
     message: "Profil pribadi berhasil diperbarui.",
   };
+}
+
+export async function changeOwnEmailAction(input: {
+  currentPassword: string;
+  newEmail: string;
+}): Promise<SettingsActionResult<{ email: string }>> {
+  const actor = await requireAction("settings.profile");
+
+  const rawNewEmail =
+    typeof input.newEmail === "string" ? input.newEmail.trim() : "";
+  const currentPassword =
+    typeof input.currentPassword === "string" ? input.currentPassword : "";
+
+  if (!rawNewEmail || rawNewEmail.length > 254) {
+    return {
+      ok: false,
+      error: "Format email baru tidak valid (maksimal 254 karakter).",
+    };
+  }
+  const newEmail = sanitizeTextInput(rawNewEmail, 254).toLowerCase();
+  if (!newEmail || !EMAIL_REGEX.test(newEmail)) {
+    return { ok: false, error: "Format email baru tidak valid." };
+  }
+  if (!currentPassword || currentPassword.trim().length === 0) {
+    return { ok: false, error: "Kata sandi saat ini wajib diisi." };
+  }
+  if (currentPassword.length > 128) {
+    return { ok: false, error: "Kata sandi saat ini maksimal 128 karakter." };
+  }
+
+  const currentEmail = (actor.email ?? "").trim().toLowerCase();
+  if (!currentEmail) {
+    return {
+      ok: false,
+      error:
+        "Alamat email akun Anda saat ini tidak ditemukan. Hubungi administrator.",
+    };
+  }
+  if (newEmail === currentEmail) {
+    return {
+      ok: false,
+      error: "Email baru sama dengan email Anda saat ini.",
+    };
+  }
+
+  try {
+    const supabase = await createClient();
+
+    const { data: reauthData, error: reauthErr } =
+      await supabase.auth.signInWithPassword({
+        email: currentEmail,
+        password: currentPassword,
+      });
+
+    if (reauthErr || !reauthData.user || reauthData.user.id !== actor.id) {
+      return { ok: false, error: "Kata sandi saat ini tidak sesuai." };
+    }
+
+    const useServiceRole = hasServiceRoleKey();
+    const lookupClient = useServiceRole ? createAdminClient() : supabase;
+
+    const { data: existingWithEmail, error: emailCheckErr } = await lookupClient
+      .from("profiles")
+      .select("id")
+      .eq("email", newEmail)
+      .neq("id", actor.id)
+      .maybeSingle();
+
+    if (emailCheckErr) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          emailCheckErr,
+          "Gagal memverifikasi ketersediaan email.",
+          "settings/changeOwnEmailCheck",
+        ),
+      };
+    }
+    if (existingWithEmail) {
+      return {
+        ok: false,
+        error: "Email tersebut sudah digunakan oleh akun lain.",
+      };
+    }
+
+    if (useServiceRole) {
+      const admin = createAdminClient();
+      const { error: authErr } = await admin.auth.admin.updateUserById(
+        actor.id,
+        {
+          email: newEmail,
+          email_confirm: true,
+        },
+      );
+
+      if (authErr) {
+        return {
+          ok: false,
+          error: sanitizeSafeError(
+            authErr,
+            "Gagal memperbarui alamat email autentikasi.",
+            "settings/changeOwnEmailAuth",
+          ),
+        };
+      }
+
+      const { error: profileErr } = await admin
+        .from("profiles")
+        .update({ email: newEmail })
+        .eq("id", actor.id);
+
+      if (profileErr) {
+        try {
+          await admin.auth.admin.updateUserById(actor.id, {
+            email: currentEmail,
+            email_confirm: true,
+          });
+        } catch {
+          // Best-effort rollback if profile update failed after auth email mutation.
+        }
+        return {
+          ok: false,
+          error: sanitizeSafeError(
+            profileErr,
+            "Gagal menyinkronkan alamat email pada profil akun.",
+            "settings/changeOwnEmailProfile",
+          ),
+        };
+      }
+    } else {
+      const { error: authErr } = await supabase.auth.updateUser({
+        email: newEmail,
+      });
+
+      if (authErr) {
+        return {
+          ok: false,
+          error: sanitizeSafeError(
+            authErr,
+            "Gagal memperbarui alamat email akun.",
+            "settings/changeOwnEmailFallback",
+          ),
+        };
+      }
+    }
+
+    try {
+      const auditClient = useServiceRole ? createAdminClient() : supabase;
+      await auditClient.from("audit_logs").insert({
+        actor_id: actor.id,
+        actor_name: actor.fullName,
+        actor_role: actor.role,
+        action: "USER_EMAIL_CHANGED",
+        entity_type: "profiles",
+        entity_id: actor.id,
+        entity_code: newEmail,
+        summary: `Mengubah email akun pribadi dari ${currentEmail} menjadi ${newEmail}`,
+        metadata: {
+          previous_email: currentEmail,
+          new_email: newEmail,
+          self_service: true,
+        },
+      });
+    } catch {
+      // Best-effort audit log; do not block email change completion.
+    }
+
+    await forceGlobalSignOut(supabase);
+
+    revalidatePath("/settings");
+    revalidatePath("/audit-log");
+    revalidatePath("/", "layout");
+
+    return {
+      ok: true,
+      data: { email: newEmail },
+      message:
+        "Email berhasil diperbarui! Anda akan otomatis keluar untuk masuk kembali dengan email baru.",
+      requireRelogin: true,
+      redirectTo: "/login?notice=email-changed",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: sanitizeSafeError(
+        err,
+        "Gagal memperbarui alamat email akun.",
+        "settings/changeOwnEmailCatch",
+      ),
+    };
+  }
+}
+
+export async function changeOwnPasswordAction(input: {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}): Promise<SettingsActionResult<{ id: string }>> {
+  const actor = await requireAction("settings.profile");
+
+  const currentPassword =
+    typeof input.currentPassword === "string" ? input.currentPassword : "";
+  const newPassword =
+    typeof input.newPassword === "string" ? input.newPassword : "";
+  const confirmPassword =
+    typeof input.confirmPassword === "string" ? input.confirmPassword : "";
+
+  if (!currentPassword || currentPassword.trim().length === 0) {
+    return { ok: false, error: "Kata sandi saat ini wajib diisi." };
+  }
+  if (currentPassword.length > 128) {
+    return { ok: false, error: "Kata sandi saat ini maksimal 128 karakter." };
+  }
+
+  const pwErr = validatePasswordStrength(newPassword);
+  if (pwErr) {
+    return { ok: false, error: pwErr };
+  }
+  if (newPassword !== confirmPassword) {
+    return { ok: false, error: "Konfirmasi kata sandi baru tidak cocok." };
+  }
+  if (newPassword === currentPassword) {
+    return {
+      ok: false,
+      error: "Kata sandi baru harus berbeda dari kata sandi saat ini.",
+    };
+  }
+
+  const currentEmail = (actor.email ?? "").trim().toLowerCase();
+  if (!currentEmail) {
+    return {
+      ok: false,
+      error:
+        "Alamat email akun Anda saat ini tidak ditemukan. Hubungi administrator.",
+    };
+  }
+
+  try {
+    const supabase = await createClient();
+
+    const { data: reauthData, error: reauthErr } =
+      await supabase.auth.signInWithPassword({
+        email: currentEmail,
+        password: currentPassword,
+      });
+
+    if (reauthErr || !reauthData.user || reauthData.user.id !== actor.id) {
+      return { ok: false, error: "Kata sandi saat ini tidak sesuai." };
+    }
+
+    const { error: updateErr } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+
+    if (updateErr) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          updateErr,
+          "Gagal memperbarui kata sandi akun.",
+          "settings/changeOwnPassword",
+        ),
+      };
+    }
+
+    try {
+      const auditClient = hasServiceRoleKey() ? createAdminClient() : supabase;
+      await auditClient.from("audit_logs").insert({
+        actor_id: actor.id,
+        actor_name: actor.fullName,
+        actor_role: actor.role,
+        action: "USER_PASSWORD_CHANGED",
+        entity_type: "profiles",
+        entity_id: actor.id,
+        entity_code: currentEmail,
+        summary: `Mengubah kata sandi akun pribadi (${actor.fullName})`,
+        metadata: {
+          self_service: true,
+        },
+      });
+    } catch {
+      // Best-effort audit log; never blocks password change completion.
+    }
+
+    await forceGlobalSignOut(supabase);
+
+    revalidatePath("/settings");
+    revalidatePath("/audit-log");
+    revalidatePath("/", "layout");
+
+    return {
+      ok: true,
+      data: { id: actor.id },
+      message:
+        "Kata sandi berhasil diperbarui! Anda akan otomatis keluar untuk masuk kembali dengan kata sandi baru.",
+      requireRelogin: true,
+      redirectTo: "/login?notice=password-changed",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: sanitizeSafeError(
+        err,
+        "Gagal memperbarui kata sandi akun.",
+        "settings/changeOwnPasswordCatch",
+      ),
+    };
+  }
 }
 
 export async function createOrInviteUserAction(input: {
@@ -530,6 +861,18 @@ export async function updateUserAction(input: {
       revalidatePath("/", "layout");
     }
 
+    if (targetUserId === actor.id && emailChanged) {
+      await forceGlobalSignOut(supabase);
+      return {
+        ok: true,
+        data: updated,
+        message:
+          "Email akun Anda berhasil diperbarui! Anda akan otomatis keluar untuk masuk kembali dengan email baru.",
+        requireRelogin: true,
+        redirectTo: "/login?notice=email-changed",
+      };
+    }
+
     return {
       ok: true,
       data: updated,
@@ -628,6 +971,20 @@ export async function resetUserPasswordAction(input: {
     });
 
     revalidatePath("/audit-log");
+
+    if (targetUserId === actor.id) {
+      await forceGlobalSignOut(supabase);
+      revalidatePath("/", "layout");
+      return {
+        ok: true,
+        data: { id: target.id },
+        message:
+          "Kata sandi akun Anda berhasil diatur ulang! Anda akan otomatis keluar untuk masuk kembali dengan kata sandi baru.",
+        requireRelogin: true,
+        redirectTo: "/login?notice=password-changed",
+      };
+    }
+
     return {
       ok: true,
       data: { id: target.id },

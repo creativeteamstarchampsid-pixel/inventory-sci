@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useState } from "react";
-import { AlertCircle, Eye, EyeOff, Loader2, LogIn } from "lucide-react";
+import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, LogIn } from "lucide-react";
 
 import { signIn, type LoginState } from "@/lib/actions/auth";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,20 +21,53 @@ function sanitizeClientNextPath(raw: string | undefined): string {
     trimmed === "/login" ||
     trimmed.startsWith("/login/") ||
     trimmed === "/auth" ||
-    trimmed.startsWith("/auth/")
+    trimmed.startsWith("/auth/") ||
+    trimmed === "/forgot-password" ||
+    trimmed.startsWith("/forgot-password/") ||
+    trimmed === "/reset-password" ||
+    trimmed.startsWith("/reset-password/")
   ) {
     return "";
   }
   return trimmed;
 }
 
+function GoogleLogoSvg({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className ?? "size-4 shrink-0"}
+      aria-hidden="true"
+    >
+      <path
+        fill="#4285F4"
+        d="M23.745 12.27c0-.79-.07-1.54-.19-2.27h-11.3v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"
+      />
+      <path
+        fill="#34A853"
+        d="M12.255 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96h-3.98v3.09C3.515 21.3 7.615 24 12.255 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.525 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62h-3.98a11.86 11.86 0 0 0 0 10.76l3.98-3.09z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12.255 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C18.205 1.19 15.495 0 12.255 0c-4.64 0-8.74 2.7-10.71 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"
+      />
+    </svg>
+  );
+}
+
 export function LoginForm({
   next,
   configured,
+  initialNotice,
   initialError,
 }: {
   next?: string;
   configured: boolean;
+  initialNotice?: string;
   initialError?: string;
 }) {
   const [state, formAction, pending] = useActionState<LoginState, FormData>(signIn, {
@@ -41,10 +76,55 @@ export function LoginForm({
 
   const [focusedField, setFocusedField] = useState<"none" | "email" | "password">("none");
   const [showPassword, setShowPassword] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   const safeNext = sanitizeClientNextPath(next);
   const isCoveringEyes = focusedField === "password";
   const isLookingDown = focusedField === "email";
+  const activeError = googleError ?? state.error;
+  const isBusy = pending || googleLoading;
+
+  async function handleGoogleSignIn() {
+    if (!configured || isBusy) return;
+    setGoogleError(null);
+    setGoogleLoading(true);
+    try {
+      const supabase = createClient();
+      const targetNext = safeNext || "/dashboard";
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(targetNext)}`,
+          queryParams: {
+            prompt: "select_account",
+          },
+        },
+      });
+      if (error) {
+        const lower = (error.message ?? "").toLowerCase();
+        if (
+          lower.includes("provider is not enabled") ||
+          lower.includes("unsupported provider") ||
+          error.code === "validation_failed"
+        ) {
+          setGoogleError(
+            "Masuk dengan Google belum diaktifkan di pengaturan autentikasi Supabase. Hubungi Admin Operasional untuk mengaktifkan Google OAuth.",
+          );
+        } else {
+          setGoogleError(
+            "Gagal menghubungkan ke Google. Silakan coba beberapa saat lagi atau masuk dengan email dan kata sandi.",
+          );
+        }
+        setGoogleLoading(false);
+      }
+    } catch {
+      setGoogleError(
+        "Terjadi kendala saat membuka halaman Google. Periksa koneksi internet Anda lalu coba lagi.",
+      );
+      setGoogleLoading(false);
+    }
+  }
 
   return (
     <div className="relative mx-auto w-full max-w-md">
@@ -204,7 +284,13 @@ export function LoginForm({
           </p>
         </div>
 
-        <form action={formAction} className="space-y-4">
+        <form
+          action={(fd) => {
+            setGoogleError(null);
+            formAction(fd);
+          }}
+          className="space-y-4"
+        >
           {!configured && (
             <div className="flex gap-2 rounded-2xl border-2 border-slate-900 bg-amber-100 p-3 text-xs font-medium text-slate-900">
               <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -212,13 +298,23 @@ export function LoginForm({
             </div>
           )}
 
-          {state.error && (
+          {initialNotice && !activeError && (
+            <div
+              role="status"
+              className="flex gap-2 rounded-2xl border-2 border-slate-900 bg-emerald-100 p-3 text-xs font-semibold text-emerald-950 shadow-[2px_2px_0px_0px_#0f172a]"
+            >
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-700" aria-hidden />
+              <p>{initialNotice}</p>
+            </div>
+          )}
+
+          {activeError && (
             <div
               role="alert"
               className="flex gap-2 rounded-2xl border-2 border-slate-900 bg-rose-100 p-3 text-xs font-semibold text-rose-950"
             >
               <AlertCircle className="mt-0.5 size-4 shrink-0 text-rose-600" aria-hidden />
-              <p>{state.error}</p>
+              <p>{activeError}</p>
             </div>
           )}
 
@@ -237,7 +333,7 @@ export function LoginForm({
               placeholder="nama@starchamps.id"
               defaultValue={state.email}
               required
-              disabled={pending}
+              disabled={isBusy}
               onFocus={() => setFocusedField("email")}
               onBlur={() => setFocusedField("none")}
               className="h-11 rounded-xl border-2 border-slate-900 bg-slate-50/70 font-medium focus-visible:bg-sky-50/50 focus-visible:ring-0 dark:border-slate-700 dark:bg-slate-800"
@@ -245,12 +341,20 @@ export function LoginForm({
           </div>
 
           <div className="space-y-1.5">
-            <Label
-              htmlFor="password"
-              className="text-xs font-extrabold text-slate-800 dark:text-slate-200"
-            >
-              Kata Sandi
-            </Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label
+                htmlFor="password"
+                className="text-xs font-extrabold text-slate-800 dark:text-slate-200"
+              >
+                Kata Sandi
+              </Label>
+              <Link
+                href="/forgot-password"
+                className="text-xs font-extrabold text-indigo-600 underline-offset-2 transition-colors hover:text-indigo-700 hover:underline dark:text-sky-300 dark:hover:text-sky-200"
+              >
+                Lupa kata sandi?
+              </Link>
+            </div>
             <div className="relative">
               <Input
                 id="password"
@@ -260,7 +364,7 @@ export function LoginForm({
                 maxLength={128}
                 placeholder="Masukkan kata sandi"
                 required
-                disabled={pending}
+                disabled={isBusy}
                 onFocus={() => setFocusedField("password")}
                 onBlur={() => setFocusedField("none")}
                 className="h-11 rounded-xl border-2 border-slate-900 bg-slate-50/70 pr-10 font-medium focus-visible:bg-amber-50/50 focus-visible:ring-0 dark:border-slate-700 dark:bg-slate-800"
@@ -277,10 +381,10 @@ export function LoginForm({
             </div>
           </div>
 
-          <div className="pt-2">
+          <div className="pt-1.5">
             <Button
               type="submit"
-              disabled={pending || !configured}
+              disabled={isBusy || !configured}
               className="h-12 w-full rounded-2xl border-2 border-slate-900 bg-gradient-to-r from-indigo-500 via-sky-500 to-emerald-500 text-sm font-black text-white shadow-[4px_4px_0px_0px_#0f172a] transition-all hover:translate-y-[-1px] hover:shadow-[5px_5px_0px_0px_#0f172a] active:translate-y-[2px] active:shadow-[2px_2px_0px_0px_#0f172a]"
             >
               {pending ? (
@@ -292,8 +396,31 @@ export function LoginForm({
             </Button>
           </div>
 
+          <div className="relative flex items-center py-1">
+            <div className="flex-1 border-t-2 border-dashed border-slate-200 dark:border-slate-700" />
+            <span className="px-3 text-[11px] font-bold tracking-wide text-slate-500 dark:text-slate-400">
+              atau masuk cepat dengan
+            </span>
+            <div className="flex-1 border-t-2 border-dashed border-slate-200 dark:border-slate-700" />
+          </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isBusy || !configured}
+            onClick={handleGoogleSignIn}
+            className="h-11 w-full rounded-2xl border-2 border-slate-900 bg-[#FFFDF7] text-sm font-extrabold text-slate-900 shadow-[3px_3px_0px_0px_#0f172a] transition-all hover:translate-y-[-1px] hover:bg-sky-50 hover:shadow-[4px_4px_0px_0px_#0f172a] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#0f172a] dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700"
+          >
+            {googleLoading ? (
+              <Loader2 className="size-4 animate-spin text-slate-700 dark:text-slate-200" aria-hidden />
+            ) : (
+              <GoogleLogoSvg className="size-4 shrink-0" />
+            )}
+            <span>{googleLoading ? "Mengarahkan ke Google…" : "Masuk dengan Google"}</span>
+          </Button>
+
           <p className="pt-1 text-center text-xs font-medium text-slate-500 dark:text-slate-400">
-            Lupa kata sandi atau belum punya akun? Hubungi <strong>Admin Operasional</strong>.
+            Belum punya akun StarOps? Hubungi <strong>Admin Operasional</strong>.
           </p>
         </form>
       </div>

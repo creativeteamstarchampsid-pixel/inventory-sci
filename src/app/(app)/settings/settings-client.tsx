@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -11,6 +11,9 @@ import {
   EyeOff,
   Info,
   KeyRound,
+  Link2,
+  Lock,
+  LogOut,
   Mail,
   Pencil,
   Phone,
@@ -20,6 +23,7 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  Unlink,
   UserCheck,
   UserPlus,
   Users,
@@ -64,6 +68,8 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
+  changeOwnEmailAction,
+  changeOwnPasswordAction,
   createOrInviteUserAction,
   deleteUserAction,
   resetUserPasswordAction,
@@ -81,6 +87,7 @@ import {
   ROLE_LABELS,
   type Role,
 } from "@/lib/rbac";
+import { createClient } from "@/lib/supabase/client";
 import type { Profile } from "@/types/database";
 
 export type OffboardVaultWarning = {
@@ -88,11 +95,21 @@ export type OffboardVaultWarning = {
   subscriptionCodes: string[];
 };
 
+export type GoogleConnectionState = {
+  connected: boolean;
+  email: string | null;
+  identityId: string | null;
+  linkedAt: string | null;
+  canUnlink: boolean;
+  providers: string[];
+};
+
 type SettingsClientProps = {
   ownProfile: Profile;
   users: Profile[];
   serviceRoleConfigured: boolean;
   offboardVaultWarnings: OffboardVaultWarning[];
+  googleConnection: GoogleConnectionState;
 };
 
 type StatusFilter = "all" | "active" | "inactive" | "offboard";
@@ -146,14 +163,71 @@ function getRolePastelTheme(role: Role, offboarded: boolean): {
   }
 }
 
+function GoogleGIcon({ className = "size-5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className}>
+      <path
+        fill="#4285F4"
+        d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.51h6.47a5.53 5.53 0 0 1-2.4 3.63v3.02h3.88c2.27-2.09 3.54-5.17 3.54-8.89Z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.95-1.07 7.94-2.91l-3.88-3.02c-1.07.72-2.45 1.15-4.06 1.15-3.12 0-5.77-2.11-6.72-4.95H1.27v3.11A12 12 0 0 0 12 24Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.28 14.27A7.2 7.2 0 0 1 4.9 12c0-.79.14-1.56.38-2.27V6.62H1.27A12 12 0 0 0 0 12c0 1.94.46 3.77 1.27 5.38l4.01-3.11Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.78c1.76 0 3.34.61 4.58 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.27 6.62l4.01 3.11C6.23 6.89 8.88 4.78 12 4.78Z"
+      />
+    </svg>
+  );
+}
+
+function mapGoogleLinkError(rawMessage?: string | null): string {
+  const msg = (rawMessage ?? "").toLowerCase();
+  if (
+    msg.includes("manual linking") ||
+    msg.includes("manual_linking") ||
+    msg.includes("linking is disabled")
+  ) {
+    return "Fitur Manual Linking belum diaktifkan di Supabase Dashboard (Authentication → Settings → Enable Manual Linking). Hubungi administrator sistem.";
+  }
+  if (
+    msg.includes("provider is not enabled") ||
+    msg.includes("unsupported provider") ||
+    (msg.includes("google") && msg.includes("disabled"))
+  ) {
+    return "Provider Login Google (Google OAuth) belum diaktifkan di Supabase Dashboard (Authentication → Providers → Google). Hubungi administrator sistem.";
+  }
+  if (
+    msg.includes("already linked") ||
+    msg.includes("identity_already_exists") ||
+    msg.includes("already belongs") ||
+    msg.includes("another user")
+  ) {
+    return "Akun Google ini sudah terhubung dengan akun pengguna lain di StarOps.";
+  }
+  if (msg.includes("at least 2") || msg.includes("single identity")) {
+    return "Akun Google tidak dapat diputuskan karena merupakan satu-satunya metode masuk akun Anda.";
+  }
+  return rawMessage?.trim()
+    ? `Koneksi akun Google belum dapat diproses: ${rawMessage.trim()}`
+    : "Terjadi kendala saat memproses koneksi akun Google. Silakan coba lagi beberapa saat.";
+}
+
 export function SettingsClient({
   ownProfile,
   users: initialUsers,
   serviceRoleConfigured,
   offboardVaultWarnings,
+  googleConnection,
 }: SettingsClientProps) {
   const router = useRouter();
-  const { runWithFeedback } = useCartoonFeedback();
+  const { runWithFeedback, showWorking, showSuccess, showError } =
+    useCartoonFeedback();
   const { user, role, can } = useRole();
   const canManageUsers = can("users.manage");
   const canManageAdmins = can("users.manage_admins");
@@ -163,6 +237,31 @@ export function SettingsClient({
   const [fullName, setFullName] = useState(ownProfile.full_name ?? "");
   const [phone, setPhone] = useState(ownProfile.phone ?? "");
   const [jobTitle, setJobTitle] = useState(ownProfile.job_title ?? "");
+
+  // Google account linking state (available for all 4 authenticated roles)
+  const [googleState, setGoogleState] =
+    useState<GoogleConnectionState>(googleConnection);
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const [unlinkDialogOpen, setUnlinkDialogOpen] = useState(false);
+  const handledGoogleQueryRef = useRef(false);
+
+  // Self-service Change Email state (Auto-Relogin)
+  const [nextLoginEmail, setNextLoginEmail] = useState("");
+  const [emailCurrentPassword, setEmailCurrentPassword] = useState("");
+  const [showEmailCurrentPassword, setShowEmailCurrentPassword] =
+    useState(false);
+  const [emailFormError, setEmailFormError] = useState<string | null>(null);
+
+  // Self-service Change Password state (Auto-Relogin)
+  const [ownCurrentPassword, setOwnCurrentPassword] = useState("");
+  const [ownNewPassword, setOwnNewPassword] = useState("");
+  const [ownConfirmPassword, setOwnConfirmPassword] = useState("");
+  const [showOwnCurrentPassword, setShowOwnCurrentPassword] = useState(false);
+  const [showOwnNewPassword, setShowOwnNewPassword] = useState(false);
+  const [showOwnConfirmPassword, setShowOwnConfirmPassword] = useState(false);
+  const [passwordFormError, setPasswordFormError] = useState<string | null>(
+    null,
+  );
 
   // User management directory & filter state
   const [users, setUsers] = useState<Profile[]>(initialUsers);
@@ -346,6 +445,310 @@ export function SettingsClient({
     setDeleteFormError(null);
   };
 
+  useEffect(() => {
+    setGoogleState(googleConnection);
+  }, [googleConnection]);
+
+  useEffect(() => {
+    if (handledGoogleQueryRef.current) return;
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const googleStatus = params.get("google");
+    if (!googleStatus) return;
+
+    handledGoogleQueryRef.current = true;
+
+    if (googleStatus === "linked") {
+      const successMsg =
+        "Akun Google berhasil dihubungkan! Kini Anda bisa masuk dengan Google atau email, dan siap untuk integrasi layanan Google lainnya ♪";
+      showSuccess({
+        title: "Akun Google Terhubung! ✨",
+        message: successMsg,
+        durationMs: 4200,
+      });
+      setFeedback({ type: "success", message: successMsg });
+      window.history.replaceState({}, "", "/settings");
+      router.refresh();
+    } else if (googleStatus === "error") {
+      const rawReason = params.get("reason") ?? params.get("message");
+      const errorMsg = rawReason
+        ? mapGoogleLinkError(rawReason)
+        : "Gagal menghubungkan akun Google. Pastikan akun Google belum tertaut pada akun lain dan layanan Google OAuth aktif.";
+      showError({
+        title: "Gagal Menghubungkan Akun Google",
+        message: errorMsg,
+      });
+      setFeedback({ type: "error", message: errorMsg });
+      window.history.replaceState({}, "", "/settings");
+    }
+  }, [router, showError, showSuccess]);
+
+  const triggerAutoRelogin = (redirectTo: string) => {
+    window.setTimeout(() => {
+      window.location.assign(redirectTo);
+    }, 900);
+  };
+
+  const handleConnectGoogle = async () => {
+    setFeedback(null);
+    setGoogleBusy(true);
+    showWorking({
+      title: "Menghubungkan Akun Google... ✨",
+      message:
+        "Dino Joguman lagi mengarahkan Anda ke halaman verifikasi Google untuk menautkan akun~",
+    });
+
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.linkIdentity({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/settings?google=linked")}`,
+          queryParams: {
+            prompt: "select_account",
+          },
+        },
+      });
+
+      if (error) {
+        const friendly = mapGoogleLinkError(error.message);
+        showError({
+          title: "Gagal Menghubungkan Google",
+          message: friendly,
+        });
+        setFeedback({ type: "error", message: friendly });
+        setGoogleBusy(false);
+      }
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : null;
+      const friendly = mapGoogleLinkError(raw);
+      showError({
+        title: "Gagal Menghubungkan Google",
+        message: friendly,
+      });
+      setFeedback({ type: "error", message: friendly });
+      setGoogleBusy(false);
+    }
+  };
+
+  const handleUnlinkGoogle = () => {
+    setFeedback(null);
+    setGoogleBusy(true);
+    startTransition(async () => {
+      const res = await runWithFeedback(
+        {
+          mode: "working",
+          workingTitle: "Memutuskan Koneksi Google... 🔗",
+          workingMessage:
+            "Dino Joguman lagi melepas tautan akun Google dari profil Anda dengan aman~",
+          successTitle: "Koneksi Google Diputuskan! ♪",
+          successMessage: (result) => (result.ok ? result.message : ""),
+          errorTitle: "Gagal Memutuskan Akun Google",
+          isResultError: (result) => (!result.ok ? result.error : null),
+        },
+        async (): Promise<
+          { ok: true; message: string } | { ok: false; error: string }
+        > => {
+          try {
+            const supabase = createClient();
+            const { data: authData, error: userErr } =
+              await supabase.auth.getUser();
+            if (userErr || !authData.user) {
+              return {
+                ok: false,
+                error:
+                  "Sesi login Anda tidak ditemukan. Silakan muat ulang halaman dan coba lagi.",
+              };
+            }
+
+            const identities = authData.user.identities ?? [];
+            const googleIdentity = identities.find(
+              (id) => id.provider === "google",
+            );
+            if (!googleIdentity) {
+              return {
+                ok: false,
+                error: "Akun Google tidak ditemukan pada profil Anda.",
+              };
+            }
+            if (identities.length < 2) {
+              return {
+                ok: false,
+                error:
+                  "Akun Google adalah satu-satunya metode masuk Anda sehingga tidak dapat diputuskan.",
+              };
+            }
+
+            const { error: unlinkErr } =
+              await supabase.auth.unlinkIdentity(googleIdentity);
+            if (unlinkErr) {
+              return {
+                ok: false,
+                error: mapGoogleLinkError(unlinkErr.message),
+              };
+            }
+
+            return {
+              ok: true,
+              message:
+                "Koneksi akun Google berhasil diputuskan. Anda tetap dapat masuk menggunakan email dan kata sandi terdaftar.",
+            };
+          } catch (err) {
+            const raw = err instanceof Error ? err.message : null;
+            return {
+              ok: false,
+              error: mapGoogleLinkError(raw),
+            };
+          }
+        },
+      );
+
+      setGoogleBusy(false);
+      if (!res.ok) {
+        setFeedback({ type: "error", message: res.error });
+        return;
+      }
+
+      setGoogleState((prev) => ({
+        connected: false,
+        email: null,
+        identityId: null,
+        linkedAt: null,
+        canUnlink: false,
+        providers: prev.providers.filter((p) => p !== "google"),
+      }));
+      setUnlinkDialogOpen(false);
+      setFeedback({ type: "success", message: res.message });
+      router.refresh();
+    });
+  };
+
+  const handleChangeOwnEmail = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedEmail = nextLoginEmail.trim().toLowerCase();
+    const currentEmail = (ownProfile.email ?? user.email ?? "")
+      .trim()
+      .toLowerCase();
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setEmailFormError("Format alamat email baru tidak valid.");
+      return;
+    }
+    if (trimmedEmail === currentEmail) {
+      setEmailFormError(
+        "Email baru tidak boleh sama dengan alamat email saat ini.",
+      );
+      return;
+    }
+    if (!emailCurrentPassword) {
+      setEmailFormError(
+        "Masukkan kata sandi saat ini untuk memverifikasi perubahan email.",
+      );
+      return;
+    }
+
+    setEmailFormError(null);
+    setFeedback(null);
+
+    startTransition(async () => {
+      const res = await runWithFeedback(
+        {
+          mode: "working",
+          workingTitle: "Memperbarui Email Login... 📧",
+          workingMessage:
+            "Dino Joguman lagi memverifikasi kata sandi dan memperbarui alamat email masuk Anda~",
+          successTitle: "Email Login Diperbarui! ✨",
+          successMessage: (result) => (result.ok ? result.message : ""),
+          errorTitle: "Gagal Mengubah Email Login",
+          isResultError: (result) => (!result.ok ? result.error : null),
+        },
+        () =>
+          changeOwnEmailAction({
+            currentPassword: emailCurrentPassword,
+            newEmail: trimmedEmail,
+          }),
+      );
+
+      if (!res.ok) {
+        setEmailFormError(res.error);
+        setFeedback({ type: "error", message: res.error });
+        return;
+      }
+
+      setNextLoginEmail("");
+      setEmailCurrentPassword("");
+      setShowEmailCurrentPassword(false);
+      setFeedback({ type: "success", message: res.message });
+
+      if (res.requireRelogin) {
+        triggerAutoRelogin(res.redirectTo ?? "/login?notice=email-changed");
+        return;
+      }
+      router.refresh();
+    });
+  };
+
+  const handleChangeOwnPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!ownCurrentPassword) {
+      setPasswordFormError("Masukkan kata sandi saat ini terlebih dahulu.");
+      return;
+    }
+    if (ownNewPassword.length < 8) {
+      setPasswordFormError("Kata sandi baru minimal 8 karakter.");
+      return;
+    }
+    if (ownNewPassword !== ownConfirmPassword) {
+      setPasswordFormError("Konfirmasi kata sandi baru tidak cocok.");
+      return;
+    }
+
+    setPasswordFormError(null);
+    setFeedback(null);
+
+    startTransition(async () => {
+      const res = await runWithFeedback(
+        {
+          mode: "working",
+          workingTitle: "Mengubah Kata Sandi... 🔐",
+          workingMessage:
+            "Dino Joguman lagi memverifikasi sandi lama dan memasang kata sandi baru yang lebih aman~",
+          successTitle: "Kata Sandi Berhasil Diubah! 🔐",
+          successMessage: (result) => (result.ok ? result.message : ""),
+          errorTitle: "Gagal Mengubah Kata Sandi",
+          isResultError: (result) => (!result.ok ? result.error : null),
+        },
+        () =>
+          changeOwnPasswordAction({
+            currentPassword: ownCurrentPassword,
+            newPassword: ownNewPassword,
+            confirmPassword: ownConfirmPassword,
+          }),
+      );
+
+      if (!res.ok) {
+        setPasswordFormError(res.error);
+        setFeedback({ type: "error", message: res.error });
+        return;
+      }
+
+      setOwnCurrentPassword("");
+      setOwnNewPassword("");
+      setOwnConfirmPassword("");
+      setShowOwnCurrentPassword(false);
+      setShowOwnNewPassword(false);
+      setShowOwnConfirmPassword(false);
+      setFeedback({ type: "success", message: res.message });
+
+      if (res.requireRelogin) {
+        triggerAutoRelogin(res.redirectTo ?? "/login?notice=password-changed");
+        return;
+      }
+      router.refresh();
+    });
+  };
+
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     setFeedback(null);
@@ -500,6 +903,10 @@ export function SettingsClient({
       }
       closeEditDialog();
       setFeedback({ type: "success", message: res.message });
+      if (res.requireRelogin) {
+        triggerAutoRelogin(res.redirectTo ?? "/login?notice=email-changed");
+        return;
+      }
       router.refresh();
     });
   };
@@ -558,6 +965,10 @@ export function SettingsClient({
 
       closeResetPasswordDialog();
       setFeedback({ type: "success", message: res.message });
+      if (res.requireRelogin) {
+        triggerAutoRelogin(res.redirectTo ?? "/login?notice=password-changed");
+        return;
+      }
       router.refresh();
     });
   };
@@ -759,22 +1170,26 @@ export function SettingsClient({
         : "Contoh: Admin Operasional / Direktur";
 
   const ownInitials = getInitials(fullName || ownProfile.full_name, ownProfile.email);
+  const currentLoginEmail = ownProfile.email ?? user.email ?? "";
   const isEditingSelf = editingUser?.id === ownProfile.id;
   const resetPasswordValidLength = resetPassword.length >= 8;
   const resetPasswordMatches =
     resetPasswordConfirm.length > 0 && resetPassword === resetPasswordConfirm;
+  const ownNewPasswordValidLength = ownNewPassword.length >= 8;
+  const ownNewPasswordMatches =
+    ownConfirmPassword.length > 0 && ownNewPassword === ownConfirmPassword;
 
   return (
     <div className="space-y-6">
       <KawaiiPageHeader
         accent="mint"
         mascot="gear"
-        badge={canManageUsers ? "Pengaturan & Manajemen Tim" : "Kartu Profil Saya"}
-        title={canManageUsers ? "Pengaturan Akun & Manajemen Tim" : "Profil Saya"}
+        badge={canManageUsers ? "Pengaturan & Manajemen Tim" : "Profil & Keamanan Akun"}
+        title={canManageUsers ? "Pengaturan Akun & Manajemen Tim" : "Profil & Keamanan Saya"}
         description={
           canManageUsers
-            ? "Kelola profil pribadi serta tambah, ubah data, atur ulang kata sandi, offboarding, dan hapus akun tim Star Champs Indonesia."
-            : "Perbarui nama tampilan, nomor telepon, dan informasi jabatan pribadi Anda."
+            ? "Kelola profil pribadi, keamanan akun & koneksi Google, serta manajemen lengkap anggota tim Star Champs Indonesia."
+            : "Perbarui profil pribadi, hubungkan akun Google, serta ubah alamat email atau kata sandi masuk Anda."
         }
         actions={<RoleBadge role={role} showSubtitle />}
       />
@@ -954,6 +1369,476 @@ export function SettingsClient({
           </form>
         </CardContent>
       </Card>
+
+      {/* Keamanan Akun & Koneksi Google (Tersedia untuk SEMUA peran aktif) */}
+      <section aria-labelledby="account-security-heading" className="space-y-5">
+        <div className="flex flex-col gap-2.5 rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] px-5 py-4 shadow-[4px_4px_0px_0px_#2C2623] sm:flex-row sm:items-center sm:justify-between dark:border-[#F5E9D6]/40 dark:bg-card">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-[#DDD6FE] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+              <ShieldCheck className="size-5" />
+            </span>
+            <div>
+              <h2
+                id="account-security-heading"
+                className="text-base font-black tracking-tight text-[#2C2623] dark:text-foreground"
+              >
+                Keamanan Akun &amp; Koneksi Google
+              </h2>
+              <p className="text-muted-foreground text-xs font-medium">
+                Hubungkan akun Google untuk login cepat &amp; integrasi, serta ubah
+                email atau kata sandi masuk Anda dengan aman.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full border-2 border-[#2C2623] bg-[#E8F6FF] px-2.5 py-1 text-[11px] font-extrabold text-[#2C2623] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:bg-sky-950/50 dark:text-sky-100">
+              <Mail className="size-3" />
+              Email Login
+            </span>
+            {googleState.connected && (
+              <span className="inline-flex items-center gap-1 rounded-full border-2 border-[#2C2623] bg-[#A7F3D0] px-2.5 py-1 text-[11px] font-extrabold text-[#14532D] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:bg-emerald-950/60 dark:text-emerald-200">
+                <GoogleGIcon className="size-3" />
+                Google Aktif
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* A. Koneksi Akun Google Card */}
+        <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40">
+          <CardHeader className="border-b-2 border-dashed border-[#2C2623]/20 bg-gradient-to-r from-[#E8F6FF]/90 via-[#E8FBF1]/85 to-[#FFFDF7] dark:from-sky-950/35 dark:via-emerald-950/30 dark:to-card">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3.5">
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-white shadow-[3px_3px_0px_0px_#2C2623]">
+                  <GoogleGIcon className="size-6" />
+                </div>
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base font-extrabold">
+                    Koneksi Akun Google
+                  </CardTitle>
+                  <CardDescription className="mt-0.5">
+                    Tautkan akun Google untuk masuk sekali klik dan kesiapan integrasi
+                    layanan Google di StarOps.
+                  </CardDescription>
+                </div>
+              </div>
+
+              {googleState.connected ? (
+                <span className="inline-flex w-fit items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#A7F3D0] px-3.5 py-1 text-xs font-black text-[#14532D] shadow-[2px_2px_0px_0px_#2C2623] dark:bg-emerald-900/70 dark:text-emerald-100">
+                  <CheckCircle2 className="size-3.5" />
+                  Terhubung ✓
+                </span>
+              ) : (
+                <span className="inline-flex w-fit items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#FFFBE6] px-3.5 py-1 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:bg-amber-950/50 dark:text-amber-100">
+                  <Link2 className="size-3.5" />
+                  Belum Terhubung
+                </span>
+              )}
+            </div>
+          </CardHeader>
+
+          <CardContent className="pt-5">
+            {googleState.connected ? (
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <div className="inline-flex items-center gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] px-3.5 py-2 text-sm font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5E9D6]/35 dark:bg-muted/30 dark:text-foreground">
+                      <GoogleGIcon className="size-4 shrink-0" />
+                      <span>
+                        {googleState.email ??
+                          currentLoginEmail ??
+                          "Akun Google Terhubung"}
+                      </span>
+                    </div>
+                    {googleState.linkedAt && (
+                      <span className="text-muted-foreground rounded-full border-[1.5px] border-[#2C2623]/30 bg-[#E8F6FF]/70 px-3 py-1 text-xs font-bold dark:border-[#F5E9D6]/25 dark:bg-sky-950/35">
+                        Terhubung sejak {formatDateWIB(googleState.linkedAt)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="inline-flex items-start gap-2 rounded-2xl border-2 border-[#2C2623]/25 bg-[#E8FBF1]/75 px-3.5 py-2 text-xs font-bold text-[#14532D] dark:border-emerald-400/25 dark:bg-emerald-950/35 dark:text-emerald-200">
+                    <Sparkles className="mt-0.5 size-3.5 shrink-0" />
+                    <span>
+                      Bisa dipakai untuk login cepat &amp; siap dihubungkan ke
+                      integrasi sistem Google lainnya
+                    </span>
+                  </div>
+
+                  {!googleState.canUnlink && (
+                    <p className="text-muted-foreground flex items-center gap-1.5 text-xs font-semibold">
+                      <Info className="size-3.5 shrink-0" />
+                      Google adalah satu-satunya metode masuk akun Anda saat ini
+                      sehingga tidak dapat diputuskan agar akun tetap dapat diakses.
+                    </p>
+                  )}
+                </div>
+
+                {googleState.canUnlink && (
+                  <div className="shrink-0">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={isPending || googleBusy}
+                      onClick={() => setUnlinkDialogOpen(true)}
+                      className="bg-[#FFE4E6] font-extrabold text-[#9F1239] hover:bg-[#FECDD3] dark:bg-rose-950/60 dark:text-rose-200 dark:hover:bg-rose-900/70"
+                    >
+                      <Unlink className="size-4" />
+                      Putuskan Koneksi
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="max-w-2xl space-y-2">
+                  <p className="text-sm font-semibold text-[#2C2623] dark:text-foreground">
+                    Hubungkan akun Google Anda agar bisa masuk lewat tombol Google
+                    selain email terdaftar, sekaligus siap untuk integrasi
+                    data/layanan Google ke depannya.
+                  </p>
+                  <p className="text-muted-foreground text-xs font-medium">
+                    Email &amp; kata sandi StarOps Anda tetap aktif dan bisa dipakai
+                    seperti biasa kapan saja.
+                  </p>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isPending || googleBusy}
+                  onClick={handleConnectGoogle}
+                  className="shrink-0 border-2 border-[#2C2623] bg-[#FFFDF7] px-4 font-extrabold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#E8F6FF] dark:border-[#F5E9D6]/40 dark:bg-background dark:text-foreground dark:hover:bg-sky-950/40"
+                >
+                  <GoogleGIcon className="size-4" />
+                  {googleBusy ? "Mengarahkan..." : "Hubungkan Akun Google"}
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* B & C. Self-Service Change Email & Change Password Cards (Auto-Relogin) */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* B. Ubah Alamat Email Login Card */}
+          <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40">
+            <CardHeader className="border-b-2 border-dashed border-[#2C2623]/20 bg-[#F3EEFF]/80 dark:bg-violet-950/25">
+              <div className="flex flex-col gap-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-[#DDD6FE] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                    <Mail className="size-4" />
+                  </span>
+                  <div>
+                    <CardTitle className="text-base font-extrabold">
+                      Ubah Alamat Email Login
+                    </CardTitle>
+                    <CardDescription className="mt-0.5">
+                      Perbarui alamat email utama untuk masuk ke akun StarOps Anda.
+                    </CardDescription>
+                  </div>
+                </div>
+                <span className="inline-flex w-fit items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#FFFBE6] px-3 py-1 text-[11px] font-extrabold text-[#92400E] shadow-[2px_2px_0px_0px_#2C2623] dark:bg-amber-950/60 dark:text-amber-200">
+                  <LogOut className="size-3.5 shrink-0" />
+                  Otomatis keluar &amp; masuk ulang setelah disimpan
+                </span>
+              </div>
+            </CardHeader>
+
+            <CardContent className="pt-5">
+              <form onSubmit={handleChangeOwnEmail} className="space-y-4">
+                <div className="rounded-2xl border-2 border-[#2C2623]/20 bg-[#FFFDF7] px-3.5 py-2.5 dark:border-[#F5E9D6]/20 dark:bg-muted/20">
+                  <p className="text-muted-foreground text-[11px] font-extrabold uppercase">
+                    Email Saat Ini
+                  </p>
+                  <p className="mt-0.5 truncate text-sm font-extrabold text-[#2C2623] dark:text-foreground">
+                    {currentLoginEmail || "-"}
+                  </p>
+                </div>
+
+                {emailFormError && (
+                  <Alert
+                    variant="destructive"
+                    className="rounded-2xl border-2 border-[#2C2623] bg-[#FFF0F5] shadow-[2px_2px_0px_0px_#2C2623] dark:bg-rose-950/40"
+                  >
+                    <AlertTriangle className="size-4" />
+                    <AlertTitle className="font-extrabold">
+                      Periksa Perubahan Email
+                    </AlertTitle>
+                    <AlertDescription>{emailFormError}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="own-new-email" className="font-bold">
+                    Email Baru
+                  </Label>
+                  <Input
+                    id="own-new-email"
+                    type="email"
+                    autoComplete="email"
+                    value={nextLoginEmail}
+                    onChange={(e) => {
+                      setNextLoginEmail(e.target.value);
+                      if (emailFormError) setEmailFormError(null);
+                    }}
+                    required
+                    disabled={isPending}
+                    placeholder="nama.baru@starchamps.id"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="own-email-current-pw" className="font-bold">
+                    Kata Sandi Saat Ini
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="own-email-current-pw"
+                      type={showEmailCurrentPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      value={emailCurrentPassword}
+                      onChange={(e) => {
+                        setEmailCurrentPassword(e.target.value);
+                        if (emailFormError) setEmailFormError(null);
+                      }}
+                      required
+                      disabled={isPending}
+                      placeholder="Masukkan kata sandi saat ini untuk verifikasi"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowEmailCurrentPassword((prev) => !prev)
+                      }
+                      aria-label={
+                        showEmailCurrentPassword
+                          ? "Sembunyikan kata sandi saat ini"
+                          : "Tampilkan kata sandi saat ini"
+                      }
+                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2 rounded-md p-1 transition-colors"
+                    >
+                      {showEmailCurrentPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full font-extrabold sm:w-auto"
+                  disabled={
+                    isPending || !nextLoginEmail.trim() || !emailCurrentPassword
+                  }
+                >
+                  <Mail className="size-4" />
+                  {isPending ? "Memproses..." : "Simpan Email & Masuk Ulang"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* C. Ubah Kata Sandi Card */}
+          <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40">
+            <CardHeader className="border-b-2 border-dashed border-[#2C2623]/20 bg-[#FFFBE6]/90 dark:bg-amber-950/25">
+              <div className="flex flex-col gap-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-[#FDE68A] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                    <Lock className="size-4" />
+                  </span>
+                  <div>
+                    <CardTitle className="text-base font-extrabold">
+                      Ubah Kata Sandi
+                    </CardTitle>
+                    <CardDescription className="mt-0.5">
+                      Ganti kata sandi akun Anda secara berkala agar akses tetap aman.
+                    </CardDescription>
+                  </div>
+                </div>
+                <span className="inline-flex w-fit items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#FFFBE6] px-3 py-1 text-[11px] font-extrabold text-[#92400E] shadow-[2px_2px_0px_0px_#2C2623] dark:bg-amber-950/60 dark:text-amber-200">
+                  <LogOut className="size-3.5 shrink-0" />
+                  Otomatis keluar &amp; masuk ulang setelah disimpan
+                </span>
+              </div>
+            </CardHeader>
+
+            <CardContent className="pt-5">
+              <form onSubmit={handleChangeOwnPassword} className="space-y-4">
+                {passwordFormError && (
+                  <Alert
+                    variant="destructive"
+                    className="rounded-2xl border-2 border-[#2C2623] bg-[#FFF0F5] shadow-[2px_2px_0px_0px_#2C2623] dark:bg-rose-950/40"
+                  >
+                    <AlertTriangle className="size-4" />
+                    <AlertTitle className="font-extrabold">
+                      Periksa Kata Sandi
+                    </AlertTitle>
+                    <AlertDescription>{passwordFormError}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="own-current-password" className="font-bold">
+                    Kata Sandi Saat Ini
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="own-current-password"
+                      type={showOwnCurrentPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      value={ownCurrentPassword}
+                      onChange={(e) => {
+                        setOwnCurrentPassword(e.target.value);
+                        if (passwordFormError) setPasswordFormError(null);
+                      }}
+                      required
+                      disabled={isPending}
+                      placeholder="Masukkan kata sandi saat ini"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowOwnCurrentPassword((prev) => !prev)
+                      }
+                      aria-label={
+                        showOwnCurrentPassword
+                          ? "Sembunyikan kata sandi saat ini"
+                          : "Tampilkan kata sandi saat ini"
+                      }
+                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2 rounded-md p-1 transition-colors"
+                    >
+                      {showOwnCurrentPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="own-new-password" className="font-bold">
+                    Kata Sandi Baru (min. 8 karakter)
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="own-new-password"
+                      type={showOwnNewPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      value={ownNewPassword}
+                      onChange={(e) => {
+                        setOwnNewPassword(e.target.value);
+                        if (passwordFormError) setPasswordFormError(null);
+                      }}
+                      required
+                      minLength={8}
+                      disabled={isPending}
+                      placeholder="Minimal 8 karakter"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowOwnNewPassword((prev) => !prev)}
+                      aria-label={
+                        showOwnNewPassword
+                          ? "Sembunyikan kata sandi baru"
+                          : "Tampilkan kata sandi baru"
+                      }
+                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2 rounded-md p-1 transition-colors"
+                    >
+                      {showOwnNewPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="own-confirm-password" className="font-bold">
+                    Konfirmasi Kata Sandi Baru
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="own-confirm-password"
+                      type={showOwnConfirmPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      value={ownConfirmPassword}
+                      onChange={(e) => {
+                        setOwnConfirmPassword(e.target.value);
+                        if (passwordFormError) setPasswordFormError(null);
+                      }}
+                      required
+                      minLength={8}
+                      disabled={isPending}
+                      placeholder="Ulangi kata sandi baru"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowOwnConfirmPassword((prev) => !prev)}
+                      aria-label={
+                        showOwnConfirmPassword
+                          ? "Sembunyikan konfirmasi kata sandi baru"
+                          : "Tampilkan konfirmasi kata sandi baru"
+                      }
+                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2 rounded-md p-1 transition-colors"
+                    >
+                      {showOwnConfirmPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border-[1.5px] border-[#2C2623] px-2.5 py-0.5 ${
+                      ownNewPasswordValidLength
+                        ? "bg-[#E8FBF1] text-[#14532D] dark:bg-emerald-950/60 dark:text-emerald-200"
+                        : "bg-[#FFFDF7] text-muted-foreground dark:bg-muted/40"
+                    }`}
+                  >
+                    <CheckCircle2 className="size-3.5" />
+                    Minimal 8 karakter
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border-[1.5px] border-[#2C2623] px-2.5 py-0.5 ${
+                      ownNewPasswordMatches
+                        ? "bg-[#E8FBF1] text-[#14532D] dark:bg-emerald-950/60 dark:text-emerald-200"
+                        : "bg-[#FFFDF7] text-muted-foreground dark:bg-muted/40"
+                    }`}
+                  >
+                    <CheckCircle2 className="size-3.5" />
+                    Kata sandi cocok
+                  </span>
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full font-extrabold sm:w-auto"
+                  disabled={
+                    isPending ||
+                    !ownCurrentPassword ||
+                    !ownNewPasswordValidLength ||
+                    !ownNewPasswordMatches
+                  }
+                >
+                  <KeyRound className="size-4" />
+                  {isPending ? "Memproses..." : "Simpan Sandi & Masuk Ulang"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
       {/* User Management (OWNER & Admin Operasional) */}
       <Can action="users.manage">
@@ -2206,6 +3091,77 @@ export function SettingsClient({
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Unlink Google Confirmation Dialog (tersedia untuk semua peran) */}
+      <Dialog
+        open={unlinkDialogOpen}
+        onOpenChange={(open) => {
+          if (!isPending && !googleBusy) {
+            setUnlinkDialogOpen(open);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 font-extrabold text-[#9F1239] dark:text-rose-300">
+              <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDA4AF] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                <Unlink className="size-4" />
+              </span>
+              Putuskan Koneksi Akun Google?
+            </DialogTitle>
+            <DialogDescription>
+              Anda akan melepas tautan akun Google dari profil StarOps Anda.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5">
+            <div className="flex items-center gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#E8F6FF]/80 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:bg-sky-950/35">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-white shadow-[2px_2px_0px_0px_#2C2623]">
+                <GoogleGIcon className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-extrabold">
+                  {googleState.email ?? currentLoginEmail ?? "Akun Google"}
+                </p>
+                <p className="text-muted-foreground text-xs font-medium">
+                  Terhubung dengan akun StarOps Anda
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5 rounded-2xl border-2 border-[#2C2623] bg-[#FFFBE6] p-3 text-xs font-semibold text-[#57493F] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:bg-amber-950/40 dark:text-amber-100">
+              <Info className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-300" />
+              <p>
+                Setelah diputuskan, Anda tidak dapat masuk menggunakan tombol
+                Google untuk akun ini, namun tetap bisa masuk dengan alamat email{" "}
+                <strong>{currentLoginEmail || "terdaftar"}</strong> dan kata
+                sandi Anda. Anda dapat menghubungkannya kembali kapan saja.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setUnlinkDialogOpen(false)}
+              disabled={isPending || googleBusy}
+            >
+              Batal
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleUnlinkGoogle}
+              disabled={isPending || googleBusy}
+              className="font-extrabold"
+            >
+              <Unlink className="size-4" />
+              {isPending || googleBusy ? "Memutuskan..." : "Ya, Putuskan Google"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -6,13 +6,34 @@ import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Masuk" };
 
+const LOGIN_NOTICES: Record<string, string> = {
+  "email-changed":
+    "Email akun Anda berhasil diperbarui! Demi keamanan, silakan masuk kembali menggunakan email baru Anda.",
+  "password-changed":
+    "Kata sandi Anda berhasil diubah! Demi keamanan, silakan masuk kembali menggunakan kata sandi baru Anda.",
+  "password-reset":
+    "Kata sandi baru berhasil disimpan! Silakan masuk kembali menggunakan kata sandi baru Anda.",
+};
+
+const LOGIN_ERRORS: Record<string, string> = {
+  auth: "Sesi masuk telah berakhir atau tautan sudah tidak berlaku. Silakan masuk kembali.",
+  "google-unregistered":
+    "Akun Google tersebut belum terdaftar di StarOps. Hubungi Owner atau Admin Operasional untuk pembuatan akun, atau hubungkan Google melalui menu Pengaturan setelah masuk.",
+  "google-disabled":
+    "Akun Anda saat ini sedang dinonaktifkan. Hubungi Owner atau Admin Operasional untuk bantuan.",
+  "google-failed":
+    "Gagal masuk dengan Google. Pastikan Anda memilih akun yang benar lalu coba lagi.",
+};
+
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string }>;
+  searchParams: Promise<{ next?: string; error?: string; notice?: string }>;
 }) {
-  const { next, error } = await searchParams;
+  const { next, error, notice } = await searchParams;
   const configured = hasSupabaseEnv();
+  const initialNotice = notice ? LOGIN_NOTICES[notice] : undefined;
+  const initialError = error ? LOGIN_ERRORS[error] : undefined;
 
   return (
     <main className="relative flex min-h-svh items-center justify-center overflow-hidden bg-[#FFFDF7] p-4 sm:p-6 dark:bg-slate-950">
@@ -425,9 +446,8 @@ export default async function LoginPage({
           <LoginForm
             next={next}
             configured={configured}
-            initialError={
-              error === "auth" ? "Sesi masuk telah berakhir. Silakan masuk kembali." : undefined
-            }
+            initialNotice={initialNotice}
+            initialError={initialError}
           />
         </div>
       </div>

@@ -18,7 +18,14 @@ const CONTENT_SECURITY_POLICY = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  serverExternalPackages: ["@react-pdf/renderer", "exceljs"],
+  serverExternalPackages: [
+    "@react-pdf/renderer",
+    "@react-pdf/font",
+    "@react-pdf/layout",
+    "@react-pdf/render",
+    "pdfkit",
+    "exceljs",
+  ],
   experimental: {
     optimizePackageImports: [
       "lucide-react",

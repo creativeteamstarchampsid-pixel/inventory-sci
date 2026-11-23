@@ -524,27 +524,64 @@ export function BackupClient({
   const handleDownloadBackup = (
     backupId: string,
     fileType: "json" | "xlsx" | "csv" | "pdf",
+    backupCode?: string,
+    backupPeriodYm?: string,
   ) => {
     setFeedback(null);
     const extUpper = fileType.toUpperCase();
+    const safePeriod = backupPeriodYm || period.periodCode;
+    const fallbackFilename = backupCode
+      ? `${backupCode.toLowerCase()}.${fileType}`
+      : `starops-backup-${safePeriod}.${fileType}`;
+
     startTransition(async () => {
-      const res = await runWithFeedback(
-        {
-          mode: "batch",
-          workingTitle: `Menyiapkan Bundel .${extUpper}... 📦`,
-          workingMessage: `Tim mini lagi mengambil berkas .${extUpper} dari brankas backup buat kamu unduh nih~`,
-          successTitle: `Unduhan .${extUpper} Siap! ♪`,
-          successMessage: `Tautan unduhan bundel .${extUpper} sudah dibuka di tab baru!`,
-          errorTitle: `Gagal Mengunduh .${extUpper}`,
-          isResultError: (result) => (!result.ok ? result.error : null),
-        },
-        () => getBackupDownloadUrlAction({ backupId, fileType }),
-      );
-      if (!res.ok) {
-        setFeedback({ type: "error", message: res.error });
-        return;
+      try {
+        const downloadedName = await runWithFeedback(
+          {
+            mode: "batch",
+            workingTitle: `Menyiapkan Bundel .${extUpper}... 📦`,
+            workingMessage: `Tim mini lagi mengambil berkas .${extUpper} dari brankas backup buat kamu unduh nih~`,
+            successTitle: `Unduhan .${extUpper} Siap! ♪`,
+            successMessage: (name) =>
+              `Yeay! Berkas ${name} sudah mulai diunduh ke perangkatmu~`,
+            errorTitle: `Gagal Mengunduh .${extUpper}`,
+            errorMessage: (err) =>
+              err instanceof Error
+                ? err.message
+                : `Gagal mengunduh berkas .${extUpper}. Coba lagi ya!`,
+          },
+          async () => {
+            const res = await getBackupDownloadUrlAction({ backupId, fileType });
+            if (!res.ok) {
+              throw new Error(res.error);
+            }
+            if (res.data.isFallback) {
+              return downloadFromEndpoint(res.data.url, fallbackFilename);
+            }
+            const link = document.createElement("a");
+            link.href = res.data.url;
+            link.download = fallbackFilename;
+            link.rel = "noopener noreferrer";
+            link.style.display = "none";
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            return fallbackFilename;
+          },
+        );
+        setFeedback({
+          type: "success",
+          message: `Berkas ${downloadedName} berhasil diunduh.`,
+        });
+      } catch (err) {
+        setFeedback({
+          type: "error",
+          message:
+            err instanceof Error
+              ? err.message
+              : `Gagal mengunduh berkas .${extUpper}.`,
+        });
       }
-      window.open(res.data.url, "_blank", "noopener,noreferrer");
     });
   };
 
@@ -1558,7 +1595,14 @@ export function BackupClient({
                                     variant="outline"
                                     className="h-7 rounded-lg bg-[#FFFDF7] px-2 font-mono text-[11px] font-bold uppercase dark:bg-background"
                                     disabled={isPending}
-                                    onClick={() => handleDownloadBackup(bkp.id, ext)}
+                                    onClick={() =>
+                                      handleDownloadBackup(
+                                        bkp.id,
+                                        ext,
+                                        bkp.backup_code,
+                                        bkp.period_ym,
+                                      )
+                                    }
                                   >
                                     .{ext}
                                   </Button>

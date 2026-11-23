@@ -1,14 +1,18 @@
 import "server-only";
 
-import React from "react";
-import {
-  Document,
-  Page,
-  StyleSheet,
-  Text,
-  View,
-  renderToBuffer,
-} from "@react-pdf/renderer";
+import FontStore from "@react-pdf/font";
+import layoutDocument, {
+  type DocumentNode,
+  type DynamicPageProps,
+  type PageNode,
+  type RenderProp,
+  type SafeDocumentNode,
+  type TextInstanceNode,
+  type TextNode,
+  type ViewNode,
+} from "@react-pdf/layout";
+import renderPDF from "@react-pdf/render";
+import PDFDocument from "pdfkit";
 
 import { requireAction } from "@/lib/auth";
 import { calculateBookValue, formatDateWIB, formatRupiah } from "@/lib/constants";
@@ -20,7 +24,96 @@ import {
   type ExportDataset,
 } from "./csv";
 
-const styles = StyleSheet.create({
+type PdfStyle = Record<string, string | number>;
+type PdfContentNode = ViewNode | TextNode;
+type PdfChild = PdfContentNode | null | undefined | false;
+
+const fontStore = new FontStore();
+
+const runLayout = layoutDocument as unknown as (
+  doc: DocumentNode,
+  fonts: FontStore,
+) => Promise<SafeDocumentNode>;
+
+const runRender = renderPDF as unknown as (
+  ctx: PDFDocument,
+  doc: SafeDocumentNode,
+) => PDFDocument;
+
+function compactChildren(children: PdfChild[]): PdfContentNode[] {
+  return children.filter((child): child is PdfContentNode => Boolean(child));
+}
+
+function pdfTextInstance(value: string): TextInstanceNode {
+  return {
+    type: "TEXT_INSTANCE",
+    value,
+  };
+}
+
+function pdfText(
+  value: string,
+  style: PdfStyle = {},
+  props: Record<string, unknown> = {},
+): TextNode {
+  return {
+    type: "TEXT",
+    style,
+    props,
+    children: [pdfTextInstance(value)],
+  };
+}
+
+function pdfDynamicText(
+  renderFn: (pageProps: DynamicPageProps) => string,
+  style: PdfStyle = {},
+  props: Record<string, unknown> = {},
+): TextNode {
+  const render: RenderProp = (pageProps) =>
+    [pdfTextInstance(renderFn(pageProps))] as unknown as ReturnType<RenderProp>;
+
+  return {
+    type: "TEXT",
+    style,
+    props: {
+      ...props,
+      render,
+    },
+    children: [],
+  };
+}
+
+function pdfView(
+  style: PdfStyle,
+  children: PdfChild[],
+  props: Record<string, unknown> = {},
+): ViewNode {
+  return {
+    type: "VIEW",
+    style,
+    props,
+    children: compactChildren(children),
+  };
+}
+
+function pdfPage(
+  style: PdfStyle,
+  children: PdfChild[],
+  props: Record<string, unknown> = {},
+): PageNode {
+  return {
+    type: "PAGE",
+    style,
+    props: {
+      size: "A4",
+      wrap: true,
+      ...props,
+    },
+    children: compactChildren(children),
+  };
+}
+
+const styles: Record<string, PdfStyle> = {
   page: {
     fontFamily: "Helvetica",
     fontSize: 9,
@@ -268,7 +361,7 @@ const styles = StyleSheet.create({
     fontSize: 7.5,
     color: "#64748B",
   },
-});
+};
 
 function safePdfText(value: unknown, fallback = "-"): string {
   if (value === null || value === undefined) return fallback;
@@ -292,7 +385,7 @@ function safePdfText(value: unknown, fallback = "-"): string {
   return normalized.length > 0 ? normalized : fallback;
 }
 
-function buildMonthlyReportDocument(dataset: ExportDataset) {
+function buildMonthlyReportDocument(dataset: ExportDataset): DocumentNode {
   const anomalies = getStockAnomalies(dataset.items, dataset.todayWib);
 
   const totalPurchase = dataset.items.reduce(
@@ -383,300 +476,277 @@ function buildMonthlyReportDocument(dataset: ExportDataset) {
 
   const anomalyTableRows = anomalies.rows.slice(0, 60);
 
-  const e = React.createElement;
-
-  return e(
-    Document,
-    {
-      title: safePdfText(`Laporan Bulanan StarOps ${dataset.periodLabel}`, "Laporan Bulanan StarOps"),
-      author: "StarOps - Star Champs Indonesia",
-      subject: safePdfText(`Rekonsiliasi & Ringkasan Inventaris ${dataset.periodCode}`, "Rekonsiliasi & Ringkasan Inventaris"),
-    },
-    e(
-      Page,
-      { size: "A4", style: styles.page, wrap: true },
-      // Official Star Champs Header
-      e(
-        View,
-        { style: styles.headerBox },
-        e(
-          View,
-          { style: styles.brandBlock },
-          e(Text, { style: styles.brandEyebrow }, "STAR CHAMPS INDONESIA | STAROPS"),
-          e(Text, { style: styles.brandTitle }, "LAPORAN RESMI OPERASIONAL BULANAN"),
-          e(
-            Text,
-            { style: styles.brandSubtitle },
-            dataset.canExportFinancial
-              ? "Rekapitulasi Inventaris, Kelengkapan Part, Sanitasi Mainan, Vault & Arsip Hibrida"
-              : "Rekapitulasi Inventaris, Kelengkapan Part, Sanitasi Mainan & Arsip Berkas",
-          ),
-        ),
-        e(
-          View,
-          { style: styles.metaBlock },
-          e(Text, { style: styles.metaLabel }, "Periode Laporan"),
-          e(
-            Text,
-            { style: styles.metaValue },
-            safePdfText(`${dataset.periodLabel} (${dataset.periodCode})`),
-          ),
-          e(Text, { style: styles.metaLabel }, "Dicetak Pada"),
-          e(Text, { style: styles.metaValue }, safePdfText(dataset.generatedAtWib)),
-          e(Text, { style: styles.metaLabel }, "Petugas"),
-          e(
-            Text,
-            { style: styles.metaValue },
-            safePdfText(`${dataset.actorName} (${actorRoleLabel})`),
-          ),
-        ),
-      ),
-
-      // Summary Stats
-      e(Text, { style: styles.sectionTitle }, "1. Ringkasan Statistik Operasional"),
-      e(
-        View,
-        { style: styles.statsGrid },
-        ...statCards.map((card, idx) =>
-          e(
-            View,
-            {
-              key: `stat-${idx}`,
-              style: card.alert ? styles.statCardAlert : styles.statCard,
-            },
-            e(Text, { style: styles.statLabel }, safePdfText(card.label)),
-            e(
-              Text,
-              { style: card.alert ? styles.statValueAlert : styles.statValue },
-              safePdfText(card.value),
-            ),
-            e(Text, { style: styles.statSub }, safePdfText(card.sub)),
-          ),
-        ),
-      ),
-
-      // Reconciliation status bar
-      e(
-        View,
-        { style: styles.recSummaryBar },
-        e(
-          View,
-          { style: styles.recCol },
-          e(Text, { style: styles.metaLabel }, "Progres Stock Opname"),
-          e(Text, { style: styles.metaValue }, safePdfText(`${opnamePct}% Selesai`)),
-        ),
-        e(
-          View,
-          { style: styles.recCol },
-          e(Text, { style: styles.metaLabel }, "Status Pengesahan"),
-          e(
-            Text,
-            { style: styles.metaValue },
-            dataset.reconciliation?.locked_at ? "Terkunci & Disahkan" : "Dalam Pengkinian",
-          ),
-        ),
-        e(
-          View,
-          { style: styles.recCol },
-          e(Text, { style: styles.metaLabel }, "Total Anomali Terdeteksi"),
-          e(Text, { style: styles.metaValue }, safePdfText(`${anomalies.rows.length} Item`)),
-        ),
-      ),
-
-      // Stock Anomaly Table
-      e(
-        Text,
-        { style: styles.sectionTitle },
-        "2. Daftar Anomali Stok, Part Kurang & Sanitasi Mainan",
-      ),
-      anomalyTableRows.length === 0
-        ? e(
-            View,
-            { style: styles.emptyBox },
-            e(
-              Text,
-              { style: styles.emptyText },
-              "Seluruh inventaris dalam kondisi baik, stok consumable aman, dan mainan terapi berstatus steril.",
-            ),
-          )
-        : e(
-            View,
-            { style: styles.table },
-            e(
-              View,
-              { style: styles.tableHeader, fixed: true },
-              e(Text, { style: styles.colNo }, "No"),
-              e(Text, { style: styles.colCode }, "Kode Item"),
-              e(Text, { style: styles.colName }, "Nama Barang & Ruang"),
-              e(Text, { style: styles.colType }, "Jenis Anomali"),
-              e(Text, { style: styles.colDetail }, "Detail Kondisi / Stok / Sanitasi"),
-              e(Text, { style: styles.colPic }, "PIC"),
-            ),
-            ...anomalyTableRows.map((row, idx) =>
-              e(
-                View,
-                {
-                  key: row.item.id,
-                  style: idx % 2 === 1 ? styles.tableRowAlt : styles.tableRow,
-                  wrap: false,
-                },
-                e(Text, { style: styles.colNo }, String(idx + 1)),
-                e(Text, { style: styles.colCode }, safePdfText(row.item.item_code)),
-                e(
-                  Text,
-                  { style: styles.colName },
-                  safePdfText(`${row.item.name} (${row.item.room_code})`),
-                ),
-                e(Text, { style: styles.colType }, safePdfText(row.reasons.join(", "))),
-                e(Text, { style: styles.colDetail }, safePdfText(row.detail)),
-                e(Text, { style: styles.colPic }, safePdfText(row.item.pic_name, "-")),
-              ),
-            ),
-          ),
-
-      anomalies.rows.length > 60
-        ? e(
-            Text,
-            { style: { fontSize: 7.5, color: "#64748B", marginBottom: 10 } },
-            `* Menampilkan 60 dari ${anomalies.rows.length} item anomali. Unduh file .XLSX untuk daftar lengkap.`,
-          )
-        : null,
-
-      // 3-Column Official Signature Block
-      e(
-        View,
-        { style: styles.signatureSection, wrap: false },
-        e(
-          Text,
-          { style: styles.sectionTitle },
-          "3. Lembar Pengesahan Resmi & Rekonsiliasi Bulanan",
-        ),
-        e(
-          View,
-          { style: styles.signatureGrid },
-          // Column 1: Admin Ops
-          e(
-            View,
-            { style: styles.signatureBox },
-            e(
-              View,
-              null,
-              e(Text, { style: styles.signatureRoleTitle }, "Diverifikasi Oleh"),
-              e(Text, { style: styles.signatureRoleSub }, "Admin Operasional"),
-            ),
-            e(
-              View,
-              { style: styles.signatureLine },
-              e(
-                Text,
-                { style: styles.signatureName },
-                safePdfText(
-                  dataset.approverNames.adminName,
-                  "( .............................. )",
-                ),
-              ),
-              dataset.reconciliation?.verified_by_admin_at
-                ? e(
-                    Text,
-                    { style: styles.signatureStamp },
-                    safePdfText(
-                      `E-Verified: ${formatDateWIB(dataset.reconciliation.verified_by_admin_at, true)}`,
-                    ),
-                  )
-                : e(Text, { style: styles.signaturePending }, "Menunggu verifikasi"),
-            ),
-          ),
-          // Column 2: Kepala Terapis
-          e(
-            View,
-            { style: styles.signatureBox },
-            e(
-              View,
-              null,
-              e(Text, { style: styles.signatureRoleTitle }, "Diperiksa Oleh"),
-              e(Text, { style: styles.signatureRoleSub }, "Kepala Terapis"),
-            ),
-            e(
-              View,
-              { style: styles.signatureLine },
-              e(
-                Text,
-                { style: styles.signatureName },
-                safePdfText(
-                  dataset.approverNames.leaderName,
-                  "( .............................. )",
-                ),
-              ),
-              dataset.reconciliation?.approved_by_leader_at
-                ? e(
-                    Text,
-                    { style: styles.signatureStamp },
-                    safePdfText(
-                      `E-Approved: ${formatDateWIB(dataset.reconciliation.approved_by_leader_at, true)}`,
-                    ),
-                  )
-                : e(Text, { style: styles.signaturePending }, "Menunggu pemeriksaan"),
-            ),
-          ),
-          // Column 3: Owner / Direktur
-          e(
-            View,
-            { style: styles.signatureBox },
-            e(
-              View,
-              null,
-              e(Text, { style: styles.signatureRoleTitle }, "Disetujui & Disahkan Oleh"),
-              e(Text, { style: styles.signatureRoleSub }, "Owner / Direktur"),
-            ),
-            e(
-              View,
-              { style: styles.signatureLine },
-              e(
-                Text,
-                { style: styles.signatureName },
-                safePdfText(
-                  dataset.approverNames.ownerName,
-                  "( .............................. )",
-                ),
-              ),
-              dataset.reconciliation?.approved_by_owner_at
-                ? e(
-                    Text,
-                    { style: styles.signatureStamp },
-                    safePdfText(
-                      `E-Signed: ${formatDateWIB(dataset.reconciliation.approved_by_owner_at, true)}`,
-                    ),
-                  )
-                : e(Text, { style: styles.signaturePending }, "Menunggu pengesahan Owner"),
-            ),
-          ),
-        ),
-      ),
-
-      // Footer
-      e(
-        View,
-        { style: styles.footer, fixed: true },
-        e(
-          Text,
-          null,
-          dataset.canExportFinancial
-            ? "StarOps | Star Champs Indonesia | Dokumen Audit Internal (Kredensial Vault Termasking)"
-            : "StarOps | Star Champs Indonesia | Dokumen Operasional Internal",
-        ),
-        e(Text, {
-          render: ({ pageNumber, totalPages }: { pageNumber: number; totalPages: number }) =>
-            `Halaman ${pageNumber} dari ${totalPages}`,
-        }),
-      ),
-    ),
+  const title = safePdfText(
+    `Laporan Bulanan StarOps ${dataset.periodLabel}`,
+    "Laporan Bulanan StarOps",
   );
+  const subject = safePdfText(
+    `Rekonsiliasi & Ringkasan Inventaris ${dataset.periodCode}`,
+    "Rekonsiliasi & Ringkasan Inventaris",
+  );
+
+  return {
+    type: "DOCUMENT",
+    style: {},
+    props: {
+      title,
+      author: "StarOps - Star Champs Indonesia",
+      subject,
+    },
+    children: [
+      pdfPage(styles.page, [
+        // Official Star Champs Header
+        pdfView(styles.headerBox, [
+          pdfView(styles.brandBlock, [
+            pdfText("STAR CHAMPS INDONESIA | STAROPS", styles.brandEyebrow),
+            pdfText("LAPORAN RESMI OPERASIONAL BULANAN", styles.brandTitle),
+            pdfText(
+              dataset.canExportFinancial
+                ? "Rekapitulasi Inventaris, Kelengkapan Part, Sanitasi Mainan, Vault & Arsip Hibrida"
+                : "Rekapitulasi Inventaris, Kelengkapan Part, Sanitasi Mainan & Arsip Berkas",
+              styles.brandSubtitle,
+            ),
+          ]),
+          pdfView(styles.metaBlock, [
+            pdfText("Periode Laporan", styles.metaLabel),
+            pdfText(
+              safePdfText(`${dataset.periodLabel} (${dataset.periodCode})`),
+              styles.metaValue,
+            ),
+            pdfText("Dicetak Pada", styles.metaLabel),
+            pdfText(safePdfText(dataset.generatedAtWib), styles.metaValue),
+            pdfText("Petugas", styles.metaLabel),
+            pdfText(
+              safePdfText(`${dataset.actorName} (${actorRoleLabel})`),
+              styles.metaValue,
+            ),
+          ]),
+        ]),
+
+        // Summary Stats
+        pdfText("1. Ringkasan Statistik Operasional", styles.sectionTitle),
+        pdfView(
+          styles.statsGrid,
+          statCards.map((card) =>
+            pdfView(card.alert ? styles.statCardAlert : styles.statCard, [
+              pdfText(safePdfText(card.label), styles.statLabel),
+              pdfText(
+                safePdfText(card.value),
+                card.alert ? styles.statValueAlert : styles.statValue,
+              ),
+              pdfText(safePdfText(card.sub), styles.statSub),
+            ]),
+          ),
+        ),
+
+        // Reconciliation status bar
+        pdfView(styles.recSummaryBar, [
+          pdfView(styles.recCol, [
+            pdfText("Progres Stock Opname", styles.metaLabel),
+            pdfText(safePdfText(`${opnamePct}% Selesai`), styles.metaValue),
+          ]),
+          pdfView(styles.recCol, [
+            pdfText("Status Pengesahan", styles.metaLabel),
+            pdfText(
+              dataset.reconciliation?.locked_at
+                ? "Terkunci & Disahkan"
+                : "Dalam Pengkinian",
+              styles.metaValue,
+            ),
+          ]),
+          pdfView(styles.recCol, [
+            pdfText("Total Anomali Terdeteksi", styles.metaLabel),
+            pdfText(safePdfText(`${anomalies.rows.length} Item`), styles.metaValue),
+          ]),
+        ]),
+
+        // Stock Anomaly Table
+        pdfText(
+          "2. Daftar Anomali Stok, Part Kurang & Sanitasi Mainan",
+          styles.sectionTitle,
+        ),
+        anomalyTableRows.length === 0
+          ? pdfView(styles.emptyBox, [
+              pdfText(
+                "Seluruh inventaris dalam kondisi baik, stok consumable aman, dan mainan terapi berstatus steril.",
+                styles.emptyText,
+              ),
+            ])
+          : pdfView(styles.table, [
+              pdfView(
+                styles.tableHeader,
+                [
+                  pdfText("No", styles.colNo),
+                  pdfText("Kode Item", styles.colCode),
+                  pdfText("Nama Barang & Ruang", styles.colName),
+                  pdfText("Jenis Anomali", styles.colType),
+                  pdfText("Detail Kondisi / Stok / Sanitasi", styles.colDetail),
+                  pdfText("PIC", styles.colPic),
+                ],
+                { fixed: true },
+              ),
+              ...anomalyTableRows.map((row, idx) =>
+                pdfView(
+                  idx % 2 === 1 ? styles.tableRowAlt : styles.tableRow,
+                  [
+                    pdfText(String(idx + 1), styles.colNo),
+                    pdfText(safePdfText(row.item.item_code), styles.colCode),
+                    pdfText(
+                      safePdfText(`${row.item.name} (${row.item.room_code})`),
+                      styles.colName,
+                    ),
+                    pdfText(safePdfText(row.reasons.join(", ")), styles.colType),
+                    pdfText(safePdfText(row.detail), styles.colDetail),
+                    pdfText(safePdfText(row.item.pic_name, "-"), styles.colPic),
+                  ],
+                  { wrap: false },
+                ),
+              ),
+            ]),
+
+        anomalies.rows.length > 60
+          ? pdfText(
+              `* Menampilkan 60 dari ${anomalies.rows.length} item anomali. Unduh file .XLSX untuk daftar lengkap.`,
+              { fontSize: 7.5, color: "#64748B", marginBottom: 10 },
+            )
+          : null,
+
+        // 3-Column Official Signature Block
+        pdfView(
+          styles.signatureSection,
+          [
+            pdfText(
+              "3. Lembar Pengesahan Resmi & Rekonsiliasi Bulanan",
+              styles.sectionTitle,
+            ),
+            pdfView(styles.signatureGrid, [
+              // Column 1: Admin Ops
+              pdfView(styles.signatureBox, [
+                pdfView({}, [
+                  pdfText("Diverifikasi Oleh", styles.signatureRoleTitle),
+                  pdfText("Admin Operasional", styles.signatureRoleSub),
+                ]),
+                pdfView(styles.signatureLine, [
+                  pdfText(
+                    safePdfText(
+                      dataset.approverNames.adminName,
+                      "( .............................. )",
+                    ),
+                    styles.signatureName,
+                  ),
+                  dataset.reconciliation?.verified_by_admin_at
+                    ? pdfText(
+                        safePdfText(
+                          `E-Verified: ${formatDateWIB(dataset.reconciliation.verified_by_admin_at, true)}`,
+                        ),
+                        styles.signatureStamp,
+                      )
+                    : pdfText("Menunggu verifikasi", styles.signaturePending),
+                ]),
+              ]),
+              // Column 2: Kepala Terapis
+              pdfView(styles.signatureBox, [
+                pdfView({}, [
+                  pdfText("Diperiksa Oleh", styles.signatureRoleTitle),
+                  pdfText("Kepala Terapis", styles.signatureRoleSub),
+                ]),
+                pdfView(styles.signatureLine, [
+                  pdfText(
+                    safePdfText(
+                      dataset.approverNames.leaderName,
+                      "( .............................. )",
+                    ),
+                    styles.signatureName,
+                  ),
+                  dataset.reconciliation?.approved_by_leader_at
+                    ? pdfText(
+                        safePdfText(
+                          `E-Approved: ${formatDateWIB(dataset.reconciliation.approved_by_leader_at, true)}`,
+                        ),
+                        styles.signatureStamp,
+                      )
+                    : pdfText("Menunggu pemeriksaan", styles.signaturePending),
+                ]),
+              ]),
+              // Column 3: Owner / Direktur
+              pdfView(styles.signatureBox, [
+                pdfView({}, [
+                  pdfText("Disetujui & Disahkan Oleh", styles.signatureRoleTitle),
+                  pdfText("Owner / Direktur", styles.signatureRoleSub),
+                ]),
+                pdfView(styles.signatureLine, [
+                  pdfText(
+                    safePdfText(
+                      dataset.approverNames.ownerName,
+                      "( .............................. )",
+                    ),
+                    styles.signatureName,
+                  ),
+                  dataset.reconciliation?.approved_by_owner_at
+                    ? pdfText(
+                        safePdfText(
+                          `E-Signed: ${formatDateWIB(dataset.reconciliation.approved_by_owner_at, true)}`,
+                        ),
+                        styles.signatureStamp,
+                      )
+                    : pdfText("Menunggu pengesahan Owner", styles.signaturePending),
+                ]),
+              ]),
+            ]),
+          ],
+          { wrap: false },
+        ),
+
+        // Footer
+        pdfView(
+          styles.footer,
+          [
+            pdfText(
+              dataset.canExportFinancial
+                ? "StarOps | Star Champs Indonesia | Dokumen Audit Internal (Kredensial Vault Termasking)"
+                : "StarOps | Star Champs Indonesia | Dokumen Operasional Internal",
+            ),
+            pdfDynamicText(
+              ({ pageNumber, totalPages }) =>
+                `Halaman ${pageNumber} dari ${totalPages ?? pageNumber}`,
+            ),
+          ],
+          { fixed: true },
+        ),
+      ]),
+    ],
+  };
 }
 
 export async function generatePdfBuffer(dataset: ExportDataset): Promise<Buffer> {
-  const doc = buildMonthlyReportDocument(dataset);
-  const buf = await renderToBuffer(doc);
-  return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  const docNode = buildMonthlyReportDocument(dataset);
+  const props = docNode.props ?? {};
+
+  const ctx = new PDFDocument({
+    compress: true,
+    displayTitle: true,
+    autoFirstPage: false,
+    info: {
+      Title: props.title ?? "Laporan Bulanan StarOps",
+      Author: props.author ?? "StarOps - Star Champs Indonesia",
+      Subject: props.subject ?? "Rekonsiliasi & Ringkasan Inventaris",
+      Creator: "StarOps",
+      Producer: "StarOps PDF Generator",
+      CreationDate: new Date(),
+    },
+  });
+
+  const laidOut = await runLayout(docNode, fontStore);
+  const stream = runRender(ctx, laidOut);
+
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stream.on("data", (chunk: Uint8Array | Buffer) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", (err: Error) => reject(err));
+  });
 }
 
 export async function exportPdfWithAuth(): Promise<{

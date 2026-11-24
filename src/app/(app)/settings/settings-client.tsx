@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  ArrowRight,
   ArrowRightLeft,
   Briefcase,
   CheckCircle2,
@@ -15,6 +17,7 @@ import {
   Lock,
   LogOut,
   Mail,
+  MapPin,
   Pencil,
   Phone,
   Search,
@@ -1839,6 +1842,46 @@ export function SettingsClient({
           </Card>
         </div>
       </section>
+
+      {/* Master Ruangan & Lemari Arsip Shortcut (OWNER & Admin Operasional) */}
+      <Can action="locations.manage">
+        <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-gradient-to-r from-[#CCFBF1]/70 via-[#FFFDF7] to-[#FEF3C7]/65 shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40 dark:from-[#1B3330]/75 dark:via-[#28221F] dark:to-[#3A311E]/55">
+          <CardContent className="flex flex-col justify-between gap-4 py-5 sm:flex-row sm:items-center">
+            <div className="flex items-start gap-3.5 sm:items-center">
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-[#99F6E4] text-[#2C2623] shadow-[2.5px_2.5px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:bg-[#1E443E] dark:text-[#CCFBF1]">
+                <MapPin className="size-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-extrabold tracking-tight text-[#2C2623] dark:text-[#FDF8F0]">
+                    Master Ruangan &amp; Lemari Arsip
+                  </h2>
+                  <Badge
+                    variant="outline"
+                    className="border-[#2C2623] bg-[#FFFDF7] text-[11px] font-extrabold text-[#115E59] dark:border-[#6D5D54] dark:bg-[#1B3330] dark:text-[#99F6E4]"
+                  >
+                    Dinamis
+                  </Badge>
+                </div>
+                <p className="max-w-2xl text-xs font-medium text-[#5A4D46] dark:text-[#D5C6BA]">
+                  Ubah nama Ruang Terapi 1–6, Gudang, Kantor, maupun Lemari Arsip
+                  1–4, tambah lokasi baru, dan atur ruangan cek opname bulanan.
+                  Semua data barang, arsip, stiker barcode, dan laporan otomatis
+                  mengikuti nama terbaru.
+                </p>
+              </div>
+            </div>
+
+            <Button asChild className="shrink-0 font-extrabold">
+              <Link href="/rooms">
+                <MapPin className="size-4" />
+                Kelola Ruangan &amp; Lemari Arsip
+                <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </Can>
 
       {/* User Management (OWNER & Admin Operasional) */}
       <Can action="users.manage">

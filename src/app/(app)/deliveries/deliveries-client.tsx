@@ -30,6 +30,7 @@ import {
   KawaiiPageHeader,
   KawaiiStatCard,
 } from "@/components/cartoon/kawaii-decor";
+import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -74,7 +75,6 @@ import {
   CONDITION_LABELS,
   DELIVERY_DIRECTION_LABELS,
   DELIVERY_STATUS_LABELS,
-  LOCATION_LABELS,
   formatDateWIB,
   formatRupiah,
 } from "@/lib/constants";
@@ -126,6 +126,7 @@ export function DeliveriesClient({
   const canConvert = can("delivery.convert_to_stock");
   const { showWorking, showBatch, showSuccess, showError } =
     useCartoonFeedback();
+  const { getLabel } = useLocations();
 
   const [deliveries, setDeliveries] =
     useState<DeliveryLog[]>(initialDeliveries);
@@ -1155,8 +1156,7 @@ export function DeliveriesClient({
                             {item.qty} {item.unit_label}
                           </TableCell>
                           <TableCell className="text-xs">
-                            {item.room_code} ·{" "}
-                            {LOCATION_LABELS[item.room_code] ?? item.room_code}
+                            {item.room_code} · {getLabel(item.room_code)}
                           </TableCell>
                           <TableCell className="text-xs">
                             {CONDITION_LABELS[item.condition] ?? item.condition}
@@ -1287,7 +1287,7 @@ export function DeliveriesClient({
                       <p className="font-bold">{item.name}</p>
                       <p className="text-muted-foreground">
                         Prefix: <strong>{item.category_prefix}</strong> · Lokasi:{" "}
-                        <strong>{item.room_code}</strong> ·{" "}
+                        <strong>{item.room_code}</strong> ({getLabel(item.room_code)}) ·{" "}
                         {ASSET_TYPE_LABELS[item.asset_type]}
                       </p>
                     </div>

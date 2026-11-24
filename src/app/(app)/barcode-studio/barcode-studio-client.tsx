@@ -34,6 +34,7 @@ import {
   KawaiiEmptyState,
   KawaiiPageHeader,
 } from "@/components/cartoon/kawaii-decor";
+import { useLocations } from "@/components/providers/locations-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -83,7 +84,6 @@ import {
 import {
   ASSET_TYPE_LABELS,
   BARCODE_FORMAT_LABELS,
-  LOCATION_OPTIONS,
 } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
@@ -179,6 +179,7 @@ export function BarcodeStudioClient({
 }: BarcodeStudioClientProps) {
   const { showWorking, showBatch, showSuccess, showError, runWithFeedback } =
     useCartoonFeedback();
+  const { allOptions } = useLocations();
 
   const allRecords = React.useMemo(
     () => [...items, ...archives],
@@ -258,13 +259,13 @@ export function BarcodeStudioClient({
 
   // Available locations relevant to active tab
   const locationFilterOptions = React.useMemo(() => {
-    return LOCATION_OPTIONS.filter((loc) => {
+    return allOptions.filter((loc) => {
       if (loc.group === "DIGITAL") return false;
       if (sourceTab === "ARCHIVE") return loc.group === "ARCHIVE";
-      if (sourceTab === "INVENTORY") return loc.group !== "ARCHIVE";
+      // sourceTab === "INVENTORY" or "ALL": include all non-DIGITAL locations (THERAPY, OFFICE, ARCHIVE)
       return true;
     });
-  }, [sourceTab]);
+  }, [allOptions, sourceTab]);
 
   // Filtered records
   const filteredRecords = React.useMemo(() => {
@@ -766,7 +767,9 @@ export function BarcodeStudioClient({
                     <SelectItem value="ALL">Semua Lokasi</SelectItem>
                     {locationFilterOptions.map((loc) => (
                       <SelectItem key={loc.value} value={loc.value}>
-                        {loc.label}
+                        {loc.isActive === false
+                          ? `${loc.label} (Nonaktif)`
+                          : loc.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1347,7 +1350,7 @@ export function BarcodeStudioClient({
                     </div>
                     <div className="text-muted-foreground flex items-center text-xs">
                       Layout horizontal 150 × 35 mm untuk punggung map/odner
-                      lemari arsip L01–L04.
+                      lemari arsip.
                     </div>
                   </div>
                 )}

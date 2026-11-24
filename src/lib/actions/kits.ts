@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
+import { validateLocationCode } from "@/lib/locations";
 import {
   isValidUuid,
   sanitizeOptionalText,
@@ -35,23 +36,6 @@ export type KitReturnItemUpdate = {
   hygieneStatus?: HygieneStatus;
 };
 
-const VALID_LOCATIONS: readonly LocationCode[] = [
-  "R01",
-  "R02",
-  "R03",
-  "R04",
-  "R05",
-  "R06",
-  "ADM",
-  "FO",
-  "GDG",
-  "L01",
-  "L02",
-  "L03",
-  "L04",
-  "DIG",
-];
-
 const VALID_KIT_STATUSES: readonly KitStatus[] = [
   "TERSEDIA",
   "DIPINJAM",
@@ -83,6 +67,7 @@ function deduplicateValidUuids(ids: unknown): string[] {
 
 function revalidateKitPaths() {
   revalidatePath("/kits");
+  revalidatePath("/rooms");
   revalidatePath("/scan");
   revalidatePath("/inventory");
   revalidatePath("/dashboard");
@@ -108,12 +93,20 @@ export async function createKitAction(
     return { ok: false, error: "Pilih minimal satu item inventaris yang valid untuk kit." };
   }
 
-  const assignedRoom = input.assigned_room ?? null;
-  if (assignedRoom && !VALID_LOCATIONS.includes(assignedRoom)) {
-    return { ok: false, error: "Ruangan penempatan kit tidak valid." };
+  const supabase = await createClient();
+  const rawAssignedRoom =
+    typeof input.assigned_room === "string" ? input.assigned_room.trim() : "";
+  let assignedRoom: LocationCode | null = null;
+  if (rawAssignedRoom) {
+    const roomCheck = await validateLocationCode(supabase, rawAssignedRoom, {
+      allowDigital: false,
+    });
+    if (!roomCheck.ok) {
+      return { ok: false, error: roomCheck.error };
+    }
+    assignedRoom = roomCheck.location.code;
   }
 
-  const supabase = await createClient();
   const { data: items, error: itemsErr } = await supabase
     .from("items_master")
     .select("id, condition, current_parts, total_parts")
@@ -192,11 +185,6 @@ export async function updateKitAction(
     return { ok: false, error: "Kit harus memiliki minimal satu item inventaris yang valid." };
   }
 
-  const assignedRoom = input.assigned_room ?? null;
-  if (assignedRoom && !VALID_LOCATIONS.includes(assignedRoom)) {
-    return { ok: false, error: "Ruangan penempatan kit tidak valid." };
-  }
-
   const supabase = await createClient();
   const { data: existing, error: existingErr } = await supabase
     .from("item_kits")
@@ -207,6 +195,20 @@ export async function updateKitAction(
 
   if (existingErr || !existing) {
     return { ok: false, error: "Kit tidak ditemukan." };
+  }
+
+  const rawAssignedRoom =
+    typeof input.assigned_room === "string" ? input.assigned_room.trim() : "";
+  let assignedRoom: LocationCode | null = null;
+  if (rawAssignedRoom) {
+    const roomCheck = await validateLocationCode(supabase, rawAssignedRoom, {
+      allowDigital: false,
+      allowExistingCode: existing.assigned_room,
+    });
+    if (!roomCheck.ok) {
+      return { ok: false, error: roomCheck.error };
+    }
+    assignedRoom = roomCheck.location.code;
   }
 
   const { data: items, error: itemsErr } = await supabase
@@ -322,9 +324,6 @@ export async function checkoutKitAction(
   if (!isValidUuid(kitId)) {
     return { ok: false, error: "ID kit tidak valid." };
   }
-  if (options?.roomCode && !VALID_LOCATIONS.includes(options.roomCode)) {
-    return { ok: false, error: "Kode ruangan tujuan tidak valid." };
-  }
 
   const supabase = await createClient();
   const { data: kit, error: kitErr } = await supabase
@@ -343,6 +342,22 @@ export async function checkoutKitAction(
   }
   if (kit.status === "DIPINJAM") {
     return { ok: false, error: `Kit ${kit.kit_code} sedang dipinjam.` };
+  }
+
+  const rawTargetRoom =
+    typeof options?.roomCode === "string" && options.roomCode.trim()
+      ? options.roomCode.trim()
+      : kit.assigned_room;
+  let targetRoom: LocationCode | null = null;
+  if (rawTargetRoom) {
+    const roomCheck = await validateLocationCode(supabase, rawTargetRoom, {
+      allowDigital: false,
+      allowExistingCode: kit.assigned_room,
+    });
+    if (!roomCheck.ok) {
+      return { ok: false, error: roomCheck.error };
+    }
+    targetRoom = roomCheck.location.code;
   }
 
   const { data: activeBorrow } = await supabase
@@ -369,8 +384,6 @@ export async function checkoutKitAction(
 
     partsBefore = (items ?? []).reduce((acc, item) => acc + item.current_parts, 0);
   }
-
-  const targetRoom = options?.roomCode ?? kit.assigned_room ?? null;
 
   const { data: transaction, error: trxErr } = await supabase
     .from("borrow_transactions")

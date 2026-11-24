@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
-import { ImagePlus, Loader2, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { ImagePlus, Loader2, MapPin, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
+import { useLocations } from "@/components/providers/locations-provider";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +39,6 @@ import {
   CATEGORY_PREFIX_OPTIONS,
   CONDITION_LABELS,
   HYGIENE_LABELS,
-  INVENTORY_LOCATION_OPTIONS,
   THERAPY_CATEGORIES,
   calculateBookValue,
   formatRupiah,
@@ -82,7 +83,9 @@ export function ItemFormDialog({
 }: ItemFormDialogProps) {
   const { can } = useRole();
   const { runWithFeedback, showError } = useCartoonFeedback();
+  const { inventoryOptions, getOptionWithCurrent } = useLocations();
   const canApproveWriteoff = can("writeoff.approve");
+  const canManageLocations = can("locations.manage");
   const isEditing = Boolean(editingItem);
   const lockedWrittenOff = editingItem?.condition === "DIHAPUSBUKU" && !canApproveWriteoff;
   const defaultParent =
@@ -496,9 +499,20 @@ export function ItemFormDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="item-room" className="font-bold">
-                Lokasi Ruangan *
-              </Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="item-room" className="font-bold">
+                  Lokasi Ruangan *
+                </Label>
+                {canManageLocations && (
+                  <Link
+                    href="/rooms"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-teal-700 hover:underline dark:text-teal-300"
+                  >
+                    <MapPin className="size-3" />
+                    Atur Ruangan
+                  </Link>
+                )}
+              </div>
               <Select
                 value={roomCode}
                 onValueChange={(v) => setRoomCode(v as LocationCode)}
@@ -508,7 +522,7 @@ export function ItemFormDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {INVENTORY_LOCATION_OPTIONS.map((loc) => (
+                  {getOptionWithCurrent(inventoryOptions, roomCode).map((loc) => (
                     <SelectItem key={loc.value} value={loc.value}>
                       {loc.label}
                     </SelectItem>

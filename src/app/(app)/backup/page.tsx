@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { requireRouteAccess } from "@/lib/auth";
-import { OPNAME_ROOM_CODES } from "@/lib/constants";
+import { getLocationsDirectory } from "@/lib/locations";
 import { getMonthlyUpdatePeriod } from "@/lib/period";
 import { can } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
@@ -17,7 +17,7 @@ export default async function BackupPage() {
   const period = getMonthlyUpdatePeriod();
   const supabase = await createClient();
 
-  const [recRes, itemsRes, backupsRes] = await Promise.all([
+  const [recRes, itemsRes, backupsRes, locationsDir] = await Promise.all([
     supabase
       .from("monthly_reconciliations")
       .select("*")
@@ -37,6 +37,7 @@ export default async function BackupPage() {
           .order("created_at", { ascending: false })
           .limit(30)
       : Promise.resolve({ data: [] as SystemBackup[], error: null }),
+    getLocationsDirectory(),
   ]);
 
   const reconciliation = recRes.data ?? null;
@@ -58,14 +59,19 @@ export default async function BackupPage() {
     }
   }
 
+  const opnameRoomCodes: LocationCode[] = [...locationsDir.opnameRoomCodes];
   const roomBucket = new Map<LocationCode, { total: number; anomaly: number }>();
-  for (const room of OPNAME_ROOM_CODES) {
+  for (const room of opnameRoomCodes) {
     roomBucket.set(room, { total: 0, anomaly: 0 });
   }
 
   for (const item of itemsRes.data ?? []) {
-    const bucket = roomBucket.get(item.room_code);
-    if (!bucket) continue;
+    let bucket = roomBucket.get(item.room_code);
+    if (!bucket) {
+      opnameRoomCodes.push(item.room_code);
+      bucket = { total: 0, anomaly: 0 };
+      roomBucket.set(item.room_code, bucket);
+    }
     bucket.total += 1;
     const isAnomaly =
       item.condition === "PART_KURANG" ||
@@ -79,7 +85,7 @@ export default async function BackupPage() {
     if (isAnomaly) bucket.anomaly += 1;
   }
 
-  const roomStats: RoomSummaryStat[] = OPNAME_ROOM_CODES.map((roomCode) => {
+  const roomStats: RoomSummaryStat[] = opnameRoomCodes.map((roomCode) => {
     const stat = roomBucket.get(roomCode) ?? { total: 0, anomaly: 0 };
     return {
       roomCode,

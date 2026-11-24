@@ -9,6 +9,7 @@ import {
   Eye,
   Filter,
   Loader2,
+  MapPin,
   Package,
   Pencil,
   Plus,
@@ -25,6 +26,7 @@ import {
   KawaiiPageHeader,
   KawaiiStatCard,
 } from "@/components/cartoon/kawaii-decor";
+import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -67,8 +69,6 @@ import {
   CATEGORY_PREFIX_OPTIONS,
   CONDITION_LABELS,
   HYGIENE_LABELS,
-  INVENTORY_LOCATION_OPTIONS,
-  LOCATION_LABELS,
   calculateBookValue,
   formatDateWIB,
   formatRupiah,
@@ -105,6 +105,7 @@ export function InventoryClient({
 }: InventoryClientProps) {
   const { can } = useRole();
   const { runWithFeedback } = useCartoonFeedback();
+  const { inventoryOptions, getOptionWithCurrent, getLabel } = useLocations();
   const canViewValuation = can("inventory.view_valuation");
   const canCreateItem = can("inventory.create");
   const canManageItem = canCreateItem || can("inventory.update");
@@ -367,6 +368,14 @@ export function InventoryClient({
         mascot="box"
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Can action="locations.manage">
+              <Button variant="outline" asChild className="bg-[#FFFDF7] dark:bg-stone-900">
+                <Link href="/rooms">
+                  <MapPin className="size-4" />
+                  Kelola Ruangan
+                </Link>
+              </Button>
+            </Can>
             <Button variant="outline" asChild className="bg-[#FFFDF7] dark:bg-stone-900">
               <Link href="/scan">
                 <QrCode className="size-4" />
@@ -507,7 +516,10 @@ export function InventoryClient({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL_OPTION}>Semua Ruangan</SelectItem>
-                {INVENTORY_LOCATION_OPTIONS.map((loc) => (
+                {getOptionWithCurrent(
+                  inventoryOptions,
+                  roomFilter === ALL_OPTION ? null : roomFilter,
+                ).map((loc) => (
                   <SelectItem key={loc.value} value={loc.value}>
                     {loc.label}
                   </SelectItem>
@@ -715,7 +727,7 @@ export function InventoryClient({
                       <TableCell className="whitespace-normal">
                         <div className="text-xs">
                           <p className="font-bold text-[#2C2623] dark:text-stone-100">
-                            {item.room_code} · {LOCATION_LABELS[item.room_code]}
+                            {item.room_code} · {getLabel(item.room_code)}
                           </p>
                           {item.rack_location && (
                             <p className="text-muted-foreground font-medium">{item.rack_location}</p>

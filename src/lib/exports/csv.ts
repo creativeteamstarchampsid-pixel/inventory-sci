@@ -14,7 +14,9 @@ import {
   calculateBookValue,
   formatDateWIB,
   formatRupiah,
+  getLocationLabel,
 } from "@/lib/constants";
+import { fetchLocationsDirectoryWithClient } from "@/lib/locations";
 import { getMonthlyUpdatePeriod } from "@/lib/period";
 import { ROLE_LABELS, can, type Role } from "@/lib/rbac";
 import {
@@ -35,6 +37,7 @@ import type {
   ItemKit,
   ItemMaster,
   Json,
+  LocationMaster,
   MonthlyReconciliation,
   SystemBackup,
 } from "@/types/database";
@@ -101,6 +104,7 @@ export type ExportDataset = {
   canExportFinancial: boolean;
   canViewValuation: boolean;
   canViewBilling: boolean;
+  locationLabels: Record<string, string>;
   items: ItemMaster[];
   subscriptions: ExportSubscriptionRow[];
   archives: ArchiveHybrid[];
@@ -127,6 +131,7 @@ export type BackupSnapshotPayload = {
   };
   notes: string | null;
   tables: {
+    locations_master?: LocationMaster[];
     items_master: ItemMaster[];
     item_kits: ItemKit[];
     borrow_transactions: BorrowTransaction[];
@@ -396,15 +401,23 @@ export async function loadExportDataset(
           .limit(1000)
       : Promise.resolve({ data: [] as AuditLog[], error: null });
 
-  const [itemsRes, subsRes, archivesRes, deliveriesRes, recRes, auditRes] =
-    await Promise.all([
-      itemsPromise,
-      subscriptionsPromise,
-      archivesPromise,
-      deliveriesPromise,
-      reconciliationPromise,
-      auditPromise,
-    ]);
+  const [
+    itemsRes,
+    subsRes,
+    archivesRes,
+    deliveriesRes,
+    recRes,
+    auditRes,
+    locationsDir,
+  ] = await Promise.all([
+    itemsPromise,
+    subscriptionsPromise,
+    archivesPromise,
+    deliveriesPromise,
+    reconciliationPromise,
+    auditPromise,
+    fetchLocationsDirectoryWithClient(supabase),
+  ]);
 
   if (itemsRes.error) {
     throw new Error(
@@ -468,6 +481,7 @@ export async function loadExportDataset(
     canExportFinancial,
     canViewValuation,
     canViewBilling,
+    locationLabels: locationsDir.labels,
     items,
     subscriptions: canExportFinancial
       ? ((subsRes.data ?? []) as ExportSubscriptionRow[])
@@ -500,6 +514,7 @@ function getInventoryCsvFields(canViewValuation: boolean): string[] {
     "Prefix_Kategori",
     "Kategori",
     "Lokasi_Ruang",
+    "Lokasi_Ruang_Nama",
     "Rak_Lokasi",
     "PIC",
     "Kondisi",
@@ -542,6 +557,7 @@ const ARCHIVE_CSV_FIELDS = [
   "Kategori",
   "Gedung_Cabang",
   "Lemari",
+  "Lemari_Nama",
   "Laci",
   "Kode_Map",
   "Status_Fisik",
@@ -578,6 +594,7 @@ const ANOMALY_CSV_FIELDS = [
   "Kode_Item",
   "Nama_Barang",
   "Ruang",
+  "Ruang_Nama",
   "Jenis_Anomali",
   "Detail",
   "PIC",
@@ -593,7 +610,11 @@ const AUDIT_CSV_FIELDS = [
   "Ringkasan",
 ];
 
-function mapInventoryRows(items: ItemMaster[], canViewValuation: boolean) {
+function mapInventoryRows(
+  items: ItemMaster[],
+  canViewValuation: boolean,
+  locationLabels?: Record<string, string>,
+) {
   return items.map((item) => {
     const base: Record<string, string | number> = {
       Kode_Item: item.item_code,
@@ -602,6 +623,7 @@ function mapInventoryRows(items: ItemMaster[], canViewValuation: boolean) {
       Prefix_Kategori: item.category_prefix,
       Kategori: item.category,
       Lokasi_Ruang: item.room_code,
+      Lokasi_Ruang_Nama: getLocationLabel(item.room_code, locationLabels),
       Rak_Lokasi: item.rack_location ?? "",
       PIC: item.pic_name ?? "",
       Kondisi: CONDITION_LABELS[item.condition] ?? item.condition ?? "-",
@@ -658,13 +680,17 @@ function mapSubscriptionRows(dataset: ExportDataset) {
   }));
 }
 
-function mapArchiveRows(archives: ArchiveHybrid[]) {
+function mapArchiveRows(
+  archives: ArchiveHybrid[],
+  locationLabels?: Record<string, string>,
+) {
   return archives.map((doc) => ({
     Kode_Dokumen: doc.doc_code,
     Judul: doc.title,
     Kategori: doc.category,
     Gedung_Cabang: doc.branch_building,
     Lemari: doc.cabinet_code,
+    Lemari_Nama: getLocationLabel(doc.cabinet_code, locationLabels),
     Laci: doc.drawer_no,
     Kode_Map: doc.folder_code ?? "",
     Status_Fisik:
@@ -717,6 +743,7 @@ function mapAnomalyRows(dataset: ExportDataset) {
     Kode_Item: row.item.item_code,
     Nama_Barang: row.item.name,
     Ruang: row.item.room_code,
+    Ruang_Nama: getLocationLabel(row.item.room_code, dataset.locationLabels),
     Jenis_Anomali: row.reasons.join(", "),
     Detail: row.detail,
     PIC: row.item.pic_name ?? "-",
@@ -772,7 +799,11 @@ export function generateCsvString(
     return (
       bom +
       unparseCsvWithHeaders(
-        mapInventoryRows(dataset.items, dataset.canViewValuation),
+        mapInventoryRows(
+          dataset.items,
+          dataset.canViewValuation,
+          dataset.locationLabels,
+        ),
         getInventoryCsvFields(dataset.canViewValuation),
       )
     );
@@ -791,7 +822,7 @@ export function generateCsvString(
     return (
       bom +
       unparseCsvWithHeaders(
-        mapArchiveRows(dataset.archives),
+        mapArchiveRows(dataset.archives, dataset.locationLabels),
         ARCHIVE_CSV_FIELDS,
       )
     );
@@ -854,7 +885,11 @@ export function generateCsvString(
 
   appendSection(
     "INVENTARIS & PART MAINAN",
-    mapInventoryRows(dataset.items, dataset.canViewValuation),
+    mapInventoryRows(
+      dataset.items,
+      dataset.canViewValuation,
+      dataset.locationLabels,
+    ),
   );
   appendSection("ANOMALI STOK & SANITASI", mapAnomalyRows(dataset));
   if (dataset.canExportFinancial) {
@@ -863,7 +898,10 @@ export function generateCsvString(
       mapSubscriptionRows(dataset),
     );
   }
-  appendSection("ARSIP BERKAS HYBRID", mapArchiveRows(dataset.archives));
+  appendSection(
+    "ARSIP BERKAS HYBRID",
+    mapArchiveRows(dataset.archives, dataset.locationLabels),
+  );
   if (dataset.canExportFinancial) {
     appendSection(
       "LOG PENGIRIMAN",
@@ -928,6 +966,7 @@ export async function captureFullBackupSnapshot(
   },
 ): Promise<BackupSnapshotPayload> {
   const [
+    locationsRes,
     itemsRes,
     kitsRes,
     borrowsRes,
@@ -938,6 +977,11 @@ export async function captureFullBackupSnapshot(
     requestsRes,
     recRes,
   ] = await Promise.all([
+    supabase
+      .from("locations_master")
+      .select("*")
+      .order("sort_order", { ascending: true })
+      .order("code", { ascending: true }),
     supabase.from("items_master").select("*").order("item_code", { ascending: true }),
     supabase.from("item_kits").select("*").order("kit_code", { ascending: true }),
     supabase
@@ -969,6 +1013,13 @@ export async function captureFullBackupSnapshot(
       .order("period_ym", { ascending: false }),
   ]);
 
+  if (locationsRes.error) {
+    sanitizeSafeError(
+      locationsRes.error,
+      "Master lokasi belum tersedia di snapshot.",
+      "backup/locations",
+    );
+  }
   if (itemsRes.error) {
     throw new Error(sanitizeSafeError(itemsRes.error, "Gagal mengambil snapshot inventaris.", "backup/items"));
   }
@@ -1010,6 +1061,9 @@ export async function captureFullBackupSnapshot(
     },
     notes: params.notes ?? null,
     tables: {
+      ...(!locationsRes.error && Array.isArray(locationsRes.data)
+        ? { locations_master: locationsRes.data as LocationMaster[] }
+        : {}),
       items_master: (itemsRes.data ?? []) as ItemMaster[],
       item_kits: (kitsRes.data ?? []) as ItemKit[],
       borrow_transactions: (borrowsRes.data ?? []) as BorrowTransaction[],

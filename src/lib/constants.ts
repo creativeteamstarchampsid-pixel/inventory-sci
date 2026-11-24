@@ -13,6 +13,7 @@ import type {
   ItemCondition,
   KitStatus,
   LocationCode,
+  LocationGroup,
   PaymentMethod,
   RequestStatus,
   RequestType,
@@ -111,13 +112,63 @@ export const THERAPY_CATEGORIES = [
 
 export type TherapyCategory = (typeof THERAPY_CATEGORIES)[number];
 
-export type LocationGroup = "THERAPY" | "OFFICE" | "ARCHIVE" | "DIGITAL";
+export type { LocationGroup };
+
+export const LOCATION_GROUP_LABELS: Record<LocationGroup, string> = {
+  THERAPY: "Ruang Terapi",
+  OFFICE: "Kantor & Gudang",
+  ARCHIVE: "Lemari Arsip",
+  DIGITAL: "Digital Vault",
+};
+
+export const LIVE_SUPPORTED_ENUM_CODES: readonly string[] = [
+  "R01",
+  "R02",
+  "R03",
+  "R04",
+  "R05",
+  "R06",
+  "ADM",
+  "FO",
+  "GDG",
+  "L01",
+  "L02",
+  "L03",
+  "L04",
+  "DIG",
+  "R07",
+  "R08",
+  "R09",
+  "R10",
+  "R11",
+  "R12",
+  "FAC",
+  "RTG",
+  "KLS",
+  "UKS",
+  "DPR",
+  "MUS",
+  "LAB",
+  "GDG2",
+  "KTR1",
+  "KTR2",
+  "L05",
+  "L06",
+  "L07",
+  "L08",
+] as const;
 
 export type LocationOption = {
   value: LocationCode;
   label: string;
   shortLabel: string;
   group: LocationGroup;
+  isActive?: boolean;
+  includeInOpname?: boolean;
+  isSystem?: boolean;
+  picName?: string | null;
+  description?: string | null;
+  sortOrder?: number;
 };
 
 export const LOCATION_OPTIONS: readonly LocationOption[] = [
@@ -137,7 +188,7 @@ export const LOCATION_OPTIONS: readonly LocationOption[] = [
   { value: "DIG", label: "DIG — Digital Vault", shortLabel: "Digital Vault", group: "DIGITAL" },
 ] as const;
 
-export const LOCATION_LABELS: Record<LocationCode, string> = {
+export const LOCATION_LABELS: Record<string, string> = {
   R01: "Ruang Terapi 1",
   R02: "Ruang Terapi 2",
   R03: "Ruang Terapi 3",
@@ -153,6 +204,16 @@ export const LOCATION_LABELS: Record<LocationCode, string> = {
   L04: "Lemari Arsip 4",
   DIG: "Digital Vault",
 };
+
+/** Resolve a readable room or cabinet name from dynamic labels or static defaults. */
+export function getLocationLabel(
+  code: string | null | undefined,
+  customLabels?: Record<string, string>,
+): string {
+  const trimmed = typeof code === "string" ? code.trim() : "";
+  if (!trimmed) return "-";
+  return customLabels?.[trimmed] ?? LOCATION_LABELS[trimmed] ?? trimmed;
+}
 
 export const INVENTORY_LOCATION_OPTIONS = LOCATION_OPTIONS.filter(
   (loc) => loc.group !== "DIGITAL",

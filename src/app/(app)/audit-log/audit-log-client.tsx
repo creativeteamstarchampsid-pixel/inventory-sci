@@ -93,6 +93,10 @@ const ACTION_OPTIONS = [
   "CRON_MONTHLY_BACKUP",
   "USER_CREATED",
   "USER_INVITED",
+  "LOCATION_CREATED",
+  "LOCATION_RENAMED",
+  "LOCATION_UPDATED",
+  "LOCATION_DELETED",
 ] as const;
 
 const ENTITY_LABELS: Record<string, string> = {
@@ -106,6 +110,7 @@ const ENTITY_LABELS: Record<string, string> = {
   system_backups: "Backup Sistem (system_backups)",
   monthly_reconciliations: "Rekonsiliasi Bulanan",
   profiles: "Profil & Pengguna (profiles)",
+  locations_master: "Ruangan & Lemari (locations_master)",
   system_exports: "Ekspor Data",
 };
 
@@ -114,18 +119,24 @@ const CRITICAL_ACTIONS = new Set([
   "SOFT_DELETE",
   "BACKUP_RESTORE",
   "VAULT_REVEAL",
+  "LOCATION_DELETED",
 ]);
 
 function actionBadgeVariant(
   action: string,
 ): "default" | "secondary" | "destructive" | "outline" {
-  if (action === "PURGE" || action === "SOFT_DELETE" || action === "BACKUP_RESTORE") {
+  if (
+    action === "PURGE" ||
+    action === "SOFT_DELETE" ||
+    action === "BACKUP_RESTORE" ||
+    action === "LOCATION_DELETED"
+  ) {
     return "destructive";
   }
   if (action === "VAULT_REVEAL" || action === "CRON_MONTHLY_BACKUP") {
     return "default";
   }
-  if (action === "RESTORE" || action === "INSERT") {
+  if (action === "RESTORE" || action === "INSERT" || action === "LOCATION_CREATED") {
     return "secondary";
   }
   return "outline";
@@ -137,7 +148,12 @@ function getActionPastelStyle(action: string): {
   cardTint: string;
   symbol: string;
 } {
-  if (action === "PURGE" || action === "SOFT_DELETE" || action === "BACKUP_RESTORE") {
+  if (
+    action === "PURGE" ||
+    action === "SOFT_DELETE" ||
+    action === "BACKUP_RESTORE" ||
+    action === "LOCATION_DELETED"
+  ) {
     return {
       nodeBg: "bg-[#FDA4AF]",
       pillClass:
@@ -150,7 +166,8 @@ function getActionPastelStyle(action: string): {
     action === "INSERT" ||
     action === "RESTORE" ||
     action === "USER_CREATED" ||
-    action === "USER_INVITED"
+    action === "USER_INVITED" ||
+    action === "LOCATION_CREATED"
   ) {
     return {
       nodeBg: "bg-[#A7F3D0]",

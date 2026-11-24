@@ -15,7 +15,12 @@ import renderPDF from "@react-pdf/render";
 import PDFDocument from "pdfkit";
 
 import { requireAction } from "@/lib/auth";
-import { calculateBookValue, formatDateWIB, formatRupiah } from "@/lib/constants";
+import {
+  calculateBookValue,
+  formatDateWIB,
+  formatRupiah,
+  getLocationLabel,
+} from "@/lib/constants";
 import { ROLE_LABELS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -585,14 +590,22 @@ function buildMonthlyReportDocument(dataset: ExportDataset): DocumentNode {
                 ],
                 { fixed: true },
               ),
-              ...anomalyTableRows.map((row, idx) =>
-                pdfView(
+              ...anomalyTableRows.map((row, idx) => {
+                const roomLabel = getLocationLabel(
+                  row.item.room_code,
+                  dataset.locationLabels,
+                );
+                const roomDisplay =
+                  roomLabel !== row.item.room_code
+                    ? `${row.item.room_code} - ${roomLabel}`
+                    : row.item.room_code;
+                return pdfView(
                   idx % 2 === 1 ? styles.tableRowAlt : styles.tableRow,
                   [
                     pdfText(String(idx + 1), styles.colNo),
                     pdfText(safePdfText(row.item.item_code), styles.colCode),
                     pdfText(
-                      safePdfText(`${row.item.name} (${row.item.room_code})`),
+                      safePdfText(`${row.item.name} (${roomDisplay})`),
                       styles.colName,
                     ),
                     pdfText(safePdfText(row.reasons.join(", ")), styles.colType),
@@ -600,8 +613,8 @@ function buildMonthlyReportDocument(dataset: ExportDataset): DocumentNode {
                     pdfText(safePdfText(row.item.pic_name, "-"), styles.colPic),
                   ],
                   { wrap: false },
-                ),
-              ),
+                );
+              }),
             ]),
 
         anomalies.rows.length > 60

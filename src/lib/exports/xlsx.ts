@@ -11,10 +11,10 @@ import {
   DELIVERY_DIRECTION_LABELS,
   DELIVERY_STATUS_LABELS,
   HYGIENE_LABELS,
-  LOCATION_LABELS,
   PAYMENT_METHOD_LABELS,
   calculateBookValue,
   formatDateWIB,
+  getLocationLabel,
 } from "@/lib/constants";
 import { ROLE_LABELS } from "@/lib/rbac";
 import { sanitizeCsvFormulaCell } from "@/lib/security";
@@ -227,7 +227,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
           ],
         ] as Array<[string, string | number, string, string, boolean?]>)
       : []),
-    ["Total Berkas Arsip Hybrid", dataset.archives.length, "Lemari L01–L04", `${dataset.archives.filter((a) => a.physical_status === "DIPINJAM").length} berkas sedang dipinjam`],
+    ["Total Berkas Arsip Hybrid", dataset.archives.length, "Semua Lemari Arsip", `${dataset.archives.filter((a) => a.physical_status === "DIPINJAM").length} berkas sedang dipinjam`],
     ...(dataset.canExportFinancial
       ? ([
           ["Total Log Pengiriman", dataset.deliveries.length, "Inbound & Outbound", `${dataset.deliveries.filter((d) => ["DRAFT", "DIKEMAS", "DALAM_PERJALANAN"].includes(d.status)).length} pengiriman masih berjalan`],
@@ -277,8 +277,11 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   } else {
     let roomIdx = 0;
     for (const [roomCode, stats] of byRoom.entries()) {
+      const roomLabel = getLocationLabel(roomCode, dataset.locationLabels);
+      const roomDisplay =
+        roomLabel !== roomCode ? `${roomCode} — ${roomLabel}` : roomCode || "-";
       const row = addSafeRow(sheet, [
-        `${roomCode} — ${LOCATION_LABELS[roomCode] ?? roomCode ?? "-"}`,
+        roomDisplay,
         stats.count,
         stats.anomaly,
         dataset.canViewValuation
@@ -307,7 +310,7 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
     { width: 18 },
     { width: 20 },
     { width: 10 },
-    { width: 12 },
+    { width: 24 },
     { width: 16 },
     { width: 18 },
     { width: 16 },
@@ -375,13 +378,19 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
       const isSanitationDue =
         item.asset_type === "THERAPY_TOY" && item.hygiene_status !== "STERIL";
 
+      const roomLabel = getLocationLabel(item.room_code, dataset.locationLabels);
+      const roomDisplay =
+        roomLabel !== item.room_code
+          ? `${item.room_code} — ${roomLabel}`
+          : item.room_code;
+
       const row = addSafeRow(sheet, [
         item.item_code,
         item.name,
         ASSET_TYPE_LABELS[item.asset_type] ?? item.asset_type ?? "-",
         item.category,
         item.category_prefix,
-        item.room_code,
+        roomDisplay,
         item.rack_location ?? "-",
         item.pic_name ?? "-",
         CONDITION_LABELS[item.condition] ?? item.condition ?? "-",
@@ -505,7 +514,7 @@ function addArchivesSheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
     { width: 32 },
     { width: 18 },
     { width: 16 },
-    { width: 10 },
+    { width: 22 },
     { width: 10 },
     { width: 14 },
     { width: 20 },
@@ -547,12 +556,20 @@ function addArchivesSheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
     dataset.archives.forEach((doc, idx) => {
       const digitalRef =
         [doc.digital_file_name, doc.drive_link].filter(Boolean).join(" | ") || "-";
+      const cabinetLabel = getLocationLabel(
+        doc.cabinet_code,
+        dataset.locationLabels,
+      );
+      const cabinetDisplay =
+        cabinetLabel !== doc.cabinet_code
+          ? `${doc.cabinet_code} — ${cabinetLabel}`
+          : doc.cabinet_code;
       const row = addSafeRow(sheet, [
         doc.doc_code,
         doc.title,
         doc.category,
         doc.branch_building,
-        doc.cabinet_code,
+        cabinetDisplay,
         doc.drawer_no,
         doc.folder_code ?? "-",
         ARCHIVE_STATUS_LABELS[doc.physical_status] ?? doc.physical_status ?? "-",

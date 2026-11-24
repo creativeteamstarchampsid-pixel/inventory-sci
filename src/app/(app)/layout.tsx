@@ -8,11 +8,13 @@ import { KawaiiMascotSvg } from "@/components/cartoon/kawaii-icons";
 import { KawaiiPageTransition } from "@/components/cartoon/page-transition";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { RoleBadge } from "@/components/layout/role-badge";
+import { LocationsProvider } from "@/components/providers/locations-provider";
 import { RoleProvider } from "@/components/rbac/role-provider";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { requireUser } from "@/lib/auth";
+import { getLocationsDirectory } from "@/lib/locations";
 import { formatJakartaDate, getMonthlyUpdatePeriod } from "@/lib/period";
 import { can, canAccessRoute } from "@/lib/rbac";
 
@@ -22,7 +24,10 @@ export default async function AuthenticatedAppLayout({
   children: React.ReactNode;
 }) {
   const user = await requireUser();
-  const cookieStore = await cookies();
+  const [cookieStore, locationsDir] = await Promise.all([
+    cookies(),
+    getLocationsDirectory(),
+  ]);
   const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
 
   const period = getMonthlyUpdatePeriod();
@@ -37,7 +42,8 @@ export default async function AuthenticatedAppLayout({
         role: user.role,
       }}
     >
-      <CartoonFeedbackProvider>
+      <LocationsProvider initialRecords={locationsDir.records}>
+        <CartoonFeedbackProvider>
         <SidebarProvider defaultOpen={defaultOpen}>
           <AppSidebar />
           <SidebarInset className="kawaii-paper-bg relative print:bg-white">
@@ -141,6 +147,7 @@ export default async function AuthenticatedAppLayout({
           </SidebarInset>
         </SidebarProvider>
       </CartoonFeedbackProvider>
+      </LocationsProvider>
     </RoleProvider>
   );
 }

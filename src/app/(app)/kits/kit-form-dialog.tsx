@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { Loader2, Search, Sparkles } from "lucide-react";
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
+import { useLocations } from "@/components/providers/locations-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { createKitAction, updateKitAction } from "@/lib/actions/kits";
-import { INVENTORY_LOCATION_OPTIONS, KIT_STATUS_LABELS } from "@/lib/constants";
+import { KIT_STATUS_LABELS } from "@/lib/constants";
 import type { ItemKit, ItemMaster, KitStatus, LocationCode } from "@/types/database";
 
 const NO_ROOM_VALUE = "__GENERAL__";
@@ -48,6 +49,7 @@ export function KitFormDialog({
   onSaved,
 }: KitFormDialogProps) {
   const { runWithFeedback } = useCartoonFeedback();
+  const { inventoryOptions, getOptionWithCurrent } = useLocations();
   const isEditing = Boolean(editingKit);
 
   const [kitName, setKitName] = useState(editingKit?.kit_name ?? "");
@@ -212,7 +214,10 @@ export function KitFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NO_ROOM_VALUE}>Umum / Lintas Ruang</SelectItem>
-                  {INVENTORY_LOCATION_OPTIONS.map((loc) => (
+                  {getOptionWithCurrent(
+                    inventoryOptions,
+                    assignedRoom === NO_ROOM_VALUE ? null : assignedRoom,
+                  ).map((loc) => (
                     <SelectItem key={loc.value} value={loc.value}>
                       {loc.label}
                     </SelectItem>

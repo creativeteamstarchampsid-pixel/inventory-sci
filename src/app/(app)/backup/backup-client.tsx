@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -14,6 +15,7 @@ import {
   GitCompare,
   Loader2,
   Lock,
+  MapPin,
   PackageCheck,
   RefreshCw,
   RotateCcw,
@@ -29,6 +31,7 @@ import {
   KawaiiPageHeader,
   KawaiiStatCard,
 } from "@/components/cartoon/kawaii-decor";
+import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -78,8 +81,6 @@ import {
 } from "@/lib/actions/backup";
 import {
   BACKUP_TYPE_LABELS,
-  LOCATION_LABELS,
-  OPNAME_ROOM_CODES,
   formatDateWIB,
   formatRupiah,
 } from "@/lib/constants";
@@ -131,8 +132,9 @@ type VerifiedRestoreJsonPreview = {
 function parseOpnameChecklist(json: Json | null | undefined): OpnameChecklistMap {
   if (!json || typeof json !== "object" || Array.isArray(json)) return {};
   const map: OpnameChecklistMap = {};
-  for (const room of OPNAME_ROOM_CODES) {
-    const val = (json as Record<string, Json | undefined>)[room];
+  for (const [room, val] of Object.entries(
+    json as Record<string, Json | undefined>,
+  )) {
     if (val && typeof val === "object" && !Array.isArray(val)) {
       const rec = val as Record<string, Json | undefined>;
       map[room] = {
@@ -273,6 +275,7 @@ export function BackupClient({
 }: BackupClientProps) {
   const router = useRouter();
   const { runWithFeedback, showError, showSuccess } = useCartoonFeedback();
+  const { opnameRoomCodes, getLabel } = useLocations();
   const { user, role, can } = useRole();
   const canExportFinancial = can("export.financial");
   const canSubmitOpname = can("reconciliation.submit");
@@ -320,8 +323,8 @@ export function BackupClient({
   }, [roomStats]);
 
   const checkedRoomCount = useMemo(
-    () => OPNAME_ROOM_CODES.filter((code) => checklist[code]?.checked).length,
-    [checklist],
+    () => opnameRoomCodes.filter((code) => checklist[code]?.checked).length,
+    [checklist, opnameRoomCodes],
   );
 
   const totalItemsAcrossRooms = useMemo(
@@ -384,7 +387,7 @@ export function BackupClient({
           workingTitle: checked
             ? `Menandai Opname ${roomCode}... ✅`
             : `Membuka Checklist ${roomCode}... ✏️`,
-          workingMessage: `Dino Joguman lagi mencatat status cek ruangan ${LOCATION_LABELS[roomCode]} biar progres bulan ini makin rapi~`,
+          workingMessage: `Dino Joguman lagi mencatat status cek ruangan ${getLabel(roomCode)} biar progres bulan ini makin rapi~`,
           successTitle: checked
             ? `Ruang ${roomCode} Beres Dicek! ✨`
             : `Checklist ${roomCode} Diperbarui`,
@@ -804,7 +807,7 @@ export function BackupClient({
       >
         <KawaiiStatCard
           label="Progres Opname Ruangan"
-          value={`${checkedRoomCount} / ${OPNAME_ROOM_CODES.length}`}
+          value={`${checkedRoomCount} / ${opnameRoomCodes.length}`}
           hint={`${progressPct}% ruangan sudah diverifikasi`}
           accent="mint"
           icon={<CheckCircle2 className="size-4" />}
@@ -1064,7 +1067,7 @@ export function BackupClient({
             <div className="flex items-center justify-between text-xs font-bold">
               <span>Progres Checklist Ruangan</span>
               <span className="font-mono">
-                {checkedRoomCount} dari {OPNAME_ROOM_CODES.length} ruang
+                {checkedRoomCount} dari {opnameRoomCodes.length} ruang
               </span>
             </div>
             <div className="h-4 w-full overflow-hidden rounded-full border-2 border-[#2C2623] bg-[#F5E9D6]/60 dark:bg-muted">
@@ -1087,16 +1090,31 @@ export function BackupClient({
                 <span className="inline-flex size-6 items-center justify-center rounded-full border-2 border-[#2C2623] bg-[#A7F3D0] text-xs font-black text-[#2C2623]">
                   1
                 </span>
-                Tahap 1 — Checklist Stock Opname Per Ruangan (R01–R06, ADM, GDG)
+                Tahap 1 — Checklist Stock Opname Per Ruangan
               </h3>
-              {!canSubmitOpname && (
-                <Badge variant="outline" className="text-[11px]">
-                  Mode Baca Saja
-                </Badge>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Can action="locations.manage">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    asChild
+                    className="h-8 rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-xs font-bold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#CCFBF1] dark:border-stone-500 dark:bg-stone-900 dark:text-foreground"
+                  >
+                    <Link href="/rooms">
+                      <MapPin className="size-3.5" />
+                      Kelola Ruangan Opname
+                    </Link>
+                  </Button>
+                </Can>
+                {!canSubmitOpname && (
+                  <Badge variant="outline" className="text-[11px]">
+                    Mode Baca Saja
+                  </Badge>
+                )}
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {OPNAME_ROOM_CODES.map((roomCode) => {
+              {opnameRoomCodes.map((roomCode) => {
                 const entry = checklist[roomCode];
                 const stat = roomStatMap.get(roomCode);
                 const checked = Boolean(entry?.checked);
@@ -1131,7 +1149,7 @@ export function BackupClient({
                         )}
                       </div>
                       <p className="truncate text-xs font-extrabold">
-                        {LOCATION_LABELS[roomCode]}
+                        {getLabel(roomCode)}
                       </p>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="text-muted-foreground text-[11px] font-medium">
@@ -1729,7 +1747,9 @@ export function BackupClient({
                             <span className="font-mono font-bold">{item.item_code}</span> —{" "}
                             {item.name}
                           </span>
-                          <Badge variant="outline">{item.room_code}</Badge>
+                          <Badge variant="outline">
+                            {item.room_code} · {getLabel(item.room_code)}
+                          </Badge>
                         </div>
                       ))}
                     </div>
@@ -1749,7 +1769,7 @@ export function BackupClient({
                         >
                           <span>
                             <span className="font-mono font-bold">{item.item_code}</span> —{" "}
-                            {item.name} ({item.room_code})
+                            {item.name} ({item.room_code} · {getLabel(item.room_code)})
                           </span>
                           <Badge variant="destructive">
                             {item.current_parts}/{item.total_parts} part

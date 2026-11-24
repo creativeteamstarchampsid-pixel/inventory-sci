@@ -27,7 +27,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRouteAccess } from "@/lib/auth";
-import { formatDateWIB, LOCATION_LABELS } from "@/lib/constants";
+import { formatDateWIB } from "@/lib/constants";
+import { getLocationsDirectory } from "@/lib/locations";
 import { formatJakartaDate, getJakartaGreeting, getMonthlyUpdatePeriod } from "@/lib/period";
 import { can, canAccessRoute, ROLE_LABELS, type Role } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
@@ -604,7 +605,10 @@ export default async function DashboardPage() {
   const greeting = getJakartaGreeting();
   const todayLabel = formatJakartaDate();
   const todayMs = getJakartaTodayMs();
-  const metrics = await loadDashboardMetrics(user.id, user.role, period.periodCode, todayMs);
+  const [metrics, locationsDir] = await Promise.all([
+    loadDashboardMetrics(user.id, user.role, period.periodCode, todayMs),
+    getLocationsDirectory(),
+  ]);
   const roleTip = ROLE_QUICK_TIPS[user.role];
   const visibleActions = roleTip.actions.filter((act) => canAccessRoute(user.role, act.href));
   const quickShortcuts = getQuickShortcutTiles(user.role);
@@ -1054,7 +1058,7 @@ export default async function DashboardPage() {
                           </span>
                         </p>
                         <p className="text-muted-foreground mt-0.5 text-xs font-medium">
-                          {borrow.room_code ? LOCATION_LABELS[borrow.room_code] : "Ruang Terapi"} ·{" "}
+                          {borrow.room_code ? locationsDir.getLabel(borrow.room_code) : "Ruang Terapi"} ·{" "}
                           {formatDateWIB(borrow.borrowed_at, true)}
                         </p>
                       </div>

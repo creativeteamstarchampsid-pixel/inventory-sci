@@ -24,6 +24,7 @@ import {
   KawaiiPageHeader,
   KawaiiStatCard,
 } from "@/components/cartoon/kawaii-decor";
+import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -72,9 +73,7 @@ import type { BorrowHistoryEntry } from "@/lib/actions/scan";
 import {
   BORROW_STATUS_LABELS,
   HYGIENE_LABELS,
-  INVENTORY_LOCATION_OPTIONS,
   KIT_STATUS_LABELS,
-  LOCATION_LABELS,
   formatDateWIB,
 } from "@/lib/constants";
 import type {
@@ -110,6 +109,7 @@ export function KitsClient({
 }: KitsClientProps) {
   const { user, role, can } = useRole();
   const { runWithFeedback } = useCartoonFeedback();
+  const { inventoryOptions, getOptionWithCurrent, getLabel } = useLocations();
   const canManageKits = can("kits.manage");
   const canReturnAnyKit = role !== "STAFF";
 
@@ -444,7 +444,10 @@ export function KitsClient({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL_OPTION}>Semua Ruangan</SelectItem>
-                {INVENTORY_LOCATION_OPTIONS.map((loc) => (
+                {getOptionWithCurrent(
+                  inventoryOptions,
+                  roomFilter === ALL_OPTION ? null : roomFilter,
+                ).map((loc) => (
                   <SelectItem key={loc.value} value={loc.value}>
                     {loc.label}
                   </SelectItem>
@@ -554,7 +557,7 @@ export function KitsClient({
                             variant="outline"
                             className="rounded-full border-[1.5px] border-[#2C2623] bg-[#FEF3C7] text-xs font-bold text-[#78350F] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-amber-950/70 dark:text-amber-200"
                           >
-                            {kit.assigned_room} · {LOCATION_LABELS[kit.assigned_room]}
+                            {kit.assigned_room} · {getLabel(kit.assigned_room)}
                           </Badge>
                         )}
                       </div>
@@ -758,7 +761,9 @@ export function KitsClient({
                       {trx.kit_id ? kitCodeMap.get(trx.kit_id) ?? "-" : "-"}
                     </TableCell>
                     <TableCell className="font-semibold">{trx.borrower_name || "-"}</TableCell>
-                    <TableCell className="font-semibold">{trx.room_code || "-"}</TableCell>
+                    <TableCell className="font-semibold">
+                      {trx.room_code ? `${trx.room_code} · ${getLabel(trx.room_code)}` : "-"}
+                    </TableCell>
                     <TableCell className="font-mono text-xs font-bold">
                       {trx.parts_before ?? "-"} → {trx.parts_after ?? "-"}
                     </TableCell>

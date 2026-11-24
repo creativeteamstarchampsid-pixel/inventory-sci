@@ -7,6 +7,7 @@ import {
   type PrintableItemRow,
   type PrintableLabelRecord,
 } from "@/lib/barcode";
+import { getLocationsDirectory } from "@/lib/locations";
 import { createClient } from "@/lib/supabase/server";
 
 export type BarcodeStudioLoadResult = {
@@ -56,7 +57,7 @@ const ARCHIVE_SELECT_COLUMNS = [
 export async function loadBarcodeStudioRecords(): Promise<BarcodeStudioLoadResult> {
   const supabase = await createClient();
 
-  const [itemsRes, archivesRes] = await Promise.all([
+  const [itemsRes, archivesRes, locationsDir] = await Promise.all([
     supabase
       .from("items_master")
       .select(ITEM_SELECT_COLUMNS)
@@ -67,6 +68,7 @@ export async function loadBarcodeStudioRecords(): Promise<BarcodeStudioLoadResul
       .select(ARCHIVE_SELECT_COLUMNS)
       .is("deleted_at", null)
       .order("doc_code", { ascending: true }),
+    getLocationsDirectory(),
   ]);
 
   if (itemsRes.error || archivesRes.error) {
@@ -83,7 +85,11 @@ export async function loadBarcodeStudioRecords(): Promise<BarcodeStudioLoadResul
 
   return {
     schemaReady: true,
-    items: rawItems.map(mapItemToPrintableRecord),
-    archives: rawArchives.map(mapArchiveToPrintableRecord),
+    items: rawItems.map((item) =>
+      mapItemToPrintableRecord(item, locationsDir.labels),
+    ),
+    archives: rawArchives.map((archive) =>
+      mapArchiveToPrintableRecord(archive, locationsDir.labels),
+    ),
   };
 }

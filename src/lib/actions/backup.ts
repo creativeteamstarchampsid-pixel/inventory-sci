@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
-import { OPNAME_ROOM_CODES } from "@/lib/constants";
+import { fetchLocationsDirectoryWithClient } from "@/lib/locations";
 import {
   captureFullBackupSnapshot,
   computeBackupDiffSummary,
@@ -53,13 +53,18 @@ const VALID_BACKUP_TYPES = new Set<BackupType>([
 
 const VALID_FILE_TYPES = new Set(["json", "xlsx", "csv", "pdf"]);
 
-function parseChecklist(json: Json | null | undefined): OpnameChecklistMap {
+function parseChecklist(
+  json: Json | null | undefined,
+  opnameRoomCodes: readonly LocationCode[] = [],
+): OpnameChecklistMap {
   if (!json || typeof json !== "object" || Array.isArray(json)) {
     return {};
   }
+  const record = json as Record<string, Json | undefined>;
+  const keys = new Set<string>([...opnameRoomCodes, ...Object.keys(record)]);
   const result: OpnameChecklistMap = {};
-  for (const room of OPNAME_ROOM_CODES) {
-    const raw = (json as Record<string, Json | undefined>)[room];
+  for (const room of keys) {
+    const raw = record[room];
     if (raw && typeof raw === "object" && !Array.isArray(raw)) {
       const entry = raw as Record<string, Json | undefined>;
       result[room] = {
@@ -92,14 +97,20 @@ export async function toggleOpnameRoomChecklist(input: {
       error: "Format periode opname tidak valid (gunakan YYYYMM atau YYYY-MM).",
     };
   }
-  if (!OPNAME_ROOM_CODES.includes(input.roomCode)) {
+
+  const supabase = await createClient();
+  const dir = await fetchLocationsDirectoryWithClient(supabase);
+  const normalizedRoomCode =
+    typeof input.roomCode === "string"
+      ? input.roomCode.trim().toUpperCase()
+      : "";
+
+  if (!normalizedRoomCode || !dir.opnameRoomCodes.includes(normalizedRoomCode)) {
     return {
       ok: false,
       error: "Kode ruangan opname tidak valid.",
     };
   }
-
-  const supabase = await createClient();
 
   const { data: existing, error: fetchErr } = await supabase
     .from("monthly_reconciliations")
@@ -129,7 +140,7 @@ export async function toggleOpnameRoomChecklist(input: {
   const { data: roomItems } = await supabase
     .from("items_master")
     .select("condition, asset_type, hygiene_status, stock_qty, min_stock_threshold, total_parts, current_parts")
-    .eq("room_code", input.roomCode)
+    .eq("room_code", normalizedRoomCode)
     .is("deleted_at", null);
 
   const anomalyCount = (roomItems ?? []).filter(
@@ -145,21 +156,26 @@ export async function toggleOpnameRoomChecklist(input: {
   ).length;
 
   const cleanNotes = sanitizeOptionalText(input.notes, 500, { multiline: true });
-  const checklist = parseChecklist(existing?.opname_checklist_json);
-  checklist[input.roomCode] = {
+  const checklist = parseChecklist(
+    existing?.opname_checklist_json,
+    dir.opnameRoomCodes,
+  );
+  checklist[normalizedRoomCode] = {
     checked: Boolean(input.checked),
     checked_by_id: user.id,
     checked_by_name: user.fullName,
     checked_at: new Date().toISOString(),
-    notes: cleanNotes ?? checklist[input.roomCode]?.notes,
+    notes: cleanNotes ?? checklist[normalizedRoomCode]?.notes,
     anomaly_count: anomalyCount,
   };
 
-  const completedRooms = OPNAME_ROOM_CODES.filter(
+  const completedRooms = dir.opnameRoomCodes.filter(
     (code) => checklist[code]?.checked === true,
   ).length;
   const progressPct =
-    Math.round((completedRooms / OPNAME_ROOM_CODES.length) * 10000) / 100;
+    dir.opnameRoomCodes.length > 0
+      ? Math.round((completedRooms / dir.opnameRoomCodes.length) * 10000) / 100
+      : 0;
 
   let saved: MonthlyReconciliation | null = null;
   if (existing) {
@@ -211,7 +227,7 @@ export async function toggleOpnameRoomChecklist(input: {
   return {
     ok: true,
     data: saved,
-    message: `Checklist opname ${input.roomCode} diperbarui (${progressPct}%).`,
+    message: `Checklist opname ${normalizedRoomCode} diperbarui (${progressPct}%).`,
   };
 }
 
@@ -851,6 +867,7 @@ export async function restoreBackupPointInTimeAction(input: {
   const nowIso = new Date().toISOString();
   const warnings: string[] = [];
   const summary: Record<string, number> = {
+    locations_master: 0,
     items_master: 0,
     item_kits: 0,
     archives_hybrid: 0,
@@ -858,6 +875,26 @@ export async function restoreBackupPointInTimeAction(input: {
     subscriptions_vault: 0,
     internal_requests: 0,
   };
+
+  // Restore locations_master first so dynamic room/cabinet FKs resolve cleanly
+  if (
+    Array.isArray(snapshot.tables.locations_master) &&
+    snapshot.tables.locations_master.length > 0
+  ) {
+    const { error: locErr } = await db
+      .from("locations_master")
+      .upsert(snapshot.tables.locations_master, { onConflict: "code" });
+    if (locErr) {
+      const msg = sanitizeSafeError(
+        locErr,
+        "gagal dipulihkan",
+        "restore/locations_master",
+      );
+      warnings.push(`Master Lokasi: ${msg}`);
+    } else {
+      summary.locations_master = snapshot.tables.locations_master.length;
+    }
+  }
 
   // Restore items_master
   {
@@ -1125,6 +1162,7 @@ export async function restoreBackupPointInTimeAction(input: {
   });
 
   revalidatePath("/backup");
+  revalidatePath("/rooms");
   revalidatePath("/inventory");
   revalidatePath("/kits");
   revalidatePath("/vault");

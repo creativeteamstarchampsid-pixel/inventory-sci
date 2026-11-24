@@ -26,6 +26,7 @@ import {
   KawaiiEmptyState,
   KawaiiPageHeader,
 } from "@/components/cartoon/kawaii-decor";
+import { useLocations } from "@/components/providers/locations-provider";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -70,8 +71,6 @@ import {
   BORROW_STATUS_LABELS,
   CONDITION_LABELS,
   HYGIENE_LABELS,
-  INVENTORY_LOCATION_OPTIONS,
-  LOCATION_LABELS,
   formatDateWIB,
 } from "@/lib/constants";
 import { ROLE_LABELS } from "@/lib/rbac";
@@ -117,6 +116,7 @@ export function ScanClient({
 }: ScanClientProps) {
   const { can } = useRole();
   const { showWorking, showError, runWithFeedback } = useCartoonFeedback();
+  const { inventoryOptions, getOptionWithCurrent, getLabel } = useLocations();
 
   const canEditMasterStock = can("inventory.update");
   const canValidateOpname = can("inventory.validate_opname");
@@ -1116,7 +1116,7 @@ export function ScanClient({
                       </CardTitle>
                       <CardDescription className="font-medium text-[#2C2623]/75 dark:text-stone-300">
                         {matched.item.category} · {matched.item.room_code} (
-                        {LOCATION_LABELS[matched.item.room_code]})
+                        {getLabel(matched.item.room_code)})
                         {matched.item.rack_location ? ` · ${matched.item.rack_location}` : ""}
                       </CardDescription>
                     </div>
@@ -1164,8 +1164,10 @@ export function ScanClient({
                     </AlertTitle>
                     <AlertDescription>
                       Oleh <strong>{matched.activeBorrow.borrower_name || "Terapis"}</strong> di{" "}
-                      {matched.activeBorrow.room_code || "-"} sejak{" "}
-                      {formatDateWIB(matched.activeBorrow.borrowed_at, true)}. Part awal:{" "}
+                      {matched.activeBorrow.room_code
+                        ? `${matched.activeBorrow.room_code} (${getLabel(matched.activeBorrow.room_code)})`
+                        : "-"}{" "}
+                      sejak {formatDateWIB(matched.activeBorrow.borrowed_at, true)}. Part awal:{" "}
                       {matched.activeBorrow.parts_before ?? matched.item.current_parts}.
                     </AlertDescription>
                   </Alert>
@@ -1222,7 +1224,7 @@ export function ScanClient({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {INVENTORY_LOCATION_OPTIONS.map((loc) => (
+                          {getOptionWithCurrent(inventoryOptions, borrowRoom).map((loc) => (
                             <SelectItem key={loc.value} value={loc.value}>
                               {loc.label}
                             </SelectItem>
@@ -1581,7 +1583,7 @@ export function ScanClient({
                           variant="secondary"
                           className="rounded-full border-2 border-[#2C2623] bg-[#E0F2FE] font-bold text-[#2C2623] dark:border-stone-500 dark:bg-sky-950/60 dark:text-sky-100"
                         >
-                          {matched.kit.assigned_room} · {LOCATION_LABELS[matched.kit.assigned_room]}
+                          {matched.kit.assigned_room} · {getLabel(matched.kit.assigned_room)}
                         </Badge>
                       )}
                     </div>
@@ -1666,7 +1668,7 @@ export function ScanClient({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {INVENTORY_LOCATION_OPTIONS.map((loc) => (
+                          {getOptionWithCurrent(inventoryOptions, borrowRoom).map((loc) => (
                             <SelectItem key={loc.value} value={loc.value}>
                               {loc.label}
                             </SelectItem>

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useRef, useState, useTransition } from "react";
 import {
   AlertTriangle,
@@ -32,6 +33,7 @@ import {
   KawaiiPageHeader,
   KawaiiStatCard,
 } from "@/components/cartoon/kawaii-decor";
+import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -80,14 +82,11 @@ import {
   softDeleteArchiveAction,
   updateArchiveAction,
   updateArchivePhysicalStatusAction,
-  type ArchiveCabinetCode,
   type ArchiveVersionItem,
 } from "@/lib/actions/archives";
 import {
-  ARCHIVE_CABINET_OPTIONS,
   ARCHIVE_CATEGORIES,
   ARCHIVE_STATUS_LABELS,
-  LOCATION_LABELS,
   formatDateWIB,
 } from "@/lib/constants";
 import { ROLE_LABELS } from "@/lib/rbac";
@@ -102,6 +101,7 @@ import {
 import type {
   ArchiveHybrid,
   ArchivePhysicalStatus,
+  LocationCode,
   UserRole,
 } from "@/types/database";
 
@@ -129,7 +129,7 @@ type ArchiveFormState = {
   categoryPreset: string;
   customCategory: string;
   branch_building: string;
-  cabinet_code: ArchiveCabinetCode;
+  cabinet_code: LocationCode;
   drawer_no: string;
   folder_code: string;
   physical_status: ArchivePhysicalStatus;
@@ -165,18 +165,17 @@ const EMPTY_FORM: ArchiveFormState = {
   change_notes: "",
 };
 
-const CABINET_THEMES: Record<
-  ArchiveCabinetCode,
+type CabinetTheme = {
+  bg: string;
+  tabBg: string;
+  drawerFill: string;
+  folderFill: string;
+  badgeBg: string;
+  textAccent: string;
+};
+
+const CABINET_THEME_PALETTES: readonly CabinetTheme[] = [
   {
-    bg: string;
-    tabBg: string;
-    drawerFill: string;
-    folderFill: string;
-    badgeBg: string;
-    textAccent: string;
-  }
-> = {
-  L01: {
     bg: "bg-[#E8F6FF] dark:bg-sky-950/35",
     tabBg: "bg-[#BAE6FD] dark:bg-sky-900/60",
     drawerFill: "#BAE6FD",
@@ -184,7 +183,7 @@ const CABINET_THEMES: Record<
     badgeBg: "bg-[#7CC4FA] text-[#0C4A6E]",
     textAccent: "text-[#0C4A6E] dark:text-sky-200",
   },
-  L02: {
+  {
     bg: "bg-[#E8FBF0] dark:bg-emerald-950/35",
     tabBg: "bg-[#A7F3D0] dark:bg-emerald-900/60",
     drawerFill: "#A7F3D0",
@@ -192,7 +191,7 @@ const CABINET_THEMES: Record<
     badgeBg: "bg-[#6EE7B7] text-[#115E3B]",
     textAccent: "text-[#115E3B] dark:text-emerald-200",
   },
-  L03: {
+  {
     bg: "bg-[#FFF8DC] dark:bg-amber-950/35",
     tabBg: "bg-[#FDE68A] dark:bg-amber-900/60",
     drawerFill: "#FDE68A",
@@ -200,7 +199,7 @@ const CABINET_THEMES: Record<
     badgeBg: "bg-[#FCD34D] text-[#78350F]",
     textAccent: "text-[#78350F] dark:text-amber-200",
   },
-  L04: {
+  {
     bg: "bg-[#FFF0F5] dark:bg-pink-950/35",
     tabBg: "bg-[#FBCFE8] dark:bg-pink-900/60",
     drawerFill: "#FBCFE8",
@@ -208,7 +207,34 @@ const CABINET_THEMES: Record<
     badgeBg: "bg-[#FDA4AF] text-[#881337]",
     textAccent: "text-[#881337] dark:text-pink-200",
   },
+];
+
+const PRESET_CABINET_THEME_INDEX: Record<string, number> = {
+  L01: 0,
+  L02: 1,
+  L03: 2,
+  L04: 3,
 };
+
+function getCabinetTheme(code: string, index = 0): CabinetTheme {
+  const upper = code.trim().toUpperCase();
+  if (upper in PRESET_CABINET_THEME_INDEX) {
+    return CABINET_THEME_PALETTES[PRESET_CABINET_THEME_INDEX[upper]];
+  }
+  if (index > 0) {
+    return CABINET_THEME_PALETTES[index % CABINET_THEME_PALETTES.length];
+  }
+  const trailingDigits = /(\d+)$/.exec(upper);
+  if (trailingDigits) {
+    const numIdx = Math.max(0, Number(trailingDigits[1]) - 1);
+    return CABINET_THEME_PALETTES[numIdx % CABINET_THEME_PALETTES.length];
+  }
+  const charSum = Array.from(upper).reduce(
+    (sum, ch) => sum + ch.charCodeAt(0),
+    0,
+  );
+  return CABINET_THEME_PALETTES[(index + charSum) % CABINET_THEME_PALETTES.length];
+}
 
 const PHYSICAL_STATUS_CLASSES: Record<ArchivePhysicalStatus, string> = {
   TERSEDIA_DI_LEMARI:
@@ -394,11 +420,13 @@ export function ArchivesClient({
 }: ArchivesClientProps) {
   const { role, can } = useRole();
   const { showWorking, showSuccess, showError } = useCartoonFeedback();
+  const { archiveCabinetOptions, getOptionWithCurrent, getLabel } =
+    useLocations();
   const isStaff = role === "STAFF";
   const canManage = can("archive.manage");
 
   const [search, setSearch] = useState(initialCode ?? "");
-  const [cabinetFilter, setCabinetFilter] = useState<"ALL" | ArchiveCabinetCode>(
+  const [cabinetFilter, setCabinetFilter] = useState<"ALL" | LocationCode>(
     "ALL",
   );
   const [statusFilter, setStatusFilter] = useState<
@@ -488,11 +516,11 @@ export function ArchivesClient({
 
   const cabinetStats = useMemo(() => {
     const map = new Map<
-      ArchiveCabinetCode,
+      LocationCode,
       { total: number; available: number; borrowed: number; old: number }
     >();
-    for (const opt of ARCHIVE_CABINET_OPTIONS) {
-      map.set(opt.value as ArchiveCabinetCode, {
+    for (const opt of archiveCabinetOptions) {
+      map.set(opt.value, {
         total: 0,
         available: 0,
         borrowed: 0,
@@ -500,7 +528,7 @@ export function ArchivesClient({
       });
     }
     for (const doc of archives) {
-      const code = doc.cabinet_code as ArchiveCabinetCode;
+      const code = doc.cabinet_code;
       const entry = map.get(code);
       if (!entry) continue;
       entry.total += 1;
@@ -509,7 +537,15 @@ export function ArchivesClient({
       else entry.old += 1;
     }
     return map;
-  }, [archives]);
+  }, [archives, archiveCabinetOptions]);
+
+  const cabinetIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    archiveCabinetOptions.forEach((cab, idx) => {
+      map.set(cab.value, idx);
+    });
+    return map;
+  }, [archiveCabinetOptions]);
 
   const filteredArchives = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -574,7 +610,11 @@ export function ArchivesClient({
 
   function openCreateDialog() {
     setFormMode("create");
-    setForm(EMPTY_FORM);
+    const defaultCab =
+      archiveCabinetOptions.find((c) => c.value === "L01")?.value ??
+      archiveCabinetOptions[0]?.value ??
+      "L01";
+    setForm({ ...EMPTY_FORM, cabinet_code: defaultCab });
     setSelectedFile(null);
     setFileSecurityNote(null);
     setFormError(null);
@@ -593,7 +633,7 @@ export function ArchivesClient({
       categoryPreset: isPreset ? doc.category : CUSTOM_CAT_VALUE,
       customCategory: isPreset ? "" : doc.category,
       branch_building: doc.branch_building,
-      cabinet_code: doc.cabinet_code as ArchiveCabinetCode,
+      cabinet_code: doc.cabinet_code,
       drawer_no: doc.drawer_no,
       folder_code: doc.folder_code ?? "",
       physical_status: doc.physical_status,
@@ -1111,18 +1151,32 @@ export function ArchivesClient({
         description={
           isStaff
             ? "Direktori panduan SOP terapi dan dokumen operasional untuk Tim Terapis."
-            : "Pemetaan lemari fisik (L01–L04), penyimpanan file privat terenkripsi, tautan Google Drive & riwayat versi."
+            : "Pemetaan lemari fisik arsip, penyimpanan file privat terenkripsi, tautan Google Drive & riwayat versi."
         }
         actions={
-          <Can action="archive.manage">
-            <Button
-              onClick={openCreateDialog}
-              className="rounded-2xl border-2 border-[#2C2623] bg-[#2AB673] px-4 font-extrabold text-white shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#239D62] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none dark:border-[#F5EFE6]/30"
-            >
-              <Plus className="size-4" />
-              Tambah Arsip
-            </Button>
-          </Can>
+          <div className="flex flex-wrap items-center gap-2">
+            <Can action="locations.manage">
+              <Button
+                variant="outline"
+                asChild
+                className="rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] px-4 font-extrabold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#CCFBF1] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none dark:border-[#F5EFE6]/30 dark:bg-stone-900 dark:text-foreground"
+              >
+                <Link href="/rooms">
+                  <MapPin className="size-4" />
+                  Kelola Lemari &amp; Ruangan
+                </Link>
+              </Button>
+            </Can>
+            <Can action="archive.manage">
+              <Button
+                onClick={openCreateDialog}
+                className="rounded-2xl border-2 border-[#2C2623] bg-[#2AB673] px-4 font-extrabold text-white shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#239D62] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none dark:border-[#F5EFE6]/30"
+              >
+                <Plus className="size-4" />
+                Tambah Arsip
+              </Button>
+            </Can>
+          </div>
         }
       />
 
@@ -1210,7 +1264,7 @@ export function ArchivesClient({
             accent="mint"
             label="Tersedia di Lemari"
             value={summaryStats.available}
-            hint="Berkas fisik rapi di lemari L01–L04"
+            hint="Berkas fisik rapi di lemari arsip"
             icon={<Check className="size-4" />}
           />
           <KawaiiStatCard
@@ -1230,13 +1284,13 @@ export function ArchivesClient({
         </div>
       )}
 
-      {/* Illustrated 2D Cabinet Shelf Mapping Cards (L01 - L04) — hidden for STAFF */}
+      {/* Illustrated 2D Cabinet Shelf Mapping Cards — hidden for STAFF */}
       {!isStaff && (
         <div className="space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <h2 className="inline-flex items-center gap-1.5 text-sm font-extrabold tracking-tight text-[#2C2623] dark:text-foreground">
               <Sparkles className="size-4 text-[#0284C7]" />
-              <span>Peta Rak Lemari Fisik (L01 – L04)</span>
+              <span>Peta Rak Lemari Fisik</span>
             </h2>
             {cabinetFilter !== "ALL" && (
               <Button
@@ -1253,9 +1307,9 @@ export function ArchivesClient({
           </div>
 
           <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
-            {ARCHIVE_CABINET_OPTIONS.map((cab) => {
-              const code = cab.value as ArchiveCabinetCode;
-              const theme = CABINET_THEMES[code];
+            {archiveCabinetOptions.map((cab, cabIdx) => {
+              const code = cab.value;
+              const theme = getCabinetTheme(code, cabIdx);
               const stats = cabinetStats.get(code) ?? {
                 total: 0,
                 available: 0,
@@ -1427,7 +1481,7 @@ export function ArchivesClient({
                   <Select
                     value={cabinetFilter}
                     onValueChange={(v) =>
-                      setCabinetFilter(v as "ALL" | ArchiveCabinetCode)
+                      setCabinetFilter(v as "ALL" | LocationCode)
                     }
                   >
                     <SelectTrigger className="w-40 rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-border dark:bg-background">
@@ -1435,7 +1489,10 @@ export function ArchivesClient({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="ALL">Semua Lemari</SelectItem>
-                      {ARCHIVE_CABINET_OPTIONS.map((c) => (
+                      {getOptionWithCurrent(
+                        archiveCabinetOptions,
+                        cabinetFilter === "ALL" ? null : cabinetFilter,
+                      ).map((c) => (
                         <SelectItem key={c.value} value={c.value}>
                           {c.label}
                         </SelectItem>
@@ -1518,9 +1575,10 @@ export function ArchivesClient({
                 const previewKey = `${doc.id}-active-view`;
                 const downloadKey = `${doc.id}-active-dl`;
                 const safeDocDriveLink = safeExternalUrl(doc.drive_link);
-                const cabTheme =
-                  CABINET_THEMES[doc.cabinet_code as ArchiveCabinetCode] ??
-                  CABINET_THEMES.L01;
+                const cabTheme = getCabinetTheme(
+                  doc.cabinet_code,
+                  cabinetIndexMap.get(doc.cabinet_code) ?? 0,
+                );
 
                 return (
                   <div
@@ -1592,9 +1650,7 @@ export function ArchivesClient({
                         <div className="flex items-center gap-1.5 font-bold text-[#2C2623] dark:text-foreground">
                           <MapPin className="size-3.5 shrink-0 text-[#0284C7]" />
                           <span className="truncate">
-                            {doc.branch_building} ·{" "}
-                            {LOCATION_LABELS[doc.cabinet_code] ||
-                              doc.cabinet_code}
+                            {doc.branch_building} · {getLabel(doc.cabinet_code)}
                           </span>
                         </div>
                         <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -1871,8 +1927,7 @@ export function ArchivesClient({
                           <div className="space-y-1.5 text-xs">
                             <div className="font-bold text-[#2C2623] dark:text-foreground">
                               {doc.branch_building} ·{" "}
-                              {LOCATION_LABELS[doc.cabinet_code] ||
-                                doc.cabinet_code}
+                              {getLabel(doc.cabinet_code)}
                             </div>
                             <div className="text-muted-foreground">
                               Laci{" "}
@@ -2076,7 +2131,7 @@ export function ArchivesClient({
                 : `Edit Dokumen Arsip (${editingDoc?.doc_code ?? ""})`}
             </DialogTitle>
             <DialogDescription className="text-xs leading-relaxed">
-              Petakan lokasi fisik lemari (L01–L04) serta unggah file digital ke
+              Petakan lokasi fisik lemari arsip serta unggah file digital ke
               bucket privat <code>archives</code> dan/atau tautkan Google Drive.
             </DialogDescription>
           </DialogHeader>
@@ -2179,13 +2234,13 @@ export function ArchivesClient({
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold">Lemari (L01–L04) *</Label>
+                  <Label className="text-xs font-bold">Lemari Arsip *</Label>
                   <Select
                     value={form.cabinet_code}
                     onValueChange={(v) =>
                       setForm((p) => ({
                         ...p,
-                        cabinet_code: v as ArchiveCabinetCode,
+                        cabinet_code: v,
                       }))
                     }
                   >
@@ -2193,7 +2248,10 @@ export function ArchivesClient({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {ARCHIVE_CABINET_OPTIONS.map((c) => (
+                      {getOptionWithCurrent(
+                        archiveCabinetOptions,
+                        form.cabinet_code,
+                      ).map((c) => (
                         <SelectItem key={c.value} value={c.value}>
                           {c.label}
                         </SelectItem>

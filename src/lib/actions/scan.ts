@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
+import { validateLocationCode } from "@/lib/locations";
 import { can, type Role } from "@/lib/rbac";
 import {
   isSafeHttpUrl,
@@ -45,23 +46,6 @@ export type ScanLookupResult =
       recentBorrows: BorrowHistoryEntry[];
       canReturnActiveBorrow: boolean;
     };
-
-const VALID_LOCATIONS: readonly LocationCode[] = [
-  "R01",
-  "R02",
-  "R03",
-  "R04",
-  "R05",
-  "R06",
-  "ADM",
-  "FO",
-  "GDG",
-  "L01",
-  "L02",
-  "L03",
-  "L04",
-  "DIG",
-];
 
 const VALID_HYGIENE_STATUSES: readonly HygieneStatus[] = [
   "STERIL",
@@ -350,10 +334,6 @@ export async function borrowItemViaScanAction(input: {
     return { ok: false, error: "ID item tidak valid." };
   }
 
-  if (input.roomCode && !VALID_LOCATIONS.includes(input.roomCode)) {
-    return { ok: false, error: "Kode ruangan tujuan tidak valid." };
-  }
-
   const dueAtClean = sanitizeOptionalText(input.dueAt, 40);
   if (dueAtClean && Number.isNaN(Date.parse(dueAtClean))) {
     return { ok: false, error: "Format batas waktu pengembalian tidak valid." };
@@ -378,6 +358,19 @@ export async function borrowItemViaScanAction(input: {
     };
   }
 
+  const rawTargetRoom =
+    typeof input.roomCode === "string" && input.roomCode.trim()
+      ? input.roomCode.trim()
+      : item.room_code;
+  const roomCheck = await validateLocationCode(supabase, rawTargetRoom, {
+    allowDigital: false,
+    allowExistingCode: item.room_code,
+  });
+  if (!roomCheck.ok) {
+    return { ok: false, error: roomCheck.error };
+  }
+  const targetRoom = roomCheck.location.code;
+
   const { data: existingActive } = await supabase
     .from("borrow_transactions")
     .select("id, borrower_id")
@@ -399,7 +392,7 @@ export async function borrowItemViaScanAction(input: {
       item_id: item.id,
       kit_id: null,
       borrower_id: user.id,
-      room_code: input.roomCode ?? item.room_code,
+      room_code: targetRoom,
       parts_before: item.current_parts,
       status: "DIPINJAM",
       borrowed_at: new Date().toISOString(),

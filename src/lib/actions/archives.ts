@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireAction, requireRouteAccess } from "@/lib/auth";
+import { validateLocationCode } from "@/lib/locations";
 import {
   isSafeHttpUrl,
   isValidUuid,
@@ -12,13 +14,13 @@ import {
   sanitizeTextInput,
 } from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
-import type { ArchivePhysicalStatus, LocationCode } from "@/types/database";
+import type { ArchivePhysicalStatus, Database, LocationCode } from "@/types/database";
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
-export type ArchiveCabinetCode = Extract<LocationCode, "L01" | "L02" | "L03" | "L04">;
+export type ArchiveCabinetCode = LocationCode;
 
 export type CreateArchiveInput = {
   title: string;
@@ -54,13 +56,38 @@ export type ArchiveVersionItem = {
   created_at: string;
 };
 
-const VALID_CABINETS: readonly ArchiveCabinetCode[] = ["L01", "L02", "L03", "L04"];
-
 const VALID_PHYSICAL_STATUSES: readonly ArchivePhysicalStatus[] = [
   "TERSEDIA_DI_LEMARI",
   "DIPINJAM",
   "ARSIP_LAMA",
 ];
+
+function formatArchiveDbError(
+  error: unknown,
+  cabinetCode: string,
+  fallback: string,
+  context: string,
+): string {
+  const errObj =
+    error && typeof error === "object"
+      ? (error as { code?: unknown; message?: unknown })
+      : null;
+  const code = typeof errObj?.code === "string" ? errObj.code.trim() : "";
+  const safeMsg = sanitizeSafeError(error, fallback, context);
+  if (code === "23514" || code === "22P02") {
+    return `Database menolak kode lemari "${cabinetCode}" karena batasan pada archives_hybrid.cabinet_code saat ini hanya mengizinkan L01–L04 hingga migrasi 20261124_locations_master.sql dijalankan di Supabase SQL Editor.`;
+  }
+  return safeMsg;
+}
+
+function revalidateArchivePaths(includeRecycleBin = false) {
+  revalidatePath("/archives");
+  revalidatePath("/rooms");
+  revalidatePath("/dashboard");
+  if (includeRecycleBin) {
+    revalidatePath("/recycle-bin");
+  }
+}
 
 const BLOCKED_EXTENSIONS = new Set([
   "html",
@@ -111,41 +138,54 @@ function validateDigitalFileReference(
   return { ok: true, value: safePath };
 }
 
-function validateArchiveFields(input: CreateArchiveInput): string | null {
+async function validateArchiveFields(
+  supabase: SupabaseClient<Database>,
+  input: CreateArchiveInput,
+  allowExistingCode?: string | null,
+): Promise<{ ok: true; cabinetCode: string } | { ok: false; error: string }> {
   const title = sanitizeTextInput(input.title, 200);
   if (!title) {
-    return "Judul dokumen arsip wajib diisi.";
+    return { ok: false, error: "Judul dokumen arsip wajib diisi." };
   }
   const category = sanitizeTextInput(input.category, 100);
   if (!category) {
-    return "Kategori dokumen wajib diisi.";
-  }
-  if (!VALID_CABINETS.includes(input.cabinet_code)) {
-    return "Kode lemari arsip harus L01, L02, L03, atau L04.";
+    return { ok: false, error: "Kategori dokumen wajib diisi." };
   }
   const drawerNo = sanitizeTextInput(input.drawer_no, 50);
   if (!drawerNo) {
-    return "Nomor laci wajib diisi.";
+    return { ok: false, error: "Nomor laci wajib diisi." };
   }
   if (!VALID_PHYSICAL_STATUSES.includes(input.physical_status)) {
-    return "Status fisik arsip tidak valid.";
+    return { ok: false, error: "Status fisik arsip tidak valid." };
   }
   if (
     input.physical_status === "DIPINJAM" &&
     input.borrowed_by &&
     !isValidUuid(input.borrowed_by)
   ) {
-    return "Peminjam arsip tidak valid.";
+    return { ok: false, error: "Peminjam arsip tidak valid." };
   }
   const driveLink = sanitizeOptionalText(input.drive_link, 2048);
   if (driveLink && !isSafeHttpUrl(driveLink)) {
-    return "Tautan Google Drive harus berupa URL valid (https://...).";
+    return {
+      ok: false,
+      error: "Tautan Google Drive harus berupa URL valid (https://...).",
+    };
   }
   const fileRefCheck = validateDigitalFileReference(input.digital_file_url);
   if (!fileRefCheck.ok) {
-    return fileRefCheck.error;
+    return { ok: false, error: fileRefCheck.error };
   }
-  return null;
+
+  const cabinetCheck = await validateLocationCode(supabase, input.cabinet_code, {
+    requireArchiveGroup: true,
+    allowExistingCode,
+  });
+  if (!cabinetCheck.ok) {
+    return { ok: false, error: cabinetCheck.error };
+  }
+
+  return { ok: true, cabinetCode: cabinetCheck.location.code };
 }
 
 /**
@@ -419,10 +459,11 @@ export async function createArchiveAction(
   input: CreateArchiveInput,
 ): Promise<ActionResult<{ id: string; doc_code: string }>> {
   const user = await requireAction("archive.manage");
+  const supabase = await createClient();
 
-  const validationError = validateArchiveFields(input);
-  if (validationError) {
-    return { ok: false, error: validationError };
+  const validation = await validateArchiveFields(supabase, input);
+  if (!validation.ok) {
+    return { ok: false, error: validation.error };
   }
 
   const fileRef = validateDigitalFileReference(input.digital_file_url);
@@ -436,14 +477,13 @@ export async function createArchiveAction(
       ? input.borrowed_by.trim()
       : null;
 
-  const supabase = await createClient();
   const { data, error } = await supabase
     .from("archives_hybrid")
     .insert({
       title: sanitizeTextInput(input.title, 200),
       category: sanitizeTextInput(input.category, 100),
       branch_building: sanitizeOptionalText(input.branch_building, 100) ?? "Pusat",
-      cabinet_code: input.cabinet_code,
+      cabinet_code: validation.cabinetCode,
       drawer_no: sanitizeTextInput(input.drawer_no, 50),
       folder_code: sanitizeOptionalText(input.folder_code, 50),
       physical_status: input.physical_status,
@@ -463,16 +503,16 @@ export async function createArchiveAction(
   if (error || !data) {
     return {
       ok: false,
-      error: sanitizeSafeError(
+      error: formatArchiveDbError(
         error,
+        validation.cabinetCode,
         "Gagal menyimpan dokumen arsip.",
         "archives/create",
       ),
     };
   }
 
-  revalidatePath("/archives");
-  revalidatePath("/dashboard");
+  revalidateArchivePaths();
   return { ok: true, data };
 }
 
@@ -488,14 +528,6 @@ export async function updateArchiveAction(
   if (!isValidUuid(input.id)) {
     return { ok: false, error: "ID dokumen arsip tidak valid." };
   }
-
-  const validationError = validateArchiveFields(input);
-  if (validationError) {
-    return { ok: false, error: validationError };
-  }
-
-  const fileRef = validateDigitalFileReference(input.digital_file_url);
-  if (!fileRef.ok) return fileRef;
 
   const supabase = await createClient();
   const { data: existing, error: fetchErr } = await supabase
@@ -521,6 +553,18 @@ export async function updateArchiveAction(
       error: "Dokumen arsip tidak ditemukan atau sudah dihapus.",
     };
   }
+
+  const validation = await validateArchiveFields(
+    supabase,
+    input,
+    existing.cabinet_code,
+  );
+  if (!validation.ok) {
+    return { ok: false, error: validation.error };
+  }
+
+  const fileRef = validateDigitalFileReference(input.digital_file_url);
+  if (!fileRef.ok) return fileRef;
 
   const nextFileUrl = fileRef.value;
   const nextFileName = nextFileUrl
@@ -576,7 +620,7 @@ export async function updateArchiveAction(
       title: sanitizeTextInput(input.title, 200),
       category: sanitizeTextInput(input.category, 100),
       branch_building: sanitizeOptionalText(input.branch_building, 100) ?? "Pusat",
-      cabinet_code: input.cabinet_code,
+      cabinet_code: validation.cabinetCode,
       drawer_no: sanitizeTextInput(input.drawer_no, 50),
       folder_code: sanitizeOptionalText(input.folder_code, 50),
       physical_status: input.physical_status,
@@ -597,16 +641,16 @@ export async function updateArchiveAction(
   if (updErr || !updated) {
     return {
       ok: false,
-      error: sanitizeSafeError(
+      error: formatArchiveDbError(
         updErr,
+        validation.cabinetCode,
         "Gagal memperbarui dokumen arsip.",
         "archives/update",
       ),
     };
   }
 
-  revalidatePath("/archives");
-  revalidatePath("/dashboard");
+  revalidateArchivePaths();
   return { ok: true, data: updated };
 }
 
@@ -663,7 +707,7 @@ export async function updateArchivePhysicalStatusAction(input: {
     };
   }
 
-  revalidatePath("/archives");
+  revalidateArchivePaths();
   return { ok: true, data: { id: data.id } };
 }
 
@@ -710,8 +754,6 @@ export async function softDeleteArchiveAction(
     };
   }
 
-  revalidatePath("/archives");
-  revalidatePath("/dashboard");
-  revalidatePath("/recycle-bin");
+  revalidateArchivePaths(true);
   return { ok: true, data: { id: data.id } };
 }

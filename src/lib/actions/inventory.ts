@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAction } from "@/lib/auth";
+import { validateLocationCode } from "@/lib/locations";
 import { can, type Role } from "@/lib/rbac";
 import {
   isSafeHttpUrl,
@@ -69,23 +70,6 @@ const VALID_CATEGORY_PREFIXES: readonly CodeCategoryPrefix[] = [
   "SUB",
 ];
 
-const VALID_LOCATIONS: readonly LocationCode[] = [
-  "R01",
-  "R02",
-  "R03",
-  "R04",
-  "R05",
-  "R06",
-  "ADM",
-  "FO",
-  "GDG",
-  "L01",
-  "L02",
-  "L03",
-  "L04",
-  "DIG",
-];
-
 const VALID_ASSET_TYPES: readonly AssetType[] = ["THERAPY_TOY", "FIXED_ASSET", "CONSUMABLE"];
 const VALID_BARCODE_FORMATS: readonly BarcodeFormat[] = ["CODE128", "QR", "COMBO"];
 const VALID_CONDITIONS: readonly ItemCondition[] = [
@@ -136,9 +120,29 @@ function sanitizeItemForRole(item: ItemMaster, role: Role): ItemMaster {
   };
 }
 
+function formatInventoryDbError(
+  error: unknown,
+  roomCode: string,
+  fallback: string,
+  context: string,
+): string {
+  const errObj =
+    error && typeof error === "object"
+      ? (error as { code?: unknown; message?: unknown })
+      : null;
+  const code = typeof errObj?.code === "string" ? errObj.code.trim() : "";
+  const msg = typeof errObj?.message === "string" ? errObj.message.toLowerCase() : "";
+  const safeMsg = sanitizeSafeError(error, fallback, context);
+  if (code === "22P02" && (!msg || msg.includes("location_code") || msg.includes("enum"))) {
+    return `Kode lokasi "${roomCode}" belum didukung oleh enum database saat ini. Jalankan migrasi 20261124_locations_master.sql di Supabase SQL Editor terlebih dahulu.`;
+  }
+  return safeMsg;
+}
+
 function revalidateInventoryPaths(itemId?: string) {
   revalidatePath("/inventory");
   if (itemId) revalidatePath(`/inventory/${itemId}`);
+  revalidatePath("/rooms");
   revalidatePath("/dashboard");
   revalidatePath("/kits");
   revalidatePath("/scan");
@@ -161,9 +165,6 @@ export async function createItemAction(
   }
   if (!VALID_CATEGORY_PREFIXES.includes(input.category_prefix)) {
     return { ok: false, error: "Prefix kode kategori tidak valid." };
-  }
-  if (!VALID_LOCATIONS.includes(input.room_code)) {
-    return { ok: false, error: "Kode lokasi ruangan tidak valid." };
   }
   if (!VALID_ASSET_TYPES.includes(input.asset_type)) {
     return { ok: false, error: "Tipe aset tidak valid." };
@@ -217,6 +218,14 @@ export async function createItemAction(
 
   const supabase = await createClient();
 
+  const roomCheck = await validateLocationCode(supabase, input.room_code, {
+    allowDigital: false,
+  });
+  if (!roomCheck.ok) {
+    return { ok: false, error: roomCheck.error };
+  }
+  const roomCode = roomCheck.location.code;
+
   const parentId = sanitizeOptionalText(input.parent_item_id, 64);
   if (parentId) {
     if (!isValidUuid(parentId)) {
@@ -247,7 +256,7 @@ export async function createItemAction(
       category_prefix: input.category_prefix,
       category,
       asset_type: input.asset_type,
-      room_code: input.room_code,
+      room_code: roomCode,
       rack_location: sanitizeOptionalText(input.rack_location, 100),
       pic_name: sanitizeOptionalText(input.pic_name, 120),
       photo_url: cleanPhotoPathOrUrl(input.photo_url),
@@ -273,8 +282,9 @@ export async function createItemAction(
   if (error || !data) {
     return {
       ok: false,
-      error: sanitizeSafeError(
+      error: formatInventoryDbError(
         error,
+        roomCode,
         "Gagal menyimpan item inventaris baru.",
         "inventory/create",
       ),
@@ -324,14 +334,11 @@ export async function updateItemAction(
   }
 
   const categoryPrefix = input.category_prefix ?? existing.category_prefix;
-  const roomCode = input.room_code ?? existing.room_code;
+  const rawRoomCode = input.room_code ?? existing.room_code;
   const assetType = input.asset_type ?? existing.asset_type;
   const barcodeFormat = input.barcode_format ?? existing.barcode_format;
   if (!VALID_CATEGORY_PREFIXES.includes(categoryPrefix)) {
     return { ok: false, error: "Prefix kode kategori tidak valid." };
-  }
-  if (!VALID_LOCATIONS.includes(roomCode)) {
-    return { ok: false, error: "Kode lokasi ruangan tidak valid." };
   }
   if (!VALID_ASSET_TYPES.includes(assetType)) {
     return { ok: false, error: "Tipe aset tidak valid." };
@@ -339,6 +346,15 @@ export async function updateItemAction(
   if (!VALID_BARCODE_FORMATS.includes(barcodeFormat)) {
     return { ok: false, error: "Format barcode tidak valid." };
   }
+
+  const roomCheck = await validateLocationCode(supabase, rawRoomCode, {
+    allowDigital: false,
+    allowExistingCode: existing.room_code,
+  });
+  if (!roomCheck.ok) {
+    return { ok: false, error: roomCheck.error };
+  }
+  const roomCode = roomCheck.location.code;
 
   const acquisitionDate =
     input.acquisition_date !== undefined
@@ -489,8 +505,9 @@ export async function updateItemAction(
   if (error || !data) {
     return {
       ok: false,
-      error: sanitizeSafeError(
+      error: formatInventoryDbError(
         error,
+        roomCode,
         "Gagal memperbarui data item inventaris.",
         "inventory/update",
       ),

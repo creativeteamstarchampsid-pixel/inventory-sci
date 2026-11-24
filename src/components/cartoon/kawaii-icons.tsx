@@ -18,7 +18,8 @@ export type KawaiiMascotType =
   | "gear"
   | "scan"
   | "clipboard"
-  | "backup";
+  | "backup"
+  | "room";
 
 const INK = "#2C2623";
 const BLUSH = "#FDA4AF";
@@ -1046,6 +1047,85 @@ export function KawaiiMascotSvg({
           </g>
         </svg>
       );
+
+    case "room":
+      // Cozy pastel teal & cream clinic house buddy
+      return (
+        <svg viewBox="0 0 64 64" fill="none" className={baseClass} aria-hidden="true">
+          {!compact && (
+            <g className="animate-twinkle-2d" style={svgMotionStyle("center", "-0.6s")}>
+              <path
+                d="M11 12.5 12.1 15.1 14.7 16.2 12.1 17.3 11 19.9 9.9 17.3 7.3 16.2 9.9 15.1Z"
+                fill="#FDE68A"
+                stroke={INK}
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+            </g>
+          )}
+          <g {...breatheGroupProps(compact, "bottom center", "-1.1s")}>
+            {/* Cute butter chimney */}
+            <rect
+              x="40.5"
+              y="13"
+              width="7.5"
+              height="12"
+              rx="3"
+              fill="#FDE68A"
+              stroke={INK}
+              strokeWidth="2.4"
+            />
+            {!compact && (
+              <g className="animate-kawaii-note" style={svgMotionStyle("center", "-1.4s")}>
+                <circle cx="44.2" cy="8.5" r="2.2" fill="#FDA4AF" stroke={INK} strokeWidth="1.5" />
+              </g>
+            )}
+            {/* Warm cream room body */}
+            <rect
+              x="13"
+              y="28"
+              width="38"
+              height="27"
+              rx="8"
+              fill="#FFFDF7"
+              stroke={INK}
+              strokeWidth="2.5"
+            />
+            {/* Cozy pastel teal roof */}
+            <path
+              d="M8.5 30.5 29.8 12.6a3.5 3.5 0 0 1 4.4 0L55.5 30.5c1.5 1.3.6 3.5-1.4 3.5H9.9c-2 0-2.9-2.2-1.4-3.5Z"
+              fill="#5EEAD4"
+              stroke={INK}
+              strokeWidth="2.5"
+              strokeLinejoin="round"
+            />
+            {/* Little butter gable emblem on roof */}
+            <circle
+              cx="32"
+              cy="24.5"
+              r="3.6"
+              fill="#FDE68A"
+              stroke={INK}
+              strokeWidth="2"
+            />
+            {/* Cute blinking face on room front */}
+            <g className="animate-blink-2d" style={svgMotionStyle("center", "-2.4s")}>
+              <circle cx="24.5" cy="42" r="2.2" fill={INK} />
+              <circle cx="39.5" cy="42" r="2.2" fill={INK} />
+              <circle cx="23.8" cy="41.3" r="0.7" fill="#FFFDF7" />
+              <circle cx="38.8" cy="41.3" r="0.7" fill="#FFFDF7" />
+            </g>
+            <ellipse cx="20" cy="45.6" rx="2.7" ry="1.5" fill={BLUSH} />
+            <ellipse cx="44" cy="45.6" rx="2.7" ry="1.5" fill={BLUSH} />
+            <path
+              d="M29.2 45.8c1.3 1.7 4.3 1.7 5.6 0"
+              stroke={INK}
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            />
+          </g>
+        </svg>
+      );
   }
 }
 
@@ -1054,6 +1134,7 @@ const ROUTE_MASCOT_MAP: Record<string, KawaiiMascotType> = {
   "/guide": "book",
   "/inventory": "box",
   "/kits": "star",
+  "/rooms": "room",
   "/scan": "scan",
   "/barcode-studio": "barcode",
   "/requests": "clipboard",

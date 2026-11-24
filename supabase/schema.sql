@@ -32,7 +32,10 @@ do $$ begin
     'R01', 'R02', 'R03', 'R04', 'R05', 'R06',
     'ADM', 'FO', 'GDG',
     'L01', 'L02', 'L03', 'L04',
-    'DIG'
+    'DIG',
+    'R07', 'R08', 'R09', 'R10', 'R11', 'R12',
+    'FAC', 'RTG', 'KLS', 'UKS', 'DPR', 'MUS', 'LAB', 'GDG2', 'KTR1', 'KTR2',
+    'L05', 'L06', 'L07', 'L08'
   );
 exception when duplicate_object then null; end $$;
 
@@ -369,7 +372,9 @@ begin
     raise exception 'Prefix kategori tidak valid: %', p_category;
   end if;
 
-  if v_loc not in ('R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'ADM', 'FO', 'GDG', 'L01', 'L02', 'L03', 'L04', 'DIG') then
+  if not exists (
+    select 1 from public.locations_master where code = v_loc
+  ) then
     raise exception 'Kode lokasi tidak valid: %', p_location;
   end if;
 
@@ -449,6 +454,57 @@ $$;
 -- 6. CORE TABLES (7 MODUL INTI + TABEL PENDUKUNG OPERASIONAL)
 -- -----------------------------------------------------------------------------
 
+-- 6.0 locations_master — Master Ruangan & Lemari Arsip Dinamis
+create table if not exists public.locations_master (
+  code text primary key check (code ~ '^[A-Z0-9]{2,8}$'),
+  name text not null check (char_length(btrim(name)) between 2 and 80),
+  location_group text not null check (location_group in ('THERAPY', 'OFFICE', 'ARCHIVE', 'DIGITAL')),
+  description text,
+  pic_name text,
+  include_in_opname boolean not null default false,
+  is_active boolean not null default true,
+  is_system boolean not null default false,
+  sort_order integer not null default 100,
+  created_by uuid references public.profiles(id) on delete set null,
+  updated_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_locations_master_sort on public.locations_master (sort_order, code);
+create index if not exists idx_locations_master_created_by on public.locations_master (created_by) where created_by is not null;
+create index if not exists idx_locations_master_updated_by on public.locations_master (updated_by) where updated_by is not null;
+
+insert into public.locations_master (
+  code, name, location_group, include_in_opname, is_active, is_system, sort_order
+)
+values
+  ('R01', 'Ruang Terapi 1', 'THERAPY', true, true, true, 10),
+  ('R02', 'Ruang Terapi 2', 'THERAPY', true, true, true, 20),
+  ('R03', 'Ruang Terapi 3', 'THERAPY', true, true, true, 30),
+  ('R04', 'Ruang Terapi 4', 'THERAPY', true, true, true, 40),
+  ('R05', 'Ruang Terapi 5', 'THERAPY', true, true, true, 50),
+  ('R06', 'Ruang Terapi 6', 'THERAPY', true, true, true, 60),
+  ('ADM', 'Admin', 'OFFICE', true, true, true, 70),
+  ('FO', 'Resepsionis', 'OFFICE', false, true, true, 80),
+  ('GDG', 'Gudang Utama', 'OFFICE', true, true, true, 90),
+  ('L01', 'Lemari Arsip 1', 'ARCHIVE', false, true, true, 100),
+  ('L02', 'Lemari Arsip 2', 'ARCHIVE', false, true, true, 110),
+  ('L03', 'Lemari Arsip 3', 'ARCHIVE', false, true, true, 120),
+  ('L04', 'Lemari Arsip 4', 'ARCHIVE', false, true, true, 130),
+  ('DIG', 'Digital Vault', 'DIGITAL', false, true, true, 140)
+on conflict (code) do nothing;
+
+drop trigger if exists trg_locations_master_updated_at on public.locations_master;
+create trigger trg_locations_master_updated_at
+  before update on public.locations_master
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_locations_master_code_immutable on public.locations_master;
+create trigger trg_locations_master_code_immutable
+  before update on public.locations_master
+  for each row execute function public.prevent_code_mutation('code');
+
 -- 6.1 items_master — Inventaris, Aset Kantor & Mainan Terapi
 create table if not exists public.items_master (
   id uuid primary key default gen_random_uuid(),
@@ -460,7 +516,7 @@ create table if not exists public.items_master (
   category_prefix public.code_category_prefix not null,
   category text not null,
   asset_type public.asset_type not null default 'THERAPY_TOY',
-  room_code public.location_code not null,
+  room_code text not null references public.locations_master(code) on update cascade on delete restrict,
   rack_location text,
   pic_name text,
   photo_url text,
@@ -667,7 +723,7 @@ create table if not exists public.item_kits (
   kit_name text not null,
   description text,
   bundled_item_ids uuid[] not null default '{}',
-  assigned_room public.location_code,
+  assigned_room text references public.locations_master(code) on update cascade on delete set null,
   status public.kit_status not null default 'TERSEDIA',
   created_by uuid references public.profiles(id) on delete set null,
   updated_by uuid references public.profiles(id) on delete set null,
@@ -773,7 +829,7 @@ create table if not exists public.borrow_transactions (
   item_id uuid references public.items_master(id) on delete set null,
   kit_id uuid references public.item_kits(id) on delete set null,
   borrower_id uuid not null references public.profiles(id) on delete restrict,
-  room_code public.location_code,
+  room_code text references public.locations_master(code) on update cascade on delete set null,
   parts_before integer,
   parts_after integer,
   status public.borrow_status not null default 'DIPINJAM',
@@ -999,7 +1055,7 @@ create table if not exists public.archives_hybrid (
   title text not null,
   category text not null,
   branch_building text not null default 'Pusat',
-  cabinet_code public.location_code not null check (cabinet_code in ('L01', 'L02', 'L03', 'L04')),
+  cabinet_code text not null references public.locations_master(code) on update cascade on delete restrict,
   drawer_no text not null,
   folder_code text,
   physical_status public.archive_physical_status not null default 'TERSEDIA_DI_LEMARI',
@@ -1753,7 +1809,7 @@ begin
     end if;
   end if;
 
-  v_entity_id := v_row ->> 'id';
+  v_entity_id := coalesce(v_row ->> 'id', v_row ->> 'code');
   v_entity_code := coalesce(
     v_row ->> 'item_code',
     v_row ->> 'kit_code',
@@ -1764,7 +1820,8 @@ begin
     v_row ->> 'backup_code',
     v_row ->> 'transaction_code',
     v_row ->> 'period_ym',
-    v_row ->> 'email'
+    v_row ->> 'email',
+    v_row ->> 'code'
   );
 
   insert into public.audit_logs (
@@ -1843,6 +1900,11 @@ create trigger trg_audit_borrow_transactions
 drop trigger if exists trg_audit_profiles on public.profiles;
 create trigger trg_audit_profiles
   after insert or update or delete on public.profiles
+  for each row execute function public.log_table_audit();
+
+drop trigger if exists trg_audit_locations_master on public.locations_master;
+create trigger trg_audit_locations_master
+  after insert or update or delete on public.locations_master
   for each row execute function public.log_table_audit();
 
 -- -----------------------------------------------------------------------------
@@ -2078,6 +2140,7 @@ $$;
 -- 10. ROW LEVEL SECURITY (RLS) POLICIES
 -- -----------------------------------------------------------------------------
 alter table public.profiles enable row level security;
+alter table public.locations_master enable row level security;
 alter table public.code_sequences enable row level security;
 alter table public.items_master enable row level security;
 alter table public.item_kits enable row level security;
@@ -2137,6 +2200,31 @@ create policy "profiles_delete_admins" on public.profiles
       (select public.has_role(array['SUPER_ADMIN']::public.user_role[]))
       and role in ('TEAM_LEADER', 'STAFF')
     )
+  );
+
+-- locations_master
+drop policy if exists "locations_master_select_active" on public.locations_master;
+create policy "locations_master_select_active" on public.locations_master
+  for select to authenticated
+  using ((select public.is_active_user()));
+
+drop policy if exists "locations_master_insert_admins" on public.locations_master;
+create policy "locations_master_insert_admins" on public.locations_master
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
+
+drop policy if exists "locations_master_update_admins" on public.locations_master;
+create policy "locations_master_update_admins" on public.locations_master
+  for update to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
+
+drop policy if exists "locations_master_delete_admins" on public.locations_master;
+create policy "locations_master_delete_admins" on public.locations_master
+  for delete to authenticated
+  using (
+    (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+    and is_system = false
   );
 
 -- code_sequences (admin-readable only; mutated by security definer functions)
@@ -2647,6 +2735,9 @@ alter default privileges in schema public
 
 alter default privileges in schema public
   revoke all on sequences from anon;
+
+revoke all on public.locations_master from public, anon;
+grant select, insert, update, delete on public.locations_master to authenticated, service_role;
 
 revoke all on public.subscriptions_vault_directory from public, anon;
 grant select on public.subscriptions_vault_directory to authenticated, service_role;

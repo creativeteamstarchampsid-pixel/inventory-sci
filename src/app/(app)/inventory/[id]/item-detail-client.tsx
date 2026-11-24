@@ -22,6 +22,7 @@ import {
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
 import { KawaiiEmptyState, KawaiiPageHeader } from "@/components/cartoon/kawaii-decor";
+import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -67,7 +68,6 @@ import {
   CATEGORY_PREFIX_LABELS,
   CONDITION_LABELS,
   HYGIENE_LABELS,
-  LOCATION_LABELS,
   calculateBookValue,
   formatDateWIB,
   formatRupiah,
@@ -103,6 +103,7 @@ export function ItemDetailClient({
   const router = useRouter();
   const { can } = useRole();
   const { runWithFeedback } = useCartoonFeedback();
+  const { getLabel } = useLocations();
   const canViewValuation = can("inventory.view_valuation");
   const canApproveWriteoff = can("writeoff.approve");
   const canCreateItem = can("inventory.create");
@@ -313,7 +314,7 @@ export function ItemDetailClient({
       <KawaiiPageHeader
         badge={item.item_code}
         title={item.name}
-        description={`${CATEGORY_PREFIX_LABELS[item.category_prefix]} · ${item.category} · ${item.room_code} (${LOCATION_LABELS[item.room_code]})${item.rack_location ? ` · ${item.rack_location}` : ""}`}
+        description={`${CATEGORY_PREFIX_LABELS[item.category_prefix]} · ${item.category} · ${item.room_code} (${getLabel(item.room_code)})${item.rack_location ? ` · ${item.rack_location}` : ""}`}
         accent={headerAccent}
         mascot="box"
         actions={
@@ -423,7 +424,7 @@ export function ItemDetailClient({
               <dd className="font-semibold">{BARCODE_FORMAT_LABELS[item.barcode_format]}</dd>
               <dt className="text-muted-foreground font-semibold">Ruangan</dt>
               <dd className="font-semibold">
-                {item.room_code} — {LOCATION_LABELS[item.room_code]}
+                {item.room_code} — {getLabel(item.room_code)}
               </dd>
               <dt className="text-muted-foreground font-semibold">Rak / Lemari</dt>
               <dd className="font-semibold">{item.rack_location || "-"}</dd>
@@ -763,7 +764,9 @@ export function ItemDetailClient({
                           {trx.transaction_code}
                         </TableCell>
                         <TableCell className="font-semibold">{trx.borrower_name || "-"}</TableCell>
-                        <TableCell className="font-semibold">{trx.room_code || "-"}</TableCell>
+                        <TableCell className="font-semibold">
+                          {trx.room_code ? `${trx.room_code} · ${getLabel(trx.room_code)}` : "-"}
+                        </TableCell>
                         <TableCell className="font-mono text-xs font-bold">
                           {trx.parts_before ?? "-"} → {trx.parts_after ?? "-"}
                         </TableCell>

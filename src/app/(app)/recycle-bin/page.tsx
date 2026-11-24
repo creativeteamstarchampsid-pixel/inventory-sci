@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { requireRouteAccess } from "@/lib/auth";
 import type { RecycleTable } from "@/lib/actions/recycle-bin";
+import { getLocationsDirectory } from "@/lib/locations";
 import { createClient } from "@/lib/supabase/server";
 import {
   RecycleBinClient,
@@ -24,41 +25,49 @@ export default async function RecycleBinPage() {
   const supabase = await createClient();
   const nowMs = Date.now();
 
-  const [itemsRes, kitsRes, subsRes, archivesRes, deliveriesRes, requestsRes] =
-    await Promise.all([
-      supabase
-        .from("items_master")
-        .select("id, item_code, name, category, room_code, deleted_at, deleted_by")
-        .not("deleted_at", "is", null)
-        .order("deleted_at", { ascending: false }),
-      supabase
-        .from("item_kits")
-        .select("id, kit_code, kit_name, assigned_room, deleted_at, deleted_by")
-        .not("deleted_at", "is", null)
-        .order("deleted_at", { ascending: false }),
-      supabase
-        .from("subscriptions_vault")
-        .select("id, sub_code, service_name, plan_name, login_email, deleted_at, deleted_by")
-        .not("deleted_at", "is", null)
-        .order("deleted_at", { ascending: false }),
-      supabase
-        .from("archives_hybrid")
-        .select("id, doc_code, title, category, cabinet_code, deleted_at, deleted_by")
-        .not("deleted_at", "is", null)
-        .order("deleted_at", { ascending: false }),
-      supabase
-        .from("deliveries_log")
-        .select(
-          "id, delivery_code, direction, courier_name, sender_name, receiver_name, deleted_at, deleted_by",
-        )
-        .not("deleted_at", "is", null)
-        .order("deleted_at", { ascending: false }),
-      supabase
-        .from("internal_requests")
-        .select("id, request_code, request_type, title, status, deleted_at, deleted_by")
-        .not("deleted_at", "is", null)
-        .order("deleted_at", { ascending: false }),
-    ]);
+  const [
+    itemsRes,
+    kitsRes,
+    subsRes,
+    archivesRes,
+    deliveriesRes,
+    requestsRes,
+    locationsDir,
+  ] = await Promise.all([
+    supabase
+      .from("items_master")
+      .select("id, item_code, name, category, room_code, deleted_at, deleted_by")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false }),
+    supabase
+      .from("item_kits")
+      .select("id, kit_code, kit_name, assigned_room, deleted_at, deleted_by")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false }),
+    supabase
+      .from("subscriptions_vault")
+      .select("id, sub_code, service_name, plan_name, login_email, deleted_at, deleted_by")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false }),
+    supabase
+      .from("archives_hybrid")
+      .select("id, doc_code, title, category, cabinet_code, deleted_at, deleted_by")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false }),
+    supabase
+      .from("deliveries_log")
+      .select(
+        "id, delivery_code, direction, courier_name, sender_name, receiver_name, deleted_at, deleted_by",
+      )
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false }),
+    supabase
+      .from("internal_requests")
+      .select("id, request_code, request_type, title, status, deleted_at, deleted_by")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false }),
+    getLocationsDirectory(),
+  ]);
 
   const actorIds = new Set<string>();
   const collectActor = (id: string | null) => {
@@ -94,7 +103,7 @@ export default async function RecycleBinPage() {
         table: "items_master",
         code: r.item_code,
         title: r.name,
-        subtitle: `${r.category} · Ruang ${r.room_code}`,
+        subtitle: `${r.category} · Ruang ${r.room_code} (${locationsDir.getLabel(r.room_code)})`,
         deletedAt: r.deleted_at,
         deletedByName: resolveActor(r.deleted_by),
         daysRemaining: calcDaysRemaining(r.deleted_at, nowMs),
@@ -106,7 +115,9 @@ export default async function RecycleBinPage() {
         table: "item_kits",
         code: r.kit_code,
         title: r.kit_name,
-        subtitle: r.assigned_room ? `Ruang ${r.assigned_room}` : "Tanpa ruang khusus",
+        subtitle: r.assigned_room
+          ? `Ruang ${r.assigned_room} (${locationsDir.getLabel(r.assigned_room)})`
+          : "Tanpa ruang khusus",
         deletedAt: r.deleted_at,
         deletedByName: resolveActor(r.deleted_by),
         daysRemaining: calcDaysRemaining(r.deleted_at, nowMs),
@@ -130,7 +141,7 @@ export default async function RecycleBinPage() {
         table: "archives_hybrid",
         code: r.doc_code,
         title: r.title,
-        subtitle: `${r.category} · Lemari ${r.cabinet_code}`,
+        subtitle: `${r.category} · Lemari ${r.cabinet_code} (${locationsDir.getLabel(r.cabinet_code)})`,
         deletedAt: r.deleted_at,
         deletedByName: resolveActor(r.deleted_by),
         daysRemaining: calcDaysRemaining(r.deleted_at, nowMs),

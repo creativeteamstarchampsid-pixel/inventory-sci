@@ -43,6 +43,8 @@ export const ROUTE_PERMISSIONS: Record<string, readonly Role[]> = {
   "/inventory": ALL,
   // Kits: STAFF/TEAM_LEADER can view and check out/return; ADMINS manage them.
   "/kits": ALL,
+  // Room & archive cabinet management (ADMINS only).
+  "/rooms": ADMINS,
   // Barcode & label print studio is an admin tool.
   "/barcode-studio": ADMINS,
   // Borrow / return scanning – open to all; Stock Opname tab gated by inventory.validate_opname.
@@ -178,6 +180,7 @@ export const ACTION_PERMISSIONS = {
 
   // Settings & user management
   "settings.profile": ALL,
+  "locations.manage": ADMINS, // create, rename & toggle rooms and archive cabinets
   "users.manage": ADMINS, // manage TEAM_LEADER & STAFF (and all roles for OWNER)
   "users.manage_admins": ["OWNER"], // manage OWNER & SUPER_ADMIN accounts (OWNER only)
 } as const satisfies Record<string, readonly Role[]>;

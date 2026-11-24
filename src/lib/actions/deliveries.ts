@@ -1,8 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireAction } from "@/lib/auth";
+import {
+  fetchLocationsDirectoryWithClient,
+  type LocationsDirectory,
+} from "@/lib/locations";
 import { can } from "@/lib/rbac";
 import {
   isValidUuid,
@@ -17,6 +22,7 @@ import type {
   AssetType,
   BarcodeFormat,
   CodeCategoryPrefix,
+  Database,
   DeliveryDirection,
   DeliveryLog,
   DeliveryStatus,
@@ -112,22 +118,6 @@ const VALID_ASSET_TYPES = new Set<AssetType>([
   "FIXED_ASSET",
   "CONSUMABLE",
 ]);
-const VALID_LOCATIONS = new Set<LocationCode>([
-  "R01",
-  "R02",
-  "R03",
-  "R04",
-  "R05",
-  "R06",
-  "ADM",
-  "FO",
-  "GDG",
-  "L01",
-  "L02",
-  "L03",
-  "L04",
-  "DIG",
-]);
 const VALID_CONDITIONS = new Set<ItemCondition>([
   "BAIK",
   "PART_KURANG",
@@ -162,8 +152,69 @@ function sanitizeTimestampOrNull(val: string | null | undefined): string | null 
   return Number.isNaN(Date.parse(cleaned)) ? null : cleaned;
 }
 
+async function resolveAllowedExistingRoomCodes(
+  supabase: SupabaseClient<Database>,
+  rawItems: unknown,
+  locationsDir: LocationsDirectory,
+  existingPayload?: Json | null,
+): Promise<Set<string>> {
+  const allowed = new Set<string>();
+
+  if (Array.isArray(existingPayload)) {
+    for (const entry of existingPayload) {
+      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        const rawCode = (entry as Record<string, unknown>).room_code;
+        if (typeof rawCode === "string" && rawCode.trim()) {
+          allowed.add(rawCode.trim().toUpperCase());
+        }
+      }
+    }
+  }
+
+  if (!Array.isArray(rawItems)) return allowed;
+
+  const activePhysicalCodes = new Set(
+    locationsDir.records
+      .filter((loc) => loc.is_active && loc.location_group !== "DIGITAL")
+      .map((loc) => loc.code.toUpperCase()),
+  );
+
+  const candidateItemIds = new Set<string>();
+  for (const raw of rawItems) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const r = raw as Record<string, unknown>;
+    const rawCode =
+      typeof r.room_code === "string" && r.room_code.trim().length > 0
+        ? r.room_code.trim().toUpperCase()
+        : "GDG";
+    if (
+      !activePhysicalCodes.has(rawCode) &&
+      typeof r.existing_item_id === "string" &&
+      isValidUuid(r.existing_item_id)
+    ) {
+      candidateItemIds.add(r.existing_item_id.trim());
+    }
+  }
+
+  if (candidateItemIds.size > 0) {
+    const { data: existingItems } = await supabase
+      .from("items_master")
+      .select("room_code")
+      .in("id", Array.from(candidateItemIds));
+    for (const row of existingItems ?? []) {
+      if (typeof row.room_code === "string" && row.room_code.trim()) {
+        allowed.add(row.room_code.trim().toUpperCase());
+      }
+    }
+  }
+
+  return allowed;
+}
+
 function sanitizePayloadItems(
   rawItems: unknown,
+  locationsDir: LocationsDirectory,
+  allowedExistingCodes?: ReadonlySet<string>,
 ): { ok: true; items: DeliveryPayloadItem[] } | { ok: false; error: string } {
   if (!Array.isArray(rawItems)) {
     return { ok: false, error: "Daftar isi paket harus berupa array." };
@@ -171,6 +222,10 @@ function sanitizePayloadItems(
   if (rawItems.length > 200) {
     return { ok: false, error: "Maksimal 200 baris item dalam satu pengiriman." };
   }
+
+  const locationMap = new Map(
+    locationsDir.records.map((loc) => [loc.code.toUpperCase(), loc]),
+  );
 
   const sanitized: DeliveryPayloadItem[] = [];
   for (let i = 0; i < rawItems.length; i += 1) {
@@ -207,12 +262,31 @@ function sanitizePayloadItems(
       return { ok: false, error: `Tipe aset pada "${name}" tidak valid.` };
     }
 
-    const roomCode = (
-      typeof r.room_code === "string" ? r.room_code : "GDG"
-    ) as LocationCode;
-    if (!VALID_LOCATIONS.has(roomCode)) {
-      return { ok: false, error: `Kode lokasi pada "${name}" tidak valid.` };
+    const normalizedRoomCode =
+      typeof r.room_code === "string" && r.room_code.trim().length > 0
+        ? r.room_code.trim().toUpperCase()
+        : "GDG";
+    const matchedLocation = locationMap.get(normalizedRoomCode);
+    const matchesExisting = Boolean(allowedExistingCodes?.has(normalizedRoomCode));
+    if (!matchedLocation) {
+      return {
+        ok: false,
+        error: `Kode lokasi "${normalizedRoomCode}" pada "${name}" tidak terdaftar di master lokasi.`,
+      };
     }
+    if (matchedLocation.location_group === "DIGITAL" && !matchesExisting) {
+      return {
+        ok: false,
+        error: `Lokasi Digital Vault (${matchedLocation.code}) pada "${name}" tidak digunakan untuk barang fisik.`,
+      };
+    }
+    if (!matchedLocation.is_active && !matchesExisting) {
+      return {
+        ok: false,
+        error: `Lokasi ${matchedLocation.code} (${matchedLocation.name}) pada "${name}" sedang nonaktif.`,
+      };
+    }
+    const roomCode = matchedLocation.code as LocationCode;
 
     const condition = (
       typeof r.condition === "string" ? r.condition : "BAIK"
@@ -313,7 +387,11 @@ function sanitizePayloadItems(
   return { ok: true, items: sanitized };
 }
 
-function validateDeliveryInput(input: DeliveryInput):
+function validateDeliveryInput(
+  input: DeliveryInput,
+  locationsDir: LocationsDirectory,
+  allowedExistingCodes?: ReadonlySet<string>,
+):
   | {
       ok: true;
       data: {
@@ -370,7 +448,11 @@ function validateDeliveryInput(input: DeliveryInput):
     return { ok: false, error: "Status pengiriman tidak valid." };
   }
 
-  const payloadCheck = sanitizePayloadItems(input.items_payload_json);
+  const payloadCheck = sanitizePayloadItems(
+    input.items_payload_json,
+    locationsDir,
+    allowedExistingCodes,
+  );
   if (!payloadCheck.ok) {
     return payloadCheck;
   }
@@ -433,11 +515,18 @@ export async function createDeliveryAction(
 ): Promise<DeliveryActionResult<{ delivery: DeliveryLog }>> {
   const user = await requireAction("delivery.manage");
 
-  const parsed = validateDeliveryInput(input);
-  if (!parsed.ok) return parsed;
-
   try {
     const supabase = await createClient();
+    const locationsDir = await fetchLocationsDirectoryWithClient(supabase);
+    const allowedExistingCodes = await resolveAllowedExistingRoomCodes(
+      supabase,
+      input.items_payload_json,
+      locationsDir,
+    );
+
+    const parsed = validateDeliveryInput(input, locationsDir, allowedExistingCodes);
+    if (!parsed.ok) return parsed;
+
     const d = parsed.data;
     const timestamps = resolveTimestampsForStatus(
       d.status,
@@ -503,21 +592,31 @@ export async function updateDeliveryAction(
     return { ok: false, error: "ID pengiriman tidak valid." };
   }
 
-  const parsed = validateDeliveryInput(input);
-  if (!parsed.ok) return parsed;
-
   try {
     const supabase = await createClient();
-    const { data: existing, error: fetchError } = await supabase
-      .from("deliveries_log")
-      .select("*")
-      .eq("id", deliveryId)
-      .is("deleted_at", null)
-      .maybeSingle();
+    const [existingRes, locationsDir] = await Promise.all([
+      supabase
+        .from("deliveries_log")
+        .select("*")
+        .eq("id", deliveryId)
+        .is("deleted_at", null)
+        .maybeSingle(),
+      fetchLocationsDirectoryWithClient(supabase),
+    ]);
 
+    const { data: existing, error: fetchError } = existingRes;
     if (fetchError || !existing) {
       return { ok: false, error: "Data pengiriman tidak ditemukan." };
     }
+
+    const allowedExistingCodes = await resolveAllowedExistingRoomCodes(
+      supabase,
+      input.items_payload_json,
+      locationsDir,
+      existing.items_payload_json,
+    );
+    const parsed = validateDeliveryInput(input, locationsDir, allowedExistingCodes);
+    if (!parsed.ok) return parsed;
 
     if (existing.direction !== parsed.data.direction) {
       return {
@@ -1000,12 +1099,17 @@ export async function convertInboundToStockAction(
 
   try {
     const supabase = await createClient();
-    const { data: delivery, error: fetchError } = await supabase
-      .from("deliveries_log")
-      .select("*")
-      .eq("id", deliveryId)
-      .is("deleted_at", null)
-      .maybeSingle();
+    const [deliveryRes, locationsDir] = await Promise.all([
+      supabase
+        .from("deliveries_log")
+        .select("*")
+        .eq("id", deliveryId)
+        .is("deleted_at", null)
+        .maybeSingle(),
+      fetchLocationsDirectoryWithClient(supabase),
+    ]);
+
+    const { data: delivery, error: fetchError } = deliveryRes;
 
     if (fetchError || !delivery) {
       return { ok: false, error: "Data pengiriman tidak ditemukan." };
@@ -1032,7 +1136,16 @@ export async function convertInboundToStockAction(
       };
     }
 
-    const payloadCheck = sanitizePayloadItems(delivery.items_payload_json);
+    const allowedExistingCodes = await resolveAllowedExistingRoomCodes(
+      supabase,
+      delivery.items_payload_json,
+      locationsDir,
+    );
+    const payloadCheck = sanitizePayloadItems(
+      delivery.items_payload_json,
+      locationsDir,
+      allowedExistingCodes,
+    );
     if (!payloadCheck.ok) {
       return payloadCheck;
     }
@@ -1124,13 +1237,25 @@ export async function convertInboundToStockAction(
       );
 
     if (insertError || !insertedItems || insertedItems.length === 0) {
+      const errCode =
+        insertError && typeof insertError === "object" && "code" in insertError
+          ? String((insertError as { code?: unknown }).code ?? "").trim()
+          : "";
+      const safeMsg = sanitizeSafeError(
+        insertError,
+        "Gagal memasukkan item ke master inventaris.",
+        "deliveries/convertInsert",
+      );
+      if (errCode === "22P02") {
+        return {
+          ok: false,
+          error:
+            "Salah satu kode lokasi pada item pengiriman belum didukung oleh tipe enum database saat ini. Jalankan migrasi 20261124_locations_master.sql di Supabase SQL Editor terlebih dahulu.",
+        };
+      }
       return {
         ok: false,
-        error: sanitizeSafeError(
-          insertError,
-          "Gagal memasukkan item ke master inventaris.",
-          "deliveries/convertInsert",
-        ),
+        error: safeMsg,
       };
     }
 
@@ -1224,6 +1349,7 @@ export async function convertInboundToStockAction(
 
     revalidateLogisticsPaths();
     revalidatePath("/inventory");
+    revalidatePath("/rooms");
     revalidatePath("/barcode-studio");
 
     return {

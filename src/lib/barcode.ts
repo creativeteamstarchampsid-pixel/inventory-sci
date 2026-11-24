@@ -1,6 +1,6 @@
 import JsBarcode from "jsbarcode";
 
-import { LOCATION_LABELS } from "@/lib/constants";
+import { getLocationLabel } from "@/lib/constants";
 import type {
   ArchivePhysicalStatus,
   AssetType,
@@ -301,8 +301,9 @@ export function buildQrTargetUrl(
 /** Maps an `items_master` row into the unified printable label shape. */
 export function mapItemToPrintableRecord(
   item: PrintableItemRow,
+  locationLabels?: Record<string, string>,
 ): PrintableLabelRecord {
-  const roomShort = LOCATION_LABELS[item.room_code] ?? item.room_code;
+  const roomShort = getLocationLabel(item.room_code, locationLabels);
   const locationDisplay = item.rack_location
     ? `${roomShort} (${item.room_code}) · ${item.rack_location}`
     : `${roomShort} (${item.room_code})`;
@@ -340,9 +341,9 @@ export function mapItemToPrintableRecord(
 /** Maps an `archives_hybrid` row into the unified printable label shape. */
 export function mapArchiveToPrintableRecord(
   archive: PrintableArchiveRow,
+  locationLabels?: Record<string, string>,
 ): PrintableLabelRecord {
-  const cabinetShort =
-    LOCATION_LABELS[archive.cabinet_code] ?? archive.cabinet_code;
+  const cabinetShort = getLocationLabel(archive.cabinet_code, locationLabels);
   const folderSuffix = archive.folder_code
     ? ` · Map ${archive.folder_code}`
     : "";

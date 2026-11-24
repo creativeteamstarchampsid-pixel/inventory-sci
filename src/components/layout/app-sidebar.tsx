@@ -33,6 +33,7 @@ const ROUTE_TILE_COLORS: Record<string, string> = {
   "/guide": "bg-[#FEF3C7] dark:bg-[#3A311E]",
   "/inventory": "bg-[#FFECD6] dark:bg-[#3B281B]",
   "/kits": "bg-[#FEF6D3] dark:bg-[#382F1C]",
+  "/rooms": "bg-[#CCFBF1] dark:bg-[#1B3330]",
   "/scan": "bg-[#CCFBF1] dark:bg-[#1B3330]",
   "/barcode-studio": "bg-[#FFE4EA] dark:bg-[#3A2229]",
   "/requests": "bg-[#FFE2DC] dark:bg-[#3C2221]",

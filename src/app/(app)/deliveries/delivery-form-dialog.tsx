@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ImagePlus, Loader2, PackagePlus, Plus, ShieldCheck, Trash2 } from "lucide-react";
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
+import { useLocations } from "@/components/providers/locations-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -39,7 +40,6 @@ import {
   CONDITION_LABELS,
   DELIVERY_DIRECTION_LABELS,
   DELIVERY_STATUS_LABELS,
-  INVENTORY_LOCATION_OPTIONS,
   THERAPY_CATEGORIES,
 } from "@/lib/constants";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
@@ -90,6 +90,7 @@ export function DeliveryFormDialog({
 }: DeliveryFormDialogProps) {
   const isEditing = Boolean(editingDelivery);
   const { showWorking, showSuccess, showError } = useCartoonFeedback();
+  const { inventoryOptions, getOptionWithCurrent } = useLocations();
 
   const [direction, setDirection] =
     useState<DeliveryDirection>(initialDirection);
@@ -887,7 +888,10 @@ export function DeliveryFormDialog({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {INVENTORY_LOCATION_OPTIONS.map((loc) => (
+                          {getOptionWithCurrent(
+                            inventoryOptions,
+                            item.room_code,
+                          ).map((loc) => (
                             <SelectItem key={loc.value} value={loc.value}>
                               {loc.label}
                             </SelectItem>

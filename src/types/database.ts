@@ -27,7 +27,9 @@ export type CodeCategoryPrefix =
   | "DOC"
   | "SUB";
 
-export type LocationCode =
+export type LocationGroup = "THERAPY" | "OFFICE" | "ARCHIVE" | "DIGITAL";
+
+export type PresetLocationCode =
   | "R01"
   | "R02"
   | "R03"
@@ -42,6 +44,8 @@ export type LocationCode =
   | "L03"
   | "L04"
   | "DIG";
+
+export type LocationCode = string;
 
 export type BarcodeFormat = "CODE128" | "QR" | "COMBO";
 export type AssetType = "THERAPY_TOY" | "FIXED_ASSET" | "CONSUMABLE";
@@ -90,6 +94,54 @@ export type BackupType = "PRE_UPDATE" | "MONTHLY_CUTOFF" | "MANUAL";
 export type Database = {
   public: {
     Tables: {
+      locations_master: {
+        Row: {
+          code: string;
+          name: string;
+          location_group: LocationGroup;
+          description: string | null;
+          pic_name: string | null;
+          include_in_opname: boolean;
+          is_active: boolean;
+          is_system: boolean;
+          sort_order: number;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          code: string;
+          name: string;
+          location_group: LocationGroup;
+          description?: string | null;
+          pic_name?: string | null;
+          include_in_opname?: boolean;
+          is_active?: boolean;
+          is_system?: boolean;
+          sort_order?: number;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          code?: string;
+          name?: string;
+          location_group?: LocationGroup;
+          description?: string | null;
+          pic_name?: string | null;
+          include_in_opname?: boolean;
+          is_active?: boolean;
+          is_system?: boolean;
+          sort_order?: number;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       profiles: {
         Row: {
           id: string;
@@ -953,6 +1005,7 @@ export type Views<T extends keyof PublicSchema["Views"]> =
 export type Enums<T extends keyof PublicSchema["Enums"]> = PublicSchema["Enums"][T];
 
 export type Profile = Tables<"profiles">;
+export type LocationMaster = Tables<"locations_master">;
 export type ItemMaster = Tables<"items_master">;
 export type ItemKit = Tables<"item_kits">;
 export type BorrowTransaction = Tables<"borrow_transactions">;

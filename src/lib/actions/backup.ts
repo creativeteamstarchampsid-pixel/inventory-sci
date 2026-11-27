@@ -137,11 +137,12 @@ export async function toggleOpnameRoomChecklist(input: {
     };
   }
 
-  // Count active anomalies in this room for visibility
+  // Count active leaf anomalies in this room for visibility (exclude Parent aggregation rows to prevent double counting)
   const { data: roomItems } = await supabase
     .from("items_master")
-    .select("condition, asset_type, hygiene_status, stock_qty, min_stock_threshold, total_parts, current_parts")
+    .select("condition, asset_type, hygiene_status, stock_qty, min_stock_threshold, total_parts, current_parts, has_sub_items")
     .eq("room_code", normalizedRoomCode)
+    .eq("has_sub_items", false)
     .is("deleted_at", null);
 
   const anomalyCount = (roomItems ?? []).filter(
@@ -153,7 +154,7 @@ export async function toggleOpnameRoomChecklist(input: {
       (item.asset_type === "THERAPY_TOY" && item.hygiene_status !== "STERIL") ||
       (item.asset_type === "CONSUMABLE" &&
         item.min_stock_threshold > 0 &&
-        item.stock_qty <= item.min_stock_threshold),
+        item.stock_qty < item.min_stock_threshold),
   ).length;
 
   const cleanNotes = sanitizeOptionalText(input.notes, 500, { multiline: true });

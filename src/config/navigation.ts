@@ -143,8 +143,8 @@ const NAV_GROUP_DEFINITIONS: NavGroupDefinition[] = [
       ),
       item(
         "/scan",
-        "Pinjam, Kembali & Opname",
-        "Scan stiker barang untuk pinjam, kembalikan & stock opname",
+        "Scan, Pinjam & Kembali",
+        "Scan barcode/QR untuk meminjam dan mengembalikan alat terapi",
         ArrowLeftRight,
         "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-300",
         {
@@ -153,6 +153,13 @@ const NAV_GROUP_DEFINITIONS: NavGroupDefinition[] = [
             description: "Scan stiker barang untuk pinjam & kembalikan alat terapi",
           },
         },
+      ),
+      item(
+        "/stock-opname",
+        "Stock Opname",
+        "Halaman khusus scan & hitung stok fisik Parent Item, Sub-Item & barang",
+        ClipboardCheck,
+        "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
       ),
       item(
         "/barcode-studio",

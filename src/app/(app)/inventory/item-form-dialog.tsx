@@ -2,7 +2,17 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { ImagePlus, Loader2, MapPin, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import {
+  ImagePlus,
+  Info,
+  Layers,
+  Loader2,
+  MapPin,
+  Plus,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
 import { useLocations } from "@/components/providers/locations-provider";
@@ -10,6 +20,7 @@ import { useRole } from "@/components/rbac/role-provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -62,12 +73,28 @@ import type {
 const NO_PARENT_VALUE = "__NONE__";
 const CUSTOM_CATEGORY_VALUE = "__CUSTOM__";
 
+type SubItemDraftRow = {
+  localKey: string;
+  id?: string;
+  item_code?: string;
+  name: string;
+  unit_label: string;
+  stock_qty: string;
+  total_parts: number;
+  current_parts: number;
+  condition: ItemCondition;
+  hygiene_status: HygieneStatus;
+  description: string | null;
+};
+
 type ItemFormDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editingItem?: ItemMaster | null;
   initialSignedPhotoUrl?: string | null;
   defaultParentId?: string | null;
+  initialSubItems?: ItemMaster[];
+  initialEnableSubItems?: boolean;
   parentCandidates: ItemMaster[];
   onSaved?: (saved: ItemMaster, message?: string) => void;
 };
@@ -78,6 +105,8 @@ export function ItemFormDialog({
   editingItem = null,
   initialSignedPhotoUrl = null,
   defaultParentId = null,
+  initialSubItems,
+  initialEnableSubItems = false,
   parentCandidates,
   onSaved,
 }: ItemFormDialogProps) {
@@ -87,11 +116,34 @@ export function ItemFormDialog({
   const canApproveWriteoff = can("writeoff.approve");
   const canManageLocations = can("locations.manage");
   const isEditing = Boolean(editingItem);
+  const isEditingSubItem = Boolean(editingItem?.parent_item_id);
   const lockedWrittenOff = editingItem?.condition === "DIHAPUSBUKU" && !canApproveWriteoff;
   const defaultParent =
     !editingItem && defaultParentId
       ? parentCandidates.find((item) => item.id === defaultParentId) ?? null
       : null;
+
+  const editingParentInfo =
+    isEditingSubItem && editingItem?.parent_item_id
+      ? parentCandidates.find((item) => item.id === editingItem.parent_item_id) ?? null
+      : null;
+
+  const resolvedInitialSubItems =
+    initialSubItems ??
+    (editingItem
+      ? parentCandidates
+          .filter((item) => item.parent_item_id === editingItem.id)
+          .sort((a, b) => a.item_code.localeCompare(b.item_code, "id"))
+      : []);
+
+  const initialHasSubItems =
+    !isEditingSubItem &&
+    !defaultParentId &&
+    Boolean(
+      initialEnableSubItems ||
+        editingItem?.has_sub_items ||
+        resolvedInitialSubItems.length > 0,
+    );
 
   const initialCategory = editingItem?.category ?? defaultParent?.category ?? THERAPY_CATEGORIES[0];
   const isPresetCategory = (THERAPY_CATEGORIES as readonly string[]).includes(initialCategory);
@@ -99,6 +151,54 @@ export function ItemFormDialog({
   const [parentItemId, setParentItemId] = useState<string>(
     editingItem?.parent_item_id ?? defaultParentId ?? "",
   );
+  const [hasSubItems, setHasSubItems] = useState<boolean>(initialHasSubItems);
+  const [subItems, setSubItems] = useState<SubItemDraftRow[]>(() => {
+    if (resolvedInitialSubItems.length > 0) {
+      const mapped: SubItemDraftRow[] = resolvedInitialSubItems.map((sub) => ({
+        localKey: sub.id,
+        id: sub.id,
+        item_code: sub.item_code,
+        name: sub.name,
+        unit_label: sub.unit_label,
+        stock_qty: String(sub.stock_qty),
+        total_parts: sub.total_parts,
+        current_parts: sub.current_parts,
+        condition: sub.condition,
+        hygiene_status: sub.hygiene_status,
+        description: sub.description,
+      }));
+      if (initialEnableSubItems) {
+        mapped.push({
+          localKey: "new-initial",
+          name: "",
+          unit_label: editingItem?.unit_label ?? "Pcs",
+          stock_qty: "1",
+          total_parts: 1,
+          current_parts: 1,
+          condition: "BAIK",
+          hygiene_status: editingItem?.hygiene_status ?? "STERIL",
+          description: null,
+        });
+      }
+      return mapped;
+    }
+    if (initialEnableSubItems) {
+      return [
+        {
+          localKey: "new-initial",
+          name: "",
+          unit_label: editingItem?.unit_label ?? "Pcs",
+          stock_qty: "1",
+          total_parts: 1,
+          current_parts: 1,
+          condition: "BAIK",
+          hygiene_status: editingItem?.hygiene_status ?? "STERIL",
+          description: null,
+        },
+      ];
+    }
+    return [];
+  });
   const [name, setName] = useState(editingItem?.name ?? "");
   const [categoryPrefix, setCategoryPrefix] = useState<CodeCategoryPrefix>(
     editingItem?.category_prefix ?? defaultParent?.category_prefix ?? "SNS",
@@ -154,13 +254,80 @@ export function ItemFormDialog({
   const [isPending, startTransition] = useTransition();
 
   const availableParents = parentCandidates.filter((candidate) => {
+    if (candidate.parent_item_id !== null) return false;
     if (!editingItem) return true;
     return candidate.id !== editingItem.id && candidate.parent_item_id !== editingItem.id;
   });
 
+  const computedParentStockSum = subItems
+    .filter((sub) => sub.condition !== "DIHAPUSBUKU")
+    .reduce((sum, sub) => sum + Math.max(0, Math.trunc(Number(sub.stock_qty) || 0)), 0);
+
+  const handleToggleHasSubItems = (checked: boolean) => {
+    if (!checked && subItems.some((sub) => Boolean(sub.id))) {
+      setError(
+        "Hapus seluruh Sub-Item yang sudah tersimpan terlebih dahulu sebelum menonaktifkan mode Sub-Item.",
+      );
+      return;
+    }
+    setError(null);
+    setHasSubItems(checked);
+    if (checked) {
+      setParentItemId("");
+      if (subItems.length === 0) {
+        setSubItems([
+          {
+            localKey: `new-${crypto.randomUUID()}`,
+            name: "",
+            unit_label: unitLabel.trim() || "Pcs",
+            stock_qty: "1",
+            total_parts: 1,
+            current_parts: 1,
+            condition: "BAIK",
+            hygiene_status: hygieneStatus,
+            description: null,
+          },
+        ]);
+      }
+    }
+  };
+
+  const handleAddSubItemRow = () => {
+    setSubItems((prev) => [
+      ...prev,
+      {
+        localKey: `new-${crypto.randomUUID()}`,
+        name: "",
+        unit_label: unitLabel.trim() || "Pcs",
+        stock_qty: "1",
+        total_parts: 1,
+        current_parts: 1,
+        condition: "BAIK",
+        hygiene_status: hygieneStatus,
+        description: null,
+      },
+    ]);
+  };
+
+  const handleUpdateSubItemRow = (
+    localKey: string,
+    patch: Partial<SubItemDraftRow>,
+  ) => {
+    setSubItems((prev) =>
+      prev.map((row) => (row.localKey === localKey ? { ...row, ...patch } : row)),
+    );
+  };
+
+  const handleRemoveSubItemRow = (localKey: string) => {
+    setSubItems((prev) => prev.filter((row) => row.localKey !== localKey));
+  };
+
   const handleParentChange = (value: string) => {
     const nextParentId = value === NO_PARENT_VALUE ? "" : value;
     setParentItemId(nextParentId);
+    if (nextParentId) {
+      setHasSubItems(false);
+    }
     if (!isEditing && nextParentId) {
       const parent = availableParents.find((p) => p.id === nextParentId);
       if (parent) {
@@ -248,6 +415,21 @@ export function ItemFormDialog({
       return;
     }
 
+    const effectiveHasSubItems = !isEditingSubItem && !parentItemId && hasSubItems;
+    if (effectiveHasSubItems) {
+      if (subItems.length === 0) {
+        setError(
+          "Tambahkan minimal 1 baris varian Sub-Item atau matikan opsi Memiliki Sub-Item.",
+        );
+        return;
+      }
+      const invalidIdx = subItems.findIndex((s) => !s.name.trim());
+      if (invalidIdx !== -1) {
+        setError(`Nama varian Sub-Item pada baris ${invalidIdx + 1} wajib diisi.`);
+        return;
+      }
+    }
+
     const totalPartsNum = Math.max(1, Math.trunc(Number(totalParts) || 1));
     const currentPartsNum = Math.min(
       totalPartsNum,
@@ -299,7 +481,23 @@ export function ItemFormDialog({
             }
 
             const payload = {
-              parent_item_id: parentItemId || null,
+              parent_item_id: effectiveHasSubItems ? null : parentItemId || null,
+              has_sub_items: effectiveHasSubItems,
+              ...(effectiveHasSubItems
+                ? {
+                    sub_items: subItems.map((sub) => ({
+                      ...(sub.id ? { id: sub.id } : {}),
+                      name: sub.name.trim(),
+                      unit_label: sub.unit_label.trim() || unitLabel.trim() || "Pcs",
+                      stock_qty: Math.max(0, Math.trunc(Number(sub.stock_qty) || 0)),
+                      total_parts: sub.total_parts,
+                      current_parts: sub.current_parts,
+                      condition: sub.condition,
+                      hygiene_status: sub.hygiene_status,
+                      description: sub.description,
+                    })),
+                  }
+                : {}),
               barcode_format: barcodeFormat,
               name: name.trim(),
               description: description.trim() || null,
@@ -317,7 +515,9 @@ export function ItemFormDialog({
               total_parts: totalPartsNum,
               current_parts: currentPartsNum,
               unit_label: unitLabel.trim() || "Pcs",
-              stock_qty: Math.max(0, Math.trunc(Number(stockQty) || 0)),
+              stock_qty: effectiveHasSubItems
+                ? computedParentStockSum
+                : Math.max(0, Math.trunc(Number(stockQty) || 0)),
               min_stock_threshold: Math.max(0, Math.trunc(Number(minStockThreshold) || 0)),
               condition,
               hygiene_status: hygieneStatus,
@@ -375,36 +575,106 @@ export function ItemFormDialog({
             </Alert>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="item-parent" className="font-bold">
-                Induk Item (Opsional — untuk Sub-Kode Anak)
-              </Label>
-              <Select
-                value={parentItemId || NO_PARENT_VALUE}
-                onValueChange={handleParentChange}
-                disabled={isPending}
+          {isEditingSubItem && (
+            <Alert className="rounded-2xl border-2 border-[#2C2623] bg-[#EDE9FE]/80 text-[#4C1D95] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-violet-950/50 dark:text-violet-100">
+              <Info className="size-4" />
+              <AlertDescription className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
+                <span>
+                  Item ini adalah <strong>Sub-Item</strong> dari{" "}
+                  {editingParentInfo ? (
+                    <span className="font-mono font-extrabold">
+                      {editingParentInfo.item_code} ({editingParentInfo.name})
+                    </span>
+                  ) : (
+                    "Parent Item"
+                  )}
+                  . Stok Parent dihitung otomatis dari penjumlahan seluruh Sub-Item aktif.
+                </span>
+                {(editingParentInfo?.id ?? editingItem?.parent_item_id) && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    asChild
+                    className="h-7 rounded-xl border-[#2C2623] bg-white text-xs font-extrabold text-[#4C1D95] dark:bg-stone-900 dark:text-violet-200"
+                  >
+                    <Link href={`/inventory/${editingParentInfo?.id ?? editingItem?.parent_item_id}`}>
+                      Buka Parent Item →
+                    </Link>
+                  </Button>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {!isEditingSubItem && !parentItemId && (
+            <div className="space-y-3 rounded-2xl border-2 border-[#2C2623] bg-[#EDE9FE]/55 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-violet-950/25">
+              <label
+                htmlFor="item-has-sub-items"
+                className="flex cursor-pointer items-start gap-3"
               >
-                <SelectTrigger id="item-parent" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
-                  <SelectValue placeholder="Pilih item induk (jika sub-item)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_PARENT_VALUE}>
-                    Tanpa Induk (Buat Kode Utama Baru)
-                  </SelectItem>
-                  {availableParents.map((parent) => (
-                    <SelectItem key={parent.id} value={parent.id}>
-                      {parent.item_code} — {parent.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {parentItemId && (
-                <p className="text-muted-foreground text-xs">
-                  Item ini akan menjadi bagian/sub-komponen dengan akhiran otomatis (-A, -B, dst).
-                </p>
-              )}
+                <Checkbox
+                  id="item-has-sub-items"
+                  checked={hasSubItems}
+                  onCheckedChange={(checked) => handleToggleHasSubItems(checked === true)}
+                  disabled={isPending}
+                  className="mt-0.5 border-2 border-[#2C2623] bg-white dark:border-stone-400"
+                />
+                <div className="space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-extrabold text-[#2C2623] dark:text-stone-100">
+                      Memiliki Sub-Item
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className="rounded-full border border-[#2C2623] bg-[#FFFDF7] px-2 py-0 text-[10px] font-extrabold text-[#4C1D95] dark:border-stone-400 dark:bg-stone-900 dark:text-violet-200"
+                    >
+                      <Layers className="mr-1 size-3" />
+                      Parent + Varian
+                    </Badge>
+                  </div>
+                  <p className="text-muted-foreground text-xs font-medium">
+                    Aktifkan jika barang memiliki varian warna/ukuran/seri (contoh: Playdough,
+                    Kertas Origami, Seri Buku). Barcode cukup 1 pada Parent, stok total dijumlahkan
+                    otomatis dari Sub-Item.
+                  </p>
+                </div>
+              </label>
             </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
+            {!hasSubItems && (
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="item-parent" className="font-bold">
+                  Induk Item (Opsional — untuk Sub-Kode Anak)
+                </Label>
+                <Select
+                  value={parentItemId || NO_PARENT_VALUE}
+                  onValueChange={handleParentChange}
+                  disabled={isPending}
+                >
+                  <SelectTrigger id="item-parent" className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
+                    <SelectValue placeholder="Pilih item induk (jika sub-item)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_PARENT_VALUE}>
+                      Tanpa Induk (Buat Kode Utama Baru)
+                    </SelectItem>
+                    {availableParents.map((parent) => (
+                      <SelectItem key={parent.id} value={parent.id}>
+                        {parent.item_code} — {parent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {parentItemId && (
+                  <p className="text-muted-foreground text-xs">
+                    Item ini akan menjadi bagian/sub-komponen dengan akhiran otomatis (-A, -B, dst).
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="item-name" className="font-bold">
@@ -634,17 +904,36 @@ export function ItemFormDialog({
 
             <div className="space-y-2">
               <Label htmlFor="item-stock" className="font-bold">
-                Jumlah Stok
+                {hasSubItems && !isEditingSubItem && !parentItemId
+                  ? "Total Stok Parent (Otomatis)"
+                  : "Jumlah Stok"}
               </Label>
-              <Input
-                id="item-stock"
-                type="number"
-                min={0}
-                value={stockQty}
-                onChange={(e) => setStockQty(e.target.value)}
-                disabled={isPending}
-                className="bg-white dark:bg-stone-900"
-              />
+              {hasSubItems && !isEditingSubItem && !parentItemId ? (
+                <div className="space-y-1">
+                  <Input
+                    id="item-stock"
+                    type="number"
+                    value={computedParentStockSum}
+                    readOnly
+                    disabled
+                    className="bg-[#D1FAE5]/45 font-mono font-extrabold text-[#14532D] dark:bg-emerald-950/40 dark:text-emerald-200"
+                  />
+                  <p className="text-xs font-bold text-[#14532D] dark:text-emerald-300">
+                    Total Stok Parent (Otomatis dari Sub-Item): {computedParentStockSum}{" "}
+                    {unitLabel.trim() || "Pcs"}
+                  </p>
+                </div>
+              ) : (
+                <Input
+                  id="item-stock"
+                  type="number"
+                  min={0}
+                  value={stockQty}
+                  onChange={(e) => setStockQty(e.target.value)}
+                  disabled={isPending}
+                  className="bg-white dark:bg-stone-900"
+                />
+              )}
             </div>
 
             <div className="space-y-2">
@@ -722,6 +1011,164 @@ export function ItemFormDialog({
               </Select>
             </div>
           </div>
+
+          {hasSubItems && !isEditingSubItem && !parentItemId && (
+            <div className="space-y-3 rounded-2xl border-2 border-[#2C2623] bg-[#D1FAE5]/40 p-4 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-emerald-950/25">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="flex items-center gap-2 text-sm font-extrabold text-[#2C2623] dark:text-stone-100">
+                    <Layers className="size-4 text-[#14532D] dark:text-emerald-300" />
+                    Daftar Sub-Item ({subItems.length} Varian)
+                  </h3>
+                  <p className="text-muted-foreground text-xs font-medium">
+                    Total Stok Parent (Otomatis dari Sub-Item):{" "}
+                    <strong className="font-mono text-[#14532D] dark:text-emerald-200">
+                      {computedParentStockSum} {unitLabel.trim() || "Pcs"}
+                    </strong>
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleAddSubItemRow}
+                  disabled={isPending}
+                  className="rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FEF3C7] dark:border-stone-400 dark:bg-stone-900 dark:text-stone-100"
+                >
+                  <Plus className="size-3.5" />
+                  Tambah Varian
+                </Button>
+              </div>
+
+              {subItems.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-[#2C2623]/30 bg-white/80 p-3 text-center text-xs font-semibold text-muted-foreground dark:border-stone-600 dark:bg-stone-900/50">
+                  Belum ada baris Sub-Item. Klik &ldquo;Tambah Varian&rdquo; untuk menambahkan varian.
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {subItems.map((sub, idx) => (
+                    <div
+                      key={sub.localKey}
+                      className="space-y-2 rounded-2xl border-2 border-[#2C2623]/75 bg-[#FFFDF7] p-3 shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900/80"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground text-[11px] font-extrabold">
+                            #{idx + 1}
+                          </span>
+                          {sub.item_code ? (
+                            <Badge
+                              variant="outline"
+                              className="rounded-lg border border-[#2C2623]/40 bg-[#D1FAE5] px-2 py-0 font-mono text-[11px] font-bold text-[#14532D] dark:border-stone-500 dark:bg-emerald-950/70 dark:text-emerald-200"
+                            >
+                              {sub.item_code}
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="rounded-lg border border-dashed border-[#2C2623]/50 bg-[#FEF3C7] px-2 py-0 text-[10px] font-bold text-[#78350F] dark:border-stone-500 dark:bg-amber-950/60 dark:text-amber-200"
+                            >
+                              Kode Otomatis
+                            </Badge>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveSubItemRow(sub.localKey)}
+                          disabled={isPending}
+                          className="h-7 rounded-lg px-2 text-xs font-bold text-rose-600 hover:bg-[#FFE4E6] dark:text-rose-300 dark:hover:bg-rose-950/60"
+                        >
+                          <Trash2 className="size-3.5" />
+                          Hapus
+                        </Button>
+                      </div>
+
+                      <div className="grid gap-2.5 sm:grid-cols-12 [&>*]:min-w-0">
+                        <div className="space-y-1 sm:col-span-5">
+                          <Label className="text-[11px] font-bold">
+                            Nama Varian / Sub-Item *
+                          </Label>
+                          <Input
+                            value={sub.name}
+                            onChange={(e) =>
+                              handleUpdateSubItemRow(sub.localKey, { name: e.target.value })
+                            }
+                            placeholder="Contoh: Playdough Toples Besar - Merah"
+                            disabled={isPending}
+                            className="h-8 bg-white text-xs dark:bg-stone-950"
+                          />
+                        </div>
+                        <div className="space-y-1 sm:col-span-2">
+                          <Label className="text-[11px] font-bold">Satuan</Label>
+                          <Input
+                            value={sub.unit_label}
+                            onChange={(e) =>
+                              handleUpdateSubItemRow(sub.localKey, {
+                                unit_label: e.target.value,
+                              })
+                            }
+                            placeholder="Pcs / Toples"
+                            disabled={isPending}
+                            className="h-8 bg-white text-xs dark:bg-stone-950"
+                          />
+                        </div>
+                        <div className="space-y-1 sm:col-span-2">
+                          <Label className="text-[11px] font-bold">Quantity</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={sub.stock_qty}
+                            onChange={(e) =>
+                              handleUpdateSubItemRow(sub.localKey, {
+                                stock_qty: e.target.value,
+                              })
+                            }
+                            disabled={isPending}
+                            className="h-8 bg-white font-mono text-xs font-bold dark:bg-stone-950"
+                          />
+                        </div>
+                        <div className="space-y-1 sm:col-span-3">
+                          <Label className="text-[11px] font-bold">Kondisi</Label>
+                          <Select
+                            value={sub.condition}
+                            onValueChange={(v) =>
+                              handleUpdateSubItemRow(sub.localKey, {
+                                condition: v as ItemCondition,
+                              })
+                            }
+                            disabled={
+                              isPending ||
+                              (sub.condition === "DIHAPUSBUKU" && !canApproveWriteoff)
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-full rounded-xl border-2 border-[#2C2623] bg-white text-xs dark:border-stone-500 dark:bg-stone-950">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(Object.keys(CONDITION_LABELS) as ItemCondition[])
+                                .filter(
+                                  (key) =>
+                                    key !== "DIHAPUSBUKU" ||
+                                    canApproveWriteoff ||
+                                    sub.condition === "DIHAPUSBUKU",
+                                )
+                                .map((key) => (
+                                  <SelectItem key={key} value={key}>
+                                    {CONDITION_LABELS[key]}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-3 rounded-2xl border-2 border-[#2C2623] bg-[#FEF3C7]/45 p-4 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-amber-950/25">
             <div className="flex flex-wrap items-center justify-between gap-2">

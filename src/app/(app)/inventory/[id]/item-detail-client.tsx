@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   Boxes,
   CheckCircle2,
+  ClipboardCheck,
   Coins,
   History,
   Image as ImageIcon,
@@ -18,11 +19,13 @@ import {
   QrCode,
   Share2,
   Sparkles,
+  Tag,
   Trash2,
 } from "lucide-react";
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
 import { KawaiiEmptyState, KawaiiPageHeader } from "@/components/cartoon/kawaii-decor";
+import { QrSubItemStockPanel } from "@/components/inventory/qr-subitem-stock-panel";
 import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
@@ -74,7 +77,12 @@ import {
   formatDateWIB,
   formatRupiah,
 } from "@/lib/constants";
-import type { HygieneStatus, ItemCondition, ItemMaster } from "@/types/database";
+import type {
+  HygieneStatus,
+  ItemBarcodeAlias,
+  ItemCondition,
+  ItemMaster,
+} from "@/types/database";
 import {
   AssetTypeBadge,
   ConditionBadge,
@@ -83,12 +91,18 @@ import {
 } from "../inventory-badges";
 import { ItemFormDialog } from "../item-form-dialog";
 
+export type DetailBarcodeAliasItem = Pick<
+  ItemBarcodeAlias,
+  "id" | "alias_code" | "legacy_name" | "alias_reason" | "notes"
+>;
+
 type ItemDetailClientProps = {
   item: ItemMaster;
   parentItem: Pick<ItemMaster, "id" | "item_code" | "name"> | null;
   childItems: ItemMaster[];
   allItemsForParentSelect: ItemMaster[];
   borrowHistory: BorrowHistoryEntry[];
+  barcodeAliases?: DetailBarcodeAliasItem[];
   signedPhotoUrl: string | null;
   todayWib: string;
 };
@@ -99,6 +113,7 @@ export function ItemDetailClient({
   childItems,
   allItemsForParentSelect,
   borrowHistory,
+  barcodeAliases = [],
   signedPhotoUrl,
   todayWib,
 }: ItemDetailClientProps) {
@@ -110,12 +125,16 @@ export function ItemDetailClient({
   const canApproveWriteoff = can("writeoff.approve");
   const canCreateItem = can("inventory.create");
   const canUpdateItem = can("inventory.update");
+  const canValidateOpname = can("inventory.validate_opname");
+  const isParentItem = item.has_sub_items || childItems.length > 0;
+  const isSubItem = Boolean(item.parent_item_id);
   const lockedWrittenOff = item.condition === "DIHAPUSBUKU" && !canApproveWriteoff;
 
   const [partsValue, setPartsValue] = useState(String(item.current_parts));
   const [stockValue, setStockValue] = useState(String(item.stock_qty));
   const [editOpen, setEditOpen] = useState(false);
   const [createSubOpen, setCreateSubOpen] = useState(false);
+  const [subStockEditorOpen, setSubStockEditorOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [shareTarget, setShareTarget] = useState<ItemMaster | null>(null);
 
@@ -363,6 +382,23 @@ export function ItemDetailClient({
         >
           {item.item_code}
         </Badge>
+        <Badge
+          variant="outline"
+          className={`rounded-full border-[1.5px] border-[#2C2623] px-2.5 py-0.5 text-xs font-extrabold shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 ${
+            isParentItem
+              ? "bg-[#EDE9FE] text-[#4C1D95] dark:bg-violet-950/70 dark:text-violet-200"
+              : isSubItem
+                ? "bg-[#E0F2FE] text-[#0C4A6E] dark:bg-sky-950/70 dark:text-sky-200"
+                : "bg-[#FEF3C7] text-[#78350F] dark:bg-amber-950/70 dark:text-amber-200"
+          }`}
+        >
+          <Layers className="mr-1 size-3" />
+          {isParentItem
+            ? `Parent Item (${childItems.length} Sub-Item)`
+            : isSubItem
+              ? "Sub-Item"
+              : "Simple Item"}
+        </Badge>
         <AssetTypeBadge assetType={item.asset_type} />
         <ConditionBadge condition={item.condition} />
         <HygieneBadge
@@ -382,6 +418,26 @@ export function ItemDetailClient({
           </Link>
         )}
       </div>
+
+      {barcodeAliases.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#FEF3C7]/60 px-4 py-2.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-amber-950/30">
+          <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#78350F] dark:text-amber-200">
+            <Tag className="size-3.5" />
+            Barcode Lama / Alias Terhubung:
+          </span>
+          {barcodeAliases.map((alias) => (
+            <Badge
+              key={alias.id}
+              variant="outline"
+              title={alias.notes ?? alias.legacy_name ?? alias.alias_code}
+              className="rounded-full border-[1.5px] border-[#2C2623] bg-white px-2.5 py-0.5 font-mono text-xs font-bold text-[#2C2623] shadow-[1px_1px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900 dark:text-amber-100"
+            >
+              {alias.alias_code}
+              {alias.legacy_name ? ` · ${alias.legacy_name}` : ""}
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {feedback && (
         <Alert
@@ -444,6 +500,11 @@ export function ItemDetailClient({
               <dt className="text-muted-foreground font-semibold">Stok</dt>
               <dd className="font-mono font-bold">
                 {item.stock_qty} {item.unit_label}
+                {isParentItem && (
+                  <span className="text-muted-foreground mt-0.5 block font-sans text-[11px] font-medium">
+                    Otomatis dari penjumlahan {childItems.length} Sub-Item aktif
+                  </span>
+                )}
               </dd>
             </dl>
 
@@ -584,29 +645,55 @@ export function ItemDetailClient({
                   </div>
                 )}
 
-                {item.asset_type === "CONSUMABLE" && can("inventory.update") && (
-                  <form
-                    onSubmit={handleStockSubmit}
-                    className="flex flex-wrap items-end gap-2 border-t-2 border-dashed border-[#2C2623]/15 pt-3 dark:border-stone-700"
-                  >
-                    <div className="min-w-[140px] flex-1 space-y-1">
-                      <Label htmlFor="detail-stock-input" className="text-xs font-bold">
-                        Stok Fisik ({item.unit_label}, Min: {item.min_stock_threshold})
-                      </Label>
-                      <Input
-                        id="detail-stock-input"
-                        type="number"
-                        min={0}
-                        value={stockValue}
-                        onChange={(e) => setStockValue(e.target.value)}
-                        disabled={isPending}
-                        className="bg-white font-mono font-bold dark:bg-stone-900"
-                      />
+                {isParentItem && canValidateOpname ? (
+                  <div className="space-y-2.5 rounded-2xl border-2 border-dashed border-[#2C2623]/30 bg-[#D1FAE5]/40 p-3 text-xs font-semibold text-[#14532D] dark:border-stone-600 dark:bg-emerald-950/30 dark:text-emerald-200">
+                    <p>
+                      Stok total Parent Item ini (<strong>{item.stock_qty} {item.unit_label}</strong>) dihitung otomatis dari{" "}
+                      <strong>{childItems.length} Sub-Item</strong> aktif.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          setSubStockEditorOpen(true);
+                          document
+                            .getElementById("sub-items-section")
+                            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }}
+                        className="h-8 rounded-xl border-2 border-[#2C2623] bg-[#FEF3C7] text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FDE68A]"
+                      >
+                        <Boxes className="size-3.5" />
+                        Update Stok Semua Varian ({childItems.length})
+                      </Button>
                     </div>
-                    <Button type="submit" size="sm" variant="secondary" disabled={isPending} className="shrink-0">
-                      Update Stok
-                    </Button>
-                  </form>
+                  </div>
+                ) : (
+                  item.asset_type === "CONSUMABLE" &&
+                  can("inventory.update") && (
+                    <form
+                      onSubmit={handleStockSubmit}
+                      className="flex flex-wrap items-end gap-2 border-t-2 border-dashed border-[#2C2623]/15 pt-3 dark:border-stone-700"
+                    >
+                      <div className="min-w-[140px] flex-1 space-y-1">
+                        <Label htmlFor="detail-stock-input" className="text-xs font-bold">
+                          Stok Fisik ({item.unit_label}, Min: {item.min_stock_threshold})
+                        </Label>
+                        <Input
+                          id="detail-stock-input"
+                          type="number"
+                          min={0}
+                          value={stockValue}
+                          onChange={(e) => setStockValue(e.target.value)}
+                          disabled={isPending}
+                          className="bg-white font-mono font-bold dark:bg-stone-900"
+                        />
+                      </div>
+                      <Button type="submit" size="sm" variant="secondary" disabled={isPending} className="shrink-0">
+                        Update Stok
+                      </Button>
+                    </form>
+                  )
                 )}
               </CardContent>
             </Card>
@@ -655,38 +742,95 @@ export function ItemDetailClient({
             </Card>
           )}
 
-          <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
+          <Card
+            id="sub-items-section"
+            className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]"
+          >
             <CardHeader className="flex flex-col gap-3 border-b-2 border-[#2C2623]/15 bg-[#EDE9FE]/55 sm:flex-row sm:items-center sm:justify-between dark:border-stone-700 dark:bg-violet-950/25">
               <div>
                 <CardTitle className="flex items-center gap-2 text-base font-extrabold">
                   <span className="inline-flex size-7 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900">
                     <Layers className="size-3.5 text-violet-700 dark:text-violet-300" />
                   </span>
-                  Sub-Komponen / Anak Item ({childItems.length})
+                  Sub-Komponen / Varian ({childItems.length})
                 </CardTitle>
                 <CardDescription className="font-medium">
-                  Komponen turunan dengan sub-kode dari {item.item_code}.
+                  {isParentItem
+                    ? `Total stok Parent (${item.stock_qty} ${item.unit_label}) otomatis dijumlahkan dari Sub-Item aktif di bawah ${item.item_code}.`
+                    : `Komponen turunan dengan sub-kode dari ${item.item_code}.`}
                 </CardDescription>
               </div>
-              <Can action="inventory.create">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setCreateSubOpen(true)}
-                  className="bg-[#FFFDF7] dark:bg-stone-900"
-                >
-                  <Plus className="size-3.5" />
-                  Tambah Sub-Item
-                </Button>
-              </Can>
+              <div className="flex flex-wrap items-center gap-2">
+                {isParentItem && childItems.length > 0 && canValidateOpname && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSubStockEditorOpen((prev) => !prev)}
+                    className="rounded-xl border-2 border-[#2C2623] bg-[#D1FAE5] font-extrabold text-[#14532D] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#A7F3D0] dark:border-stone-500 dark:bg-emerald-950/60 dark:text-emerald-100"
+                  >
+                    <Boxes className="size-3.5" />
+                    {subStockEditorOpen ? "Tutup Editor Stok" : "Update Stok Varian"}
+                  </Button>
+                )}
+                {!isSubItem && canValidateOpname && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    asChild
+                    className="rounded-xl border-2 border-[#2C2623] bg-[#FEF3C7] font-extrabold text-[#78350F] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#FDE68A] dark:border-stone-500 dark:bg-amber-950/60 dark:text-amber-100"
+                  >
+                    <Link href={`/stock-opname?code=${encodeURIComponent(item.item_code)}`}>
+                      <ClipboardCheck className="size-3.5" />
+                      Stock Opname di /stock-opname
+                    </Link>
+                  </Button>
+                )}
+                {!isSubItem && (
+                  <Can action="inventory.create">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setCreateSubOpen(true)}
+                      className="bg-[#FFFDF7] dark:bg-stone-900"
+                    >
+                      <Plus className="size-3.5" />
+                      Tambah Sub-Item
+                    </Button>
+                  </Can>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="p-0">
+              {subStockEditorOpen && isParentItem && childItems.length > 0 && canValidateOpname && (
+                <div className="border-b-2 border-[#2C2623]/15 bg-[#FFF8EB]/75 p-4 dark:border-stone-700 dark:bg-stone-900/60">
+                  <QrSubItemStockPanel
+                    item={item}
+                    parentItem={null}
+                    subItems={childItems}
+                    canUpdateStock={canValidateOpname}
+                    todayWib={todayWib}
+                    variant="update_only"
+                    onUpdated={() => {
+                      setSubStockEditorOpen(false);
+                      setFeedback({
+                        type: "success",
+                        text: `Stok seluruh Sub-Item "${item.name}" berhasil diperbarui.`,
+                      });
+                    }}
+                  />
+                </div>
+              )}
               {childItems.length === 0 ? (
                 <div className="p-5">
                   <KawaiiEmptyState
                     mascot="box"
-                    title="Belum Ada Sub-Komponen"
-                    description={`Belum ada sub-item terdaftar di bawah ${item.item_code}.`}
+                    title={isSubItem ? "Item Ini adalah Sub-Item" : "Belum Ada Sub-Komponen"}
+                    description={
+                      isSubItem
+                        ? "Hierarki dibatasi 2 level (Parent → Sub-Item). Kembali ke Parent Item untuk melihat seluruh varian."
+                        : `Belum ada sub-item terdaftar di bawah ${item.item_code}.`
+                    }
                   />
                 </div>
               ) : (
@@ -695,6 +839,7 @@ export function ItemDetailClient({
                     <TableRow className="bg-[#FEF3C7]/60 hover:bg-[#FEF3C7]/60 dark:bg-stone-800/80">
                       <TableHead className="font-extrabold">Kode</TableHead>
                       <TableHead className="font-extrabold">Nama</TableHead>
+                      <TableHead className="font-extrabold">Stok</TableHead>
                       <TableHead className="font-extrabold">Part</TableHead>
                       <TableHead className="font-extrabold">Kondisi</TableHead>
                       <TableHead className="font-extrabold">Sanitasi</TableHead>
@@ -712,7 +857,14 @@ export function ItemDetailClient({
                             {child.item_code}
                           </Link>
                         </TableCell>
-                        <TableCell className="font-bold">{child.name}</TableCell>
+                        <TableCell className="font-bold">
+                          <Link href={`/inventory/${child.id}`} className="hover:underline">
+                            {child.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs font-bold">
+                          {child.stock_qty} {child.unit_label}
+                        </TableCell>
                         <TableCell>
                           <PartProgressIndicator
                             currentParts={child.current_parts}
@@ -832,6 +984,7 @@ export function ItemDetailClient({
           open={editOpen}
           onOpenChange={setEditOpen}
           editingItem={item}
+          initialSubItems={childItems}
           initialSignedPhotoUrl={signedPhotoUrl}
           parentCandidates={allItemsForParentSelect}
           onSaved={(_saved, message) => {

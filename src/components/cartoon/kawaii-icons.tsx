@@ -1136,6 +1136,7 @@ const ROUTE_MASCOT_MAP: Record<string, KawaiiMascotType> = {
   "/kits": "star",
   "/rooms": "room",
   "/scan": "scan",
+  "/stock-opname": "clipboard",
   "/barcode-studio": "barcode",
   "/requests": "clipboard",
   "/archives": "folder",

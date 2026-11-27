@@ -252,34 +252,57 @@ export default async function ShortSharePreviewPage({
       resolvedTargetId = codeDelivery.id;
       resolvedSlug = normalizedClean || codeDelivery.delivery_code.toLowerCase();
     } else {
-      if (!canViewDeliveries) {
-        const restrictedDelivery = await checkRestrictedDeliveryExistence({
-          slug: normalizedClean || normalizedInput,
-          deliveryCode: upperCode,
-        });
-        if (restrictedDelivery) {
-          return (
-            <SharePreviewClient
-              mode="RESTRICTED_DELIVERY"
-              slug={normalizedClean || normalizedInput}
-            />
-          );
-        }
+      const { data: aliasMatch } = await supabase
+        .from("item_barcode_aliases")
+        .select("target_item_id")
+        .eq("alias_code", upperCode)
+        .maybeSingle();
+
+      let aliasTargetItem: { id: string; item_code: string } | null = null;
+      if (aliasMatch?.target_item_id) {
+        const { data: targetRow } = await supabase
+          .from("items_master")
+          .select("id, item_code")
+          .eq("id", aliasMatch.target_item_id)
+          .is("deleted_at", null)
+          .maybeSingle();
+        aliasTargetItem = targetRow ?? null;
       }
-      if (user.role === "STAFF") {
-        const restrictedCode = await checkRestrictedArchiveExistence({
-          docCode: upperCode,
-        });
-        if (restrictedCode) {
-          return (
-            <SharePreviewClient
-              mode="RESTRICTED_ARCHIVE"
-              slug={normalizedClean || normalizedInput}
-            />
-          );
+
+      if (aliasTargetItem) {
+        resolvedType = "ITEM";
+        resolvedTargetId = aliasTargetItem.id;
+        resolvedSlug = aliasTargetItem.item_code.toLowerCase();
+      } else {
+        if (!canViewDeliveries) {
+          const restrictedDelivery = await checkRestrictedDeliveryExistence({
+            slug: normalizedClean || normalizedInput,
+            deliveryCode: upperCode,
+          });
+          if (restrictedDelivery) {
+            return (
+              <SharePreviewClient
+                mode="RESTRICTED_DELIVERY"
+                slug={normalizedClean || normalizedInput}
+              />
+            );
+          }
         }
+        if (user.role === "STAFF") {
+          const restrictedCode = await checkRestrictedArchiveExistence({
+            docCode: upperCode,
+          });
+          if (restrictedCode) {
+            return (
+              <SharePreviewClient
+                mode="RESTRICTED_ARCHIVE"
+                slug={normalizedClean || normalizedInput}
+              />
+            );
+          }
+        }
+        notFound();
       }
-      notFound();
     }
 
     // Check if that target already has a saved custom short slug
@@ -321,6 +344,7 @@ export default async function ShortSharePreviewPage({
 
   if (resolvedType === "ITEM") {
     const canViewValuation = can(user.role, "inventory.view_valuation");
+    const canValidateOpname = can(user.role, "inventory.validate_opname");
 
     const { data: item } = await supabase
       .from("items_master")
@@ -333,22 +357,24 @@ export default async function ShortSharePreviewPage({
       notFound();
     }
 
-    const [locationsDir, parentRes, childrenCountRes, activeBorrowRes] =
+    const [locationsDir, parentRes, subItemsRes, activeBorrowRes] =
       await Promise.all([
         getLocationsDirectory(),
         item.parent_item_id
           ? supabase
               .from("items_master")
-              .select("id, item_code, name")
+              .select("*")
               .eq("id", item.parent_item_id)
               .is("deleted_at", null)
               .maybeSingle()
-          : Promise.resolve({ data: null }),
+          : Promise.resolve({ data: null as ItemMaster | null }),
         supabase
           .from("items_master")
-          .select("id", { count: "exact", head: true })
-          .eq("parent_item_id", item.id)
-          .is("deleted_at", null),
+          .select("*")
+          .eq("parent_item_id", item.parent_item_id ?? item.id)
+          .is("deleted_at", null)
+          .order("item_code", { ascending: true })
+          .order("name", { ascending: true }),
         supabase
           .from("borrow_transactions")
           .select("id, transaction_code, borrower_id, borrowed_at, status")
@@ -413,6 +439,13 @@ export default async function ShortSharePreviewPage({
       timeZone: "Asia/Jakarta",
     }).format(new Date());
 
+    const safeParent = parentRes.data
+      ? sanitizeValuation(parentRes.data, canViewValuation)
+      : null;
+    const safeSubItems = (subItemsRes.data ?? []).map((child) =>
+      sanitizeValuation(child, canViewValuation),
+    );
+
     return (
       <SharePreviewClient
         mode="ITEM"
@@ -420,8 +453,10 @@ export default async function ShortSharePreviewPage({
         canCustomize={canCustomize}
         item={safeItem}
         roomLabel={locationsDir.getLabel(item.room_code)}
-        parentItem={parentRes.data ?? null}
-        childCount={childrenCountRes.count ?? 0}
+        parentItem={safeParent}
+        subItems={safeSubItems}
+        childCount={safeSubItems.length}
+        canUpdateStock={canValidateOpname}
         activeBorrow={activeBorrow}
         signedPhotoUrl={signedPhotoUrl}
         canViewValuation={canViewValuation}

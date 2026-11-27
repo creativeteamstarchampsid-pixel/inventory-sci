@@ -28,6 +28,7 @@ export default async function BackupPage() {
       .select(
         "room_code, condition, asset_type, hygiene_status, stock_qty, min_stock_threshold, total_parts, current_parts",
       )
+      .eq("has_sub_items", false)
       .is("deleted_at", null),
     can(user.role, "backup.view")
       ? supabase
@@ -81,7 +82,7 @@ export default async function BackupPage() {
       (item.asset_type === "THERAPY_TOY" && item.hygiene_status !== "STERIL") ||
       (item.asset_type === "CONSUMABLE" &&
         item.min_stock_threshold > 0 &&
-        item.stock_qty <= item.min_stock_threshold);
+        item.stock_qty < item.min_stock_threshold);
     if (isAnomaly) bucket.anomaly += 1;
   }
 

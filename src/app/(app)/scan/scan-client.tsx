@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   Barcode,
+  Boxes,
   Camera,
   CameraOff,
   CheckCircle2,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 
 import { useCartoonFeedback } from "@/components/cartoon/feedback-provider";
+import { QrSubItemStockPanel } from "@/components/inventory/qr-subitem-stock-panel";
 import {
   KawaiiEmptyState,
   KawaiiPageHeader,
@@ -66,7 +68,6 @@ import { checkoutKitAction, returnKitAction } from "@/lib/actions/kits";
 import {
   borrowItemViaScanAction,
   lookupScanTargetAction,
-  quickStockOpnameAction,
   returnItemViaScanAction,
   type BorrowHistoryEntry,
   type ScanLookupResult,
@@ -123,7 +124,6 @@ export function ScanClient({
   const { showWorking, showError, runWithFeedback } = useCartoonFeedback();
   const { inventoryOptions, getOptionWithCurrent, getLabel } = useLocations();
 
-  const canEditMasterStock = can("inventory.update");
   const canValidateOpname = can("inventory.validate_opname");
   const canApproveWriteoff = can("writeoff.approve");
 
@@ -135,7 +135,7 @@ export function ScanClient({
   const [lastScannedCode, setLastScannedCode] = useState(initialCode);
   const [matched, setMatched] = useState<ScanLookupResult | null>(initialLookup);
   const [shareTarget, setShareTarget] = useState<ShareDialogTarget | null>(null);
-  const [activeTab, setActiveTab] = useState<"borrow" | "return" | "opname">(
+  const [activeTab, setActiveTab] = useState<"borrow" | "return" | "stock">(
     initialLookup?.activeBorrow ? "return" : "borrow",
   );
 
@@ -176,21 +176,6 @@ export function ScanClient({
     return map;
   });
 
-  // Opname form state
-  const [opnameParts, setOpnameParts] = useState<number>(
-    initialLookup?.kind === "item" ? initialLookup.item.current_parts : 1,
-  );
-  const [opnameStock, setOpnameStock] = useState<number>(
-    initialLookup?.kind === "item" ? initialLookup.item.stock_qty : 1,
-  );
-  const [opnameHygiene, setOpnameHygiene] = useState<HygieneStatus>(
-    initialLookup?.kind === "item" ? initialLookup.item.hygiene_status : "STERIL",
-  );
-  const [opnameCondition, setOpnameCondition] = useState<ItemCondition>(
-    initialLookup?.kind === "item" ? initialLookup.item.condition : "BAIK",
-  );
-  const [opnameNotes, setOpnameNotes] = useState("");
-
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
     text: string;
@@ -202,18 +187,12 @@ export function ScanClient({
     setActiveTab(result.activeBorrow ? "return" : "borrow");
     setBorrowNotes("");
     setReturnNotes("");
-    setOpnameNotes("");
 
     if (result.kind === "item") {
       setBorrowRoom(result.item.room_code);
       setReturnPartsAfter(result.item.current_parts);
       setReturnHygiene("PERLU_DICUCI");
       setReturnCondition(result.item.condition);
-
-      setOpnameParts(result.item.current_parts);
-      setOpnameStock(result.item.stock_qty);
-      setOpnameHygiene(result.item.hygiene_status);
-      setOpnameCondition(result.item.condition);
     } else {
       setBorrowRoom(result.kit.assigned_room ?? "R01");
       setReturnHygiene("PERLU_DICUCI");
@@ -583,64 +562,6 @@ export function ScanClient({
     }
   };
 
-  const handleQuickOpname = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (matched?.kind !== "item") return;
-    const item = matched.item;
-    setFeedback(null);
-    setIsPending(true);
-
-    try {
-      const res = await runWithFeedback(
-        {
-          mode: "working",
-          workingTitle: "Menyimpan Stock Opname...",
-          workingMessage: `Dino Joguman lagi nyatet hasil verifikasi fisik & stok untuk "${item.name}" biar buku inventaris makin rapi~`,
-          successTitle: "Stock Opname Selesai! ♪",
-          successMessage: (result) =>
-            result.ok && result.message
-              ? result.message
-              : `Yeay! Hasil Stock Opname "${item.name}" sudah tercatat aman!`,
-          errorTitle: "Gagal Simpan Stock Opname...",
-          errorMessage: (err) =>
-            typeof err === "string"
-              ? err
-              : err instanceof Error
-                ? err.message
-                : "Yah, hasil stock opname gagal tersimpan. Coba ulangi lagi ya!",
-          isResultError: (result) => (!result.ok ? result.error : null),
-        },
-        async () => {
-          const actionRes = await quickStockOpnameAction({
-            itemId: item.id,
-            currentParts: opnameParts,
-            stockQty: opnameStock,
-            hygieneStatus: opnameHygiene,
-            condition: opnameCondition,
-            notes: opnameNotes.trim() || null,
-          });
-          if (actionRes.ok) {
-            await refreshMatched(item.item_code);
-          }
-          return actionRes;
-        },
-      );
-
-      if (!res.ok) {
-        setFeedback({ type: "error", text: res.error });
-        return;
-      }
-      setFeedback({ type: "success", text: res.message ?? "Stock Opname berhasil dicatat." });
-    } catch (err) {
-      setFeedback({
-        type: "error",
-        text: err instanceof Error ? err.message : "Gagal mencatat Stock Opname.",
-      });
-    } finally {
-      setIsPending(false);
-    }
-  };
-
   const handleCheckoutKit = async () => {
     if (matched?.kind !== "kit") return;
     const kit = matched.kit;
@@ -772,28 +693,47 @@ export function ScanClient({
     scannerInputRef.current?.focus();
   };
 
+  const opnameTargetCode =
+    matched?.kind === "item"
+      ? (matched.parentItem?.item_code ?? matched.item.item_code)
+      : null;
+
+  const stockOpnameHref = opnameTargetCode
+    ? `/stock-opname?code=${encodeURIComponent(opnameTargetCode)}`
+    : "/stock-opname";
+
   return (
     <div className="space-y-6">
       <KawaiiPageHeader
-        badge={canValidateOpname ? "POS Pemindai & Opname" : "POS Pemindai Alat"}
-        title={
-          canValidateOpname
-            ? "Scan Pinjam, Kembali & Stock Opname"
-            : "Scan Pinjam & Kembalikan Alat"
-        }
+        badge="POS Pemindai Alat"
+        title="Scan Pinjam & Kembalikan Alat"
         description="Mendukung Kamera QR/Barcode, USB Laser Scanner Gun (Enter otomatis), dan input manual kode SC-/KIT-/URL."
         accent="mint"
         mascot="scan"
         actions={
-          <Button
-            type="button"
-            variant="outline"
-            onClick={focusScannerInput}
-            className="rounded-xl border-2 border-[#2C2623] bg-[#FEF3C7] font-bold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:bg-[#FDE68A] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none dark:border-stone-500 dark:bg-amber-950/70 dark:text-amber-100"
-          >
-            <ScanLine className="size-4" />
-            Fokus Scanner USB
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {canValidateOpname && (
+              <Button
+                variant="outline"
+                asChild
+                className="rounded-xl border-2 border-[#2C2623] bg-[#DDD6FE] font-bold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:bg-[#C4B5FD] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none dark:border-stone-500 dark:bg-violet-950/70 dark:text-violet-100"
+              >
+                <Link href={stockOpnameHref}>
+                  <ClipboardCheck className="size-4" />
+                  Buka Stock Opname
+                </Link>
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={focusScannerInput}
+              className="rounded-xl border-2 border-[#2C2623] bg-[#FEF3C7] font-bold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:bg-[#FDE68A] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none dark:border-stone-500 dark:bg-amber-950/70 dark:text-amber-100"
+            >
+              <ScanLine className="size-4" />
+              Fokus Scanner USB
+            </Button>
+          </div>
         }
       />
 
@@ -1051,11 +991,7 @@ export function ScanClient({
               <KawaiiEmptyState
                 mascot="scan"
                 title="Siap Memindai Barang atau Kit!"
-                description={
-                  canValidateOpname
-                    ? "Scan stiker barcode / QR Code pada mainan terapi, aset kantor, atau kit untuk mencatat peminjaman, pengembalian, status sanitasi, atau stock opname."
-                    : "Scan stiker barcode / QR Code pada mainan terapi atau paket kit untuk mencatat peminjaman, pengembalian, dan status kebersihan."
-                }
+                description="Scan stiker barcode / QR Code pada mainan terapi, aset kantor, atau paket kit untuk mencatat peminjaman, pengembalian, dan status kebersihan."
                 action={
                   <div className="flex flex-wrap items-center justify-center gap-2.5">
                     <Button
@@ -1076,6 +1012,18 @@ export function ScanClient({
                       >
                         <Camera className="size-4" />
                         Buka Kamera
+                      </Button>
+                    )}
+                    {canValidateOpname && (
+                      <Button
+                        variant="outline"
+                        asChild
+                        className="rounded-xl border-2 border-[#2C2623] bg-[#DDD6FE] font-extrabold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] hover:-translate-y-0.5 hover:bg-[#C4B5FD] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none"
+                      >
+                        <Link href="/stock-opname">
+                          <ClipboardCheck className="size-4" />
+                          Ke Halaman Stock Opname
+                        </Link>
                       </Button>
                     )}
                   </div>
@@ -1162,6 +1110,51 @@ export function ScanClient({
               </CardHeader>
 
               <CardContent className="space-y-4 pt-5">
+                {matched.resolvedAlias && (
+                  <Alert className="rounded-2xl border-2 border-[#2C2623] bg-[#FEF3C7] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-amber-500 dark:bg-amber-950/50 dark:text-amber-100">
+                    <Sparkles className="size-4" />
+                    <AlertTitle className="font-extrabold">
+                      Barcode Lama / Gabungan Dialihkan
+                    </AlertTitle>
+                    <AlertDescription className="text-xs font-medium">
+                      Kode{" "}
+                      <span className="font-mono font-bold">
+                        {matched.resolvedAlias.aliasCode}
+                      </span>
+                      {matched.resolvedAlias.legacyName
+                        ? ` (${matched.resolvedAlias.legacyName})`
+                        : ""}{" "}
+                      otomatis diarahkan ke item aktif{" "}
+                      <span className="font-mono font-bold">{matched.item.item_code}</span>.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {matched.parentItem && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#EDE9FE]/75 px-3.5 py-2.5 text-xs shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-violet-950/40">
+                    <div className="min-w-0">
+                      <span className="font-bold text-[#2C2623] dark:text-violet-100">
+                        Sub-Item dari Parent:{" "}
+                      </span>
+                      <span className="font-extrabold text-[#2C2623] dark:text-white">
+                        {matched.parentItem.name}
+                      </span>{" "}
+                      <span className="font-mono text-[11px] text-[#2C2623]/75 dark:text-violet-200">
+                        ({matched.parentItem.item_code})
+                      </span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void performLookup(matched.parentItem!.item_code, false)}
+                      className="h-7 rounded-lg border-2 border-[#2C2623] bg-white px-2.5 text-xs font-extrabold text-[#2C2623] hover:bg-[#FEF3C7] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
+                    >
+                      Lihat Parent
+                    </Button>
+                  </div>
+                )}
+
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#FFFBEB] p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-stone-900/60">
                   <div className="flex flex-wrap items-center gap-2">
                     <ConditionBadge condition={matched.item.condition} />
@@ -1178,6 +1171,93 @@ export function ScanClient({
                     unitLabel={matched.item.unit_label}
                   />
                 </div>
+
+                {matched.subItems.length > 0 && (
+                  <div className="space-y-2.5 rounded-2xl border-2 border-[#2C2623] bg-[#F0FDF4] p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-emerald-950/25">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-extrabold tracking-wide text-[#2C2623] uppercase dark:text-emerald-100">
+                        {matched.parentItem
+                          ? `Rincian Varian ${matched.parentItem.name} · ${matched.subItems.length} Sub-Item`
+                          : `Rincian Parent Item · ${matched.subItems.length} Sub-Item / Varian`}
+                      </p>
+                      {canValidateOpname && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setActiveTab("stock")}
+                            className="h-7 rounded-lg border-2 border-[#2C2623] bg-[#FEF3C7] px-2.5 text-xs font-extrabold text-[#2C2623] hover:bg-[#FDE68A] dark:border-stone-500 dark:bg-amber-950/70 dark:text-amber-100"
+                          >
+                            <Boxes className="size-3.5" />
+                            Update Stok Varian
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            asChild
+                            className="h-7 rounded-lg border-2 border-[#2C2623] bg-[#DDD6FE] px-2.5 text-xs font-extrabold text-[#2C2623] hover:bg-[#C4B5FD] dark:border-stone-500 dark:bg-violet-950/70 dark:text-violet-100"
+                          >
+                            <Link href={stockOpnameHref}>
+                              <ClipboardCheck className="size-3.5" />
+                              Opname Penuh
+                            </Link>
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    <ul className="max-h-56 divide-y divide-dashed divide-[#2C2623]/20 overflow-y-auto pr-1 dark:divide-stone-700">
+                      {matched.subItems.map((sub) => {
+                        const isCurrentScanned = sub.id === matched.item.id;
+                        return (
+                          <li
+                            key={sub.id}
+                            className={`flex flex-wrap items-center justify-between gap-2 py-2 text-xs ${
+                              isCurrentScanned
+                                ? "rounded-xl bg-[#FEF3C7]/75 px-2 dark:bg-amber-950/40"
+                                : ""
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <p className="truncate font-bold text-[#2C2623] dark:text-stone-100">
+                                  {sub.name}
+                                </p>
+                                {isCurrentScanned && (
+                                  <Badge className="rounded-full border border-[#2C2623] bg-[#FDE68A] px-1.5 py-0 text-[10px] font-black text-[#2C2623]">
+                                    Dipindai
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                <span className="text-muted-foreground font-mono text-[11px]">
+                                  {sub.item_code}
+                                </span>
+                                <span className="rounded-full border border-[#2C2623]/40 bg-white px-1.5 py-0.2 font-mono text-[10px] font-bold dark:border-stone-600 dark:bg-stone-900">
+                                  Stok: {sub.stock_qty} {sub.unit_label}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <ConditionBadge condition={sub.condition} />
+                              {!isCurrentScanned && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => void performLookup(sub.item_code, false)}
+                                  className="h-7 rounded-lg border-2 border-[#2C2623] bg-[#A7F3D0] px-2.5 text-[11px] font-extrabold text-[#2C2623] hover:bg-[#6EE7B7]"
+                                >
+                                  Pinjam Varian
+                                </Button>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
 
                 {matched.activeBorrow && (
                   <Alert
@@ -1200,18 +1280,13 @@ export function ScanClient({
                 )}
 
                 <Tabs
-                  value={activeTab === "opname" && !canValidateOpname ? "borrow" : activeTab}
-                  onValueChange={(v) => {
-                    if (v === "opname" && !canValidateOpname) return;
-                    setActiveTab(v as "borrow" | "return" | "opname");
-                  }}
+                  value={activeTab}
+                  onValueChange={(v) => setActiveTab(v as "borrow" | "return" | "stock")}
                 >
                   <TabsList
-                    className={
-                      canValidateOpname
-                        ? "grid h-auto w-full grid-cols-3 gap-1.5 rounded-2xl border-2 border-[#2C2623] bg-[#F5EFE6] p-1.5 dark:border-stone-500 dark:bg-stone-800"
-                        : "grid h-auto w-full grid-cols-2 gap-1.5 rounded-2xl border-2 border-[#2C2623] bg-[#F5EFE6] p-1.5 dark:border-stone-500 dark:bg-stone-800"
-                    }
+                    className={`grid h-auto w-full gap-1.5 rounded-2xl border-2 border-[#2C2623] bg-[#F5EFE6] p-1.5 dark:border-stone-500 dark:bg-stone-800 ${
+                      canValidateOpname ? "grid-cols-3" : "grid-cols-2"
+                    }`}
                   >
                     <TabsTrigger
                       value="borrow"
@@ -1229,11 +1304,11 @@ export function ScanClient({
                     </TabsTrigger>
                     {canValidateOpname && (
                       <TabsTrigger
-                        value="opname"
-                        className="rounded-xl px-1.5 py-2 text-xs font-extrabold transition-all sm:px-3 sm:text-sm data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#DDD6FE] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
+                        value="stock"
+                        className="rounded-xl px-1.5 py-2 text-xs font-extrabold transition-all sm:px-3 sm:text-sm data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#FEF3C7] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
                       >
-                        <ClipboardCheck className="size-3.5 shrink-0" />
-                        Stock Opname
+                        <Boxes className="size-3.5 shrink-0" />
+                        Update Stok
                       </TabsTrigger>
                     )}
                   </TabsList>
@@ -1461,133 +1536,48 @@ export function ScanClient({
                   </TabsContent>
 
                   {canValidateOpname && (
-                    <TabsContent value="opname" className="pt-3">
-                      <form onSubmit={(e) => void handleQuickOpname(e)} className="space-y-4">
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <div className="space-y-2">
-                            <Label htmlFor="opname-parts" className="font-bold">
-                              Part Fisik ({matched.item.unit_label}, maks {matched.item.total_parts})
-                            </Label>
-                            <Input
-                              id="opname-parts"
-                              type="number"
-                              min={0}
-                              max={matched.item.total_parts}
-                              value={opnameParts}
-                              onChange={(e) =>
-                                setOpnameParts(Math.trunc(Number(e.target.value) || 0))
-                              }
-                              disabled={isPending}
-                              className="rounded-xl border-2 border-[#2C2623] bg-white font-mono font-bold dark:border-stone-500 dark:bg-stone-900"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label htmlFor="opname-stock" className="font-bold">
-                              Stok Fisik ({matched.item.unit_label})
-                            </Label>
-                            <Input
-                              id="opname-stock"
-                              type="number"
-                              min={0}
-                              value={opnameStock}
-                              onChange={(e) =>
-                                setOpnameStock(Math.trunc(Number(e.target.value) || 0))
-                              }
-                              disabled={isPending}
-                              className="rounded-xl border-2 border-[#2C2623] bg-white font-mono font-bold dark:border-stone-500 dark:bg-stone-900"
-                            />
-                            {!canEditMasterStock && (
-                              <p className="text-muted-foreground text-[11px]">
-                                Selisih stok akan dicatat ke log audit untuk peninjauan{" "}
-                                {ROLE_LABELS.SUPER_ADMIN.title}.
-                              </p>
-                            )}
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label className="font-bold">Status Sanitasi</Label>
-                            <Select
-                              value={opnameHygiene}
-                              onValueChange={(v) => setOpnameHygiene(v as HygieneStatus)}
-                              disabled={isPending}
-                            >
-                              <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {(Object.keys(HYGIENE_LABELS) as HygieneStatus[]).map((key) => (
-                                  <SelectItem key={key} value={key}>
-                                    {HYGIENE_LABELS[key]}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label className="font-bold">Kondisi Fisik</Label>
-                            <Select
-                              value={opnameCondition}
-                              onValueChange={(v) => setOpnameCondition(v as ItemCondition)}
-                              disabled={
-                                isPending ||
-                                (matched.item.condition === "DIHAPUSBUKU" && !canApproveWriteoff)
-                              }
-                            >
-                              <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {(Object.keys(CONDITION_LABELS) as ItemCondition[])
-                                  .filter(
-                                    (k) =>
-                                      k !== "DIHAPUSBUKU" ||
-                                      canApproveWriteoff ||
-                                      matched.item.condition === "DIHAPUSBUKU",
-                                  )
-                                  .map((key) => (
-                                    <SelectItem
-                                      key={key}
-                                      value={key}
-                                      disabled={key === "DIHAPUSBUKU" && !canApproveWriteoff}
-                                    >
-                                      {CONDITION_LABELS[key]}
-                                    </SelectItem>
-                                  ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label htmlFor="opname-notes" className="font-bold">
-                            Catatan Stock Opname
-                          </Label>
-                          <Textarea
-                            id="opname-notes"
-                            rows={2}
-                            value={opnameNotes}
-                            onChange={(e) => setOpnameNotes(e.target.value)}
-                            placeholder="Catatan lokasi aktual atau hasil pemeriksaan fisik…"
-                            disabled={isPending}
-                            className="rounded-xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-900"
-                          />
-                        </div>
-
-                        <Button
-                          type="submit"
-                          variant="secondary"
-                          className="h-11 w-full rounded-xl border-2 border-[#2C2623] bg-[#DDD6FE] font-extrabold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:bg-[#C4B5FD] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none"
-                          disabled={isPending}
-                        >
-                          {isPending && <Loader2 className="size-4 animate-spin" />}
-                          Simpan Hasil Stock Opname
-                        </Button>
-                      </form>
+                    <TabsContent value="stock" className="pt-3">
+                      <QrSubItemStockPanel
+                        item={matched.item}
+                        parentItem={matched.parentItem}
+                        subItems={matched.subItems}
+                        canUpdateStock={canValidateOpname}
+                        todayWib={todayWib}
+                        variant="update_only"
+                        onUpdated={async () => {
+                          await refreshMatched(matched.item.item_code);
+                        }}
+                        onSelectSubItemCode={(code) => void performLookup(code, false)}
+                      />
                     </TabsContent>
                   )}
+
                 </Tabs>
+
+                {canValidateOpname && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#EDE9FE]/80 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-violet-950/35">
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <p className="text-xs font-extrabold text-[#2C2623] dark:text-violet-100">
+                        Ingin melakukan Stock Opname item ini?
+                      </p>
+                      <p className="text-[11px] font-medium text-[#2C2623]/75 dark:text-violet-200/80">
+                        {matched.subItems.length > 0 || matched.parentItem
+                          ? "Opname Parent Item & seluruh Sub-Item varian kini terpusat di halaman Stock Opname Terpadu."
+                          : "Pencatatan stok fisik, draft sementara & riwayat sesi tersedia di halaman Stock Opname Terpadu."}
+                      </p>
+                    </div>
+                    <Button
+                      asChild
+                      size="sm"
+                      className="shrink-0 rounded-xl border-2 border-[#2C2623] bg-[#DDD6FE] font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:bg-[#C4B5FD] dark:border-stone-500 dark:bg-violet-900 dark:text-violet-100"
+                    >
+                      <Link href={stockOpnameHref}>
+                        <ClipboardCheck className="size-3.5" />
+                        Buka di Stock Opname
+                      </Link>
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ) : (

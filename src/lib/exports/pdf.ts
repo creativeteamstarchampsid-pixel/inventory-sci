@@ -16,7 +16,6 @@ import PDFDocument from "pdfkit";
 
 import { requireAction } from "@/lib/auth";
 import {
-  calculateBookValue,
   formatDateWIB,
   formatRupiah,
   getLocationLabel,
@@ -24,6 +23,8 @@ import {
 import { ROLE_LABELS } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
 import {
+  getInventoryHierarchySummary,
+  getItemHierarchyLabel,
   getStockAnomalies,
   loadExportDataset,
   type ExportDataset,
@@ -392,22 +393,10 @@ function safePdfText(value: unknown, fallback = "-"): string {
 
 function buildMonthlyReportDocument(dataset: ExportDataset): DocumentNode {
   const anomalies = getStockAnomalies(dataset.items, dataset.todayWib);
+  const summary = getInventoryHierarchySummary(dataset.items);
 
-  const totalPurchase = dataset.items.reduce(
-    (sum, item) => sum + (Number(item.purchase_price) || 0),
-    0,
-  );
-  const totalBookValue = dataset.items.reduce(
-    (sum, item) =>
-      sum +
-      calculateBookValue(
-        item.purchase_price,
-        item.acquisition_date,
-        item.useful_life_months,
-        item.residual_value,
-      ),
-    0,
-  );
+  const totalPurchase = summary.totalPurchase;
+  const totalBookValue = summary.totalBookValue;
 
   const activeSubs = dataset.subscriptions.filter((s) => s.is_active);
   const monthlySubCost = activeSubs.reduce((sum, sub) => {
@@ -417,9 +406,9 @@ function buildMonthlyReportDocument(dataset: ExportDataset): DocumentNode {
     return sum;
   }, 0);
 
-  const toyCount = dataset.items.filter((i) => i.asset_type === "THERAPY_TOY").length;
-  const fixedCount = dataset.items.filter((i) => i.asset_type === "FIXED_ASSET").length;
-  const consumableCount = dataset.items.filter((i) => i.asset_type === "CONSUMABLE").length;
+  const toyCount = summary.topLevelItems.filter((i) => i.asset_type === "THERAPY_TOY").length;
+  const fixedCount = summary.topLevelItems.filter((i) => i.asset_type === "FIXED_ASSET").length;
+  const consumableCount = summary.topLevelItems.filter((i) => i.asset_type === "CONSUMABLE").length;
   const opnamePct = dataset.reconciliation?.opname_progress_pct ?? 0;
 
   const actorRoleLabel =
@@ -435,8 +424,8 @@ function buildMonthlyReportDocument(dataset: ExportDataset): DocumentNode {
   }> = [
     {
       label: "TOTAL INVENTARIS AKTIF",
-      value: `${dataset.items.length} Item`,
-      sub: `${toyCount} Mainan | ${fixedCount} Aset | ${consumableCount} Habis Pakai`,
+      value: `${summary.topLevelItems.length} Item`,
+      sub: `${summary.totalStockUnits} unit stok | ${toyCount} Mainan | ${fixedCount} Aset | ${consumableCount} HBP`,
     },
     ...(dataset.canViewValuation
       ? [
@@ -599,13 +588,17 @@ function buildMonthlyReportDocument(dataset: ExportDataset): DocumentNode {
                   roomLabel !== row.item.room_code
                     ? `${row.item.room_code} - ${roomLabel}`
                     : row.item.room_code;
+                const hierarchyLabel = getItemHierarchyLabel(
+                  row.item,
+                  summary.parentCodeMap,
+                );
                 return pdfView(
                   idx % 2 === 1 ? styles.tableRowAlt : styles.tableRow,
                   [
                     pdfText(String(idx + 1), styles.colNo),
                     pdfText(safePdfText(row.item.item_code), styles.colCode),
                     pdfText(
-                      safePdfText(`${row.item.name} (${roomDisplay})`),
+                      safePdfText(`${row.item.name} [${hierarchyLabel}] (${roomDisplay})`),
                       styles.colName,
                     ),
                     pdfText(safePdfText(row.reasons.join(", ")), styles.colType),

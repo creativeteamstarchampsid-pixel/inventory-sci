@@ -12,10 +12,17 @@ import {
 import { getLocationsDirectory } from "@/lib/locations";
 import { createClient } from "@/lib/supabase/server";
 
+export type BarcodeStudioItemRecord = PrintableLabelRecord & {
+  parentItemId?: string | null;
+  hasSubItems?: boolean;
+  subItemCount?: number;
+  parentCode?: string | null;
+};
+
 export type BarcodeStudioLoadResult = {
   schemaReady: boolean;
   schemaError?: string;
-  items: PrintableLabelRecord[];
+  items: BarcodeStudioItemRecord[];
   archives: PrintableLabelRecord[];
   presets: BarcodePresetRecord[];
 };
@@ -23,6 +30,8 @@ export type BarcodeStudioLoadResult = {
 const ITEM_SELECT_COLUMNS = [
   "id",
   "item_code",
+  "parent_item_id",
+  "has_sub_items",
   "barcode_format",
   "name",
   "category_prefix",
@@ -122,18 +131,45 @@ export async function loadBarcodeStudioRecords(): Promise<BarcodeStudioLoadResul
         }))
       : [];
 
-  const rawItems = (itemsRes.data ?? []) as unknown as PrintableItemRow[];
+  type HierarchyPrintableItemRow = PrintableItemRow & {
+    parent_item_id: string | null;
+    has_sub_items: boolean;
+  };
+
+  const rawItems = (itemsRes.data ?? []) as unknown as HierarchyPrintableItemRow[];
   const rawArchives = (archivesRes.data ?? []) as unknown as PrintableArchiveRow[];
+
+  const subItemCountByParentId = new Map<string, number>();
+  const itemCodeById = new Map<string, string>();
+  for (const row of rawItems) {
+    itemCodeById.set(row.id, row.item_code);
+    if (row.parent_item_id) {
+      subItemCountByParentId.set(
+        row.parent_item_id,
+        (subItemCountByParentId.get(row.parent_item_id) ?? 0) + 1,
+      );
+    }
+  }
 
   return {
     schemaReady: true,
-    items: rawItems.map((item) =>
-      mapItemToPrintableRecord(
+    items: rawItems.map((item) => {
+      const base = mapItemToPrintableRecord(
         item,
         locationsDir.labels,
         itemSlugById.get(item.id) ?? null,
-      ),
-    ),
+      );
+      const subItemCount = subItemCountByParentId.get(item.id) ?? 0;
+      return {
+        ...base,
+        parentItemId: item.parent_item_id ?? null,
+        hasSubItems: Boolean(item.has_sub_items || subItemCount > 0),
+        subItemCount,
+        parentCode: item.parent_item_id
+          ? itemCodeById.get(item.parent_item_id) ?? null
+          : null,
+      };
+    }),
     archives: rawArchives.map((archive) =>
       mapArchiveToPrintableRecord(
         archive,

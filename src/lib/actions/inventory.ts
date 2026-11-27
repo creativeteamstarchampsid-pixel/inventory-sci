@@ -29,8 +29,22 @@ export type ActionResult<T = void> =
   | { ok: true; data: T; message?: string }
   | { ok: false; error: string };
 
+export type SubItemFormInput = {
+  id?: string;
+  name: string;
+  unit_label: string;
+  stock_qty: number;
+  total_parts?: number;
+  current_parts?: number;
+  condition?: ItemCondition;
+  hygiene_status?: HygieneStatus;
+  description?: string | null;
+};
+
 export type CreateItemInput = {
   parent_item_id?: string | null;
+  has_sub_items?: boolean;
+  sub_items?: SubItemFormInput[];
   barcode_format?: BarcodeFormat;
   name: string;
   description?: string | null;
@@ -146,8 +160,93 @@ function revalidateInventoryPaths(itemId?: string) {
   revalidatePath("/dashboard");
   revalidatePath("/kits");
   revalidatePath("/scan");
+  revalidatePath("/stock-opname");
   revalidatePath("/barcode-studio");
   revalidatePath("/recycle-bin");
+}
+
+type NormalizedSubItem = {
+  id?: string;
+  name: string;
+  unit_label: string;
+  stock_qty: number;
+  total_parts: number;
+  current_parts: number;
+  condition: ItemCondition;
+  hygiene_status: HygieneStatus;
+  description: string | null;
+};
+
+function normalizeSubItemInputs(
+  rawSubItems: SubItemFormInput[] | undefined,
+  defaults: {
+    unitLabel: string;
+    hygieneStatus: HygieneStatus;
+    canApproveWriteoff: boolean;
+  },
+): { ok: true; items: NormalizedSubItem[] } | { ok: false; error: string } {
+  if (!rawSubItems) return { ok: true, items: [] };
+  if (!Array.isArray(rawSubItems)) {
+    return { ok: false, error: "Format daftar Sub-Item tidak valid." };
+  }
+
+  const normalized: NormalizedSubItem[] = [];
+  for (let idx = 0; idx < rawSubItems.length; idx += 1) {
+    const entry = rawSubItems[idx];
+    const subId = entry.id ? sanitizeOptionalText(entry.id, 64) : null;
+    if (subId && !isValidUuid(subId)) {
+      return { ok: false, error: `ID Sub-Item pada baris ${idx + 1} tidak valid.` };
+    }
+
+    const subName = sanitizeTextInput(entry.name, 200);
+    if (!subName) {
+      return {
+        ok: false,
+        error: `Nama varian Sub-Item pada baris ${idx + 1} wajib diisi.`,
+      };
+    }
+
+    const subUnit = sanitizeOptionalText(entry.unit_label, 40) ?? defaults.unitLabel;
+    const subStock = Math.max(0, toSafeInt(entry.stock_qty, 0));
+    const subTotalParts = Math.max(1, toSafeInt(entry.total_parts, 1));
+    const subCurrentParts = Math.min(
+      subTotalParts,
+      Math.max(0, toSafeInt(entry.current_parts, subTotalParts)),
+    );
+
+    let subCondition: ItemCondition =
+      entry.condition && VALID_CONDITIONS.includes(entry.condition)
+        ? entry.condition
+        : "BAIK";
+    if (subCondition === "DIHAPUSBUKU" && !defaults.canApproveWriteoff) {
+      return {
+        ok: false,
+        error: "Hanya Owner yang dapat menetapkan status Dihapusbuku pada Sub-Item.",
+      };
+    }
+    if (subTotalParts > 1 && subCurrentParts < subTotalParts && subCondition === "BAIK") {
+      subCondition = "PART_KURANG";
+    }
+
+    const subHygiene: HygieneStatus =
+      entry.hygiene_status && VALID_HYGIENE_STATUSES.includes(entry.hygiene_status)
+        ? entry.hygiene_status
+        : defaults.hygieneStatus;
+
+    normalized.push({
+      ...(subId ? { id: subId } : {}),
+      name: subName,
+      unit_label: subUnit,
+      stock_qty: subStock,
+      total_parts: subTotalParts,
+      current_parts: subCurrentParts,
+      condition: subCondition,
+      hygiene_status: subHygiene,
+      description: sanitizeOptionalText(entry.description, 2000, { multiline: true }),
+    });
+  }
+
+  return { ok: true, items: normalized };
 }
 
 export async function createItemAction(
@@ -227,13 +326,37 @@ export async function createItemAction(
   const roomCode = roomCheck.location.code;
 
   const parentId = sanitizeOptionalText(input.parent_item_id, 64);
+  if (parentId && input.has_sub_items) {
+    return {
+      ok: false,
+      error: "Sub-Item tidak dapat ditandai sebagai Memiliki Sub-Item (maksimal 2 level hierarki).",
+    };
+  }
+
+  const hasSubItems = Boolean(input.has_sub_items) && !parentId;
+  const unitLabel = sanitizeOptionalText(input.unit_label, 40) ?? "Pcs";
+  const rackLocation = sanitizeOptionalText(input.rack_location, 100);
+  const picName = sanitizeOptionalText(input.pic_name, 120);
+
+  const normalizedSubs = hasSubItems
+    ? normalizeSubItemInputs(input.sub_items, {
+        unitLabel,
+        hygieneStatus,
+        canApproveWriteoff: can(user.role, "writeoff.approve"),
+      })
+    : { ok: true as const, items: [] as NormalizedSubItem[] };
+
+  if (!normalizedSubs.ok) {
+    return { ok: false, error: normalizedSubs.error };
+  }
+
   if (parentId) {
     if (!isValidUuid(parentId)) {
       return { ok: false, error: "ID item induk (parent) tidak valid." };
     }
     const { data: parent, error: parentErr } = await supabase
       .from("items_master")
-      .select("id")
+      .select("id, parent_item_id")
       .eq("id", parentId)
       .is("deleted_at", null)
       .maybeSingle();
@@ -241,15 +364,28 @@ export async function createItemAction(
     if (parentErr || !parent) {
       return { ok: false, error: "Item induk (parent) tidak ditemukan atau sudah dihapus." };
     }
+    if (parent.parent_item_id !== null) {
+      return {
+        ok: false,
+        error: "Parent Item yang dipilih merupakan Sub-Item. Sub-Item tidak dapat memiliki turunan.",
+      };
+    }
   }
 
   const isSterilTherapyToy =
     input.asset_type === "THERAPY_TOY" && hygieneStatus === "STERIL";
 
+  const initialParentStock = hasSubItems
+    ? normalizedSubs.items
+        .filter((s) => s.condition !== "DIHAPUSBUKU")
+        .reduce((sum, s) => sum + s.stock_qty, 0)
+    : stockQty;
+
   const { data, error } = await supabase
     .from("items_master")
     .insert({
       parent_item_id: parentId,
+      has_sub_items: hasSubItems,
       barcode_format: barcodeFormat,
       name,
       description: sanitizeOptionalText(input.description, 2000, { multiline: true }),
@@ -257,8 +393,8 @@ export async function createItemAction(
       category,
       asset_type: input.asset_type,
       room_code: roomCode,
-      rack_location: sanitizeOptionalText(input.rack_location, 100),
-      pic_name: sanitizeOptionalText(input.pic_name, 120),
+      rack_location: rackLocation,
+      pic_name: picName,
       photo_url: cleanPhotoPathOrUrl(input.photo_url),
       acquisition_date: acquisitionDate,
       purchase_price: purchasePrice,
@@ -266,8 +402,8 @@ export async function createItemAction(
       residual_value: residualValue,
       total_parts: totalParts,
       current_parts: currentParts,
-      unit_label: sanitizeOptionalText(input.unit_label, 40) ?? "Pcs",
-      stock_qty: stockQty,
+      unit_label: unitLabel,
+      stock_qty: initialParentStock,
       min_stock_threshold: minStockThreshold,
       condition,
       hygiene_status: hygieneStatus,
@@ -291,11 +427,74 @@ export async function createItemAction(
     };
   }
 
-  revalidateInventoryPaths(data.id);
+  let finalData = data;
+  if (hasSubItems && normalizedSubs.items.length > 0) {
+    const nowIso = new Date().toISOString();
+    const dueWib = getWibDateString(7);
+    const subPayloads = normalizedSubs.items.map((sub) => {
+      const subSteril =
+        input.asset_type === "THERAPY_TOY" && sub.hygiene_status === "STERIL";
+      return {
+        parent_item_id: data.id,
+        has_sub_items: false,
+        barcode_format: barcodeFormat,
+        name: sub.name,
+        description: sub.description,
+        category_prefix: input.category_prefix,
+        category,
+        asset_type: input.asset_type,
+        room_code: roomCode,
+        rack_location: rackLocation,
+        pic_name: picName,
+        total_parts: sub.total_parts,
+        current_parts: sub.current_parts,
+        unit_label: sub.unit_label,
+        stock_qty: sub.stock_qty,
+        min_stock_threshold: 0,
+        condition: sub.condition,
+        hygiene_status: sub.hygiene_status,
+        last_sanitized_at: subSteril ? nowIso : null,
+        next_sanitization_due: subSteril ? dueWib : null,
+        created_by: user.id,
+        updated_by: user.id,
+      };
+    });
+
+    const { error: subErr } = await supabase.from("items_master").insert(subPayloads);
+    if (subErr) {
+      await supabase
+        .from("items_master")
+        .update({ deleted_at: nowIso, deleted_by: user.id, updated_by: user.id })
+        .eq("id", data.id);
+      return {
+        ok: false,
+        error: formatInventoryDbError(
+          subErr,
+          roomCode,
+          "Gagal menyimpan daftar Sub-Item.",
+          "inventory/createSubItems",
+        ),
+      };
+    }
+
+    const { data: refreshedParent } = await supabase
+      .from("items_master")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (refreshedParent) {
+      finalData = refreshedParent;
+    }
+  }
+
+  revalidateInventoryPaths(finalData.id);
   return {
     ok: true,
-    data,
-    message: `Item ${data.item_code} berhasil ditambahkan.`,
+    data: finalData,
+    message:
+      hasSubItems && normalizedSubs.items.length > 0
+        ? `Parent Item ${finalData.item_code} beserta ${normalizedSubs.items.length} Sub-Item berhasil ditambahkan.`
+        : `Item ${finalData.item_code} berhasil ditambahkan.`,
   };
 }
 
@@ -416,12 +615,109 @@ export async function updateItemAction(
     input.parent_item_id !== undefined
       ? sanitizeOptionalText(input.parent_item_id, 64)
       : existing.parent_item_id;
+
+  const { data: existingChildren } = await supabase
+    .from("items_master")
+    .select("id, item_code, name, hygiene_status, asset_type")
+    .eq("parent_item_id", id)
+    .is("deleted_at", null);
+  const activeChildren = existingChildren ?? [];
+
   if (parentId) {
     if (!isValidUuid(parentId)) {
       return { ok: false, error: "ID item induk (parent) tidak valid." };
     }
     if (parentId === id) {
       return { ok: false, error: "Item tidak boleh menjadi induk dari dirinya sendiri." };
+    }
+    if (input.has_sub_items) {
+      return {
+        ok: false,
+        error: "Sub-Item tidak dapat ditandai sebagai Memiliki Sub-Item.",
+      };
+    }
+    if (activeChildren.length > 0) {
+      return {
+        ok: false,
+        error: "Item yang sudah memiliki Sub-Item tidak dapat dijadikan Sub-Item dari item lain.",
+      };
+    }
+    const { data: parentRow, error: parentErr } = await supabase
+      .from("items_master")
+      .select("id, parent_item_id")
+      .eq("id", parentId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (parentErr || !parentRow) {
+      return { ok: false, error: "Item induk (parent) tidak ditemukan atau sudah dihapus." };
+    }
+    if (parentRow.parent_item_id !== null) {
+      return {
+        ok: false,
+        error: "Parent Item yang dipilih merupakan Sub-Item. Sub-Item tidak dapat memiliki turunan.",
+      };
+    }
+  }
+
+  const nextHasSubItems = parentId
+    ? false
+    : input.has_sub_items !== undefined
+      ? Boolean(input.has_sub_items)
+      : existing.has_sub_items;
+
+  if (!nextHasSubItems && activeChildren.length > 0) {
+    return {
+      ok: false,
+      error: `Masih terdapat ${activeChildren.length} Sub-Item aktif pada item ini. Hapus semua Sub-Item terlebih dahulu sebelum menonaktifkan mode Sub-Item.`,
+    };
+  }
+
+  const unitLabel =
+    input.unit_label !== undefined
+      ? sanitizeOptionalText(input.unit_label, 40) ?? "Pcs"
+      : existing.unit_label;
+  const rackLocation =
+    input.rack_location !== undefined
+      ? sanitizeOptionalText(input.rack_location, 100)
+      : existing.rack_location;
+  const picName =
+    input.pic_name !== undefined
+      ? sanitizeOptionalText(input.pic_name, 120)
+      : existing.pic_name;
+
+  const hasSubItemsPayload = nextHasSubItems && !parentId && input.sub_items !== undefined;
+  const normalizedSubs = hasSubItemsPayload
+    ? normalizeSubItemInputs(input.sub_items, {
+        unitLabel,
+        hygieneStatus,
+        canApproveWriteoff: can(user.role, "writeoff.approve"),
+      })
+    : { ok: true as const, items: [] as NormalizedSubItem[] };
+
+  if (!normalizedSubs.ok) {
+    return { ok: false, error: normalizedSubs.error };
+  }
+
+  const existingChildIdSet = new Set(activeChildren.map((c) => c.id));
+  const toUpdateSubs = normalizedSubs.items.filter((s) => s.id && existingChildIdSet.has(s.id));
+  const toInsertSubs = normalizedSubs.items.filter((s) => !s.id);
+  const keptSubIdSet = new Set(toUpdateSubs.map((s) => s.id as string));
+  const removedSubIds = hasSubItemsPayload
+    ? activeChildren.filter((c) => !keptSubIdSet.has(c.id)).map((c) => c.id)
+    : [];
+
+  if (removedSubIds.length > 0) {
+    const { data: activeSubBorrows } = await supabase
+      .from("borrow_transactions")
+      .select("id")
+      .in("item_id", removedSubIds)
+      .in("status", ["DIPINJAM", "TERLAMBAT"])
+      .limit(1);
+    if (activeSubBorrows && activeSubBorrows.length > 0) {
+      return {
+        ok: false,
+        error: "Salah satu Sub-Item yang ingin dihapus sedang dipinjam dan belum dikembalikan.",
+      };
     }
   }
 
@@ -437,10 +733,17 @@ export async function updateItemAction(
     hygieneStatus === "STERIL" &&
     (existing.hygiene_status !== "STERIL" || existing.asset_type !== "THERAPY_TOY");
 
+  const nextStockQty = nextHasSubItems
+    ? existing.stock_qty
+    : input.stock_qty !== undefined
+      ? Math.max(0, toSafeInt(input.stock_qty, existing.stock_qty))
+      : existing.stock_qty;
+
   const { data, error } = await supabase
     .from("items_master")
     .update({
       parent_item_id: parentId,
+      has_sub_items: nextHasSubItems,
       barcode_format: barcodeFormat,
       name,
       description:
@@ -451,14 +754,8 @@ export async function updateItemAction(
       category,
       asset_type: assetType,
       room_code: roomCode,
-      rack_location:
-        input.rack_location !== undefined
-          ? sanitizeOptionalText(input.rack_location, 100)
-          : existing.rack_location,
-      pic_name:
-        input.pic_name !== undefined
-          ? sanitizeOptionalText(input.pic_name, 120)
-          : existing.pic_name,
+      rack_location: rackLocation,
+      pic_name: picName,
       photo_url:
         input.photo_url !== undefined
           ? cleanPhotoPathOrUrl(input.photo_url)
@@ -475,14 +772,8 @@ export async function updateItemAction(
           : existing.residual_value,
       total_parts: totalParts,
       current_parts: currentParts,
-      unit_label:
-        input.unit_label !== undefined
-          ? sanitizeOptionalText(input.unit_label, 40) ?? "Pcs"
-          : existing.unit_label,
-      stock_qty:
-        input.stock_qty !== undefined
-          ? Math.max(0, toSafeInt(input.stock_qty, existing.stock_qty))
-          : existing.stock_qty,
+      unit_label: unitLabel,
+      stock_qty: nextStockQty,
       min_stock_threshold:
         input.min_stock_threshold !== undefined
           ? Math.max(0, toSafeInt(input.min_stock_threshold, existing.min_stock_threshold))
@@ -514,11 +805,145 @@ export async function updateItemAction(
     };
   }
 
-  revalidateInventoryPaths(data.id);
+  let finalData = data;
+  if (hasSubItemsPayload) {
+    const nowIso = new Date().toISOString();
+    const dueWib = getWibDateString(7);
+    const existingChildById = new Map(activeChildren.map((c) => [c.id, c]));
+
+    for (const sub of toUpdateSubs) {
+      const subId = sub.id as string;
+      const prevChild = existingChildById.get(subId);
+      const subSwitchingToSteril =
+        assetType === "THERAPY_TOY" &&
+        sub.hygiene_status === "STERIL" &&
+        (prevChild?.hygiene_status !== "STERIL" || prevChild?.asset_type !== "THERAPY_TOY");
+
+      const { error: subUpdErr } = await supabase
+        .from("items_master")
+        .update({
+          name: sub.name,
+          unit_label: sub.unit_label,
+          stock_qty: sub.stock_qty,
+          total_parts: sub.total_parts,
+          current_parts: sub.current_parts,
+          condition: sub.condition,
+          hygiene_status: sub.hygiene_status,
+          description: sub.description,
+          category_prefix: categoryPrefix,
+          category,
+          asset_type: assetType,
+          room_code: roomCode,
+          rack_location: rackLocation,
+          barcode_format: barcodeFormat,
+          ...(subSwitchingToSteril
+            ? {
+                last_sanitized_at: nowIso,
+                next_sanitization_due: dueWib,
+              }
+            : {}),
+          updated_by: user.id,
+        })
+        .eq("id", subId)
+        .eq("parent_item_id", id)
+        .is("deleted_at", null);
+
+      if (subUpdErr) {
+        return {
+          ok: false,
+          error: formatInventoryDbError(
+            subUpdErr,
+            roomCode,
+            `Gagal memperbarui Sub-Item "${sub.name}".`,
+            "inventory/updateSubItem",
+          ),
+        };
+      }
+    }
+
+    if (toInsertSubs.length > 0) {
+      const insertPayloads = toInsertSubs.map((sub) => {
+        const subSteril =
+          assetType === "THERAPY_TOY" && sub.hygiene_status === "STERIL";
+        return {
+          parent_item_id: id,
+          has_sub_items: false,
+          barcode_format: barcodeFormat,
+          name: sub.name,
+          description: sub.description,
+          category_prefix: categoryPrefix,
+          category,
+          asset_type: assetType,
+          room_code: roomCode,
+          rack_location: rackLocation,
+          pic_name: picName,
+          total_parts: sub.total_parts,
+          current_parts: sub.current_parts,
+          unit_label: sub.unit_label,
+          stock_qty: sub.stock_qty,
+          min_stock_threshold: 0,
+          condition: sub.condition,
+          hygiene_status: sub.hygiene_status,
+          last_sanitized_at: subSteril ? nowIso : null,
+          next_sanitization_due: subSteril ? dueWib : null,
+          created_by: user.id,
+          updated_by: user.id,
+        };
+      });
+
+      const { error: subInsErr } = await supabase.from("items_master").insert(insertPayloads);
+      if (subInsErr) {
+        return {
+          ok: false,
+          error: formatInventoryDbError(
+            subInsErr,
+            roomCode,
+            "Gagal menambahkan Sub-Item baru.",
+            "inventory/insertSubItems",
+          ),
+        };
+      }
+    }
+
+    if (removedSubIds.length > 0) {
+      const { error: subDelErr } = await supabase
+        .from("items_master")
+        .update({
+          deleted_at: nowIso,
+          deleted_by: user.id,
+          updated_by: user.id,
+        })
+        .in("id", removedSubIds)
+        .eq("parent_item_id", id)
+        .is("deleted_at", null);
+
+      if (subDelErr) {
+        return {
+          ok: false,
+          error: sanitizeSafeError(
+            subDelErr,
+            "Gagal menghapus Sub-Item yang dilepas.",
+            "inventory/deleteSubItems",
+          ),
+        };
+      }
+    }
+
+    const { data: refreshedParent } = await supabase
+      .from("items_master")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (refreshedParent) {
+      finalData = refreshedParent;
+    }
+  }
+
+  revalidateInventoryPaths(finalData.id);
   return {
     ok: true,
-    data,
-    message: `Item ${data.item_code} berhasil diperbarui.`,
+    data: finalData,
+    message: `Item ${finalData.item_code} berhasil diperbarui.`,
   };
 }
 
@@ -532,24 +957,59 @@ export async function softDeleteItemAction(
 
   const supabase = await createClient();
 
+  const { data: childRows } = await supabase
+    .from("items_master")
+    .select("id")
+    .eq("parent_item_id", id)
+    .is("deleted_at", null);
+  const childIds = (childRows ?? []).map((c) => c.id);
+  const allTargetIds = [id, ...childIds];
+
   const { data: activeBorrows } = await supabase
     .from("borrow_transactions")
     .select("id")
-    .eq("item_id", id)
+    .in("item_id", allTargetIds)
     .in("status", ["DIPINJAM", "TERLAMBAT"])
     .limit(1);
 
   if (activeBorrows && activeBorrows.length > 0) {
     return {
       ok: false,
-      error: "Item sedang dipinjam dan tidak dapat dihapus sebelum dikembalikan.",
+      error:
+        childIds.length > 0
+          ? "Item induk atau salah satu Sub-Item-nya sedang dipinjam dan tidak dapat dihapus sebelum dikembalikan."
+          : "Item sedang dipinjam dan tidak dapat dihapus sebelum dikembalikan.",
     };
+  }
+
+  const nowIso = new Date().toISOString();
+  if (childIds.length > 0) {
+    const { error: childDeleteErr } = await supabase
+      .from("items_master")
+      .update({
+        deleted_at: nowIso,
+        deleted_by: user.id,
+        updated_by: user.id,
+      })
+      .in("id", childIds)
+      .is("deleted_at", null);
+
+    if (childDeleteErr) {
+      return {
+        ok: false,
+        error: sanitizeSafeError(
+          childDeleteErr,
+          "Gagal menghapus Sub-Item terkait.",
+          "inventory/softDeleteChildren",
+        ),
+      };
+    }
   }
 
   const { data, error } = await supabase
     .from("items_master")
     .update({
-      deleted_at: new Date().toISOString(),
+      deleted_at: nowIso,
       deleted_by: user.id,
       updated_by: user.id,
     })
@@ -573,7 +1033,10 @@ export async function softDeleteItemAction(
   return {
     ok: true,
     data,
-    message: `Item ${data.item_code} dipindahkan ke Recycle Bin (dapat dipulihkan dalam 30 hari).`,
+    message:
+      childIds.length > 0
+        ? `Item ${data.item_code} beserta ${childIds.length} Sub-Item dipindahkan ke Recycle Bin (dapat dipulihkan dalam 30 hari).`
+        : `Item ${data.item_code} dipindahkan ke Recycle Bin (dapat dipulihkan dalam 30 hari).`,
   };
 }
 

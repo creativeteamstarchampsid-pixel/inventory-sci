@@ -136,6 +136,7 @@ import {
 } from "@/lib/barcode";
 import { ASSET_TYPE_LABELS, BARCODE_FORMAT_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import type { BarcodeStudioItemRecord } from "./queries";
 
 import "./print.css";
 
@@ -299,7 +300,7 @@ type TypeFilter =
 export type BarcodeStudioClientProps = {
   schemaReady: boolean;
   schemaError?: string;
-  items: PrintableLabelRecord[];
+  items: BarcodeStudioItemRecord[];
   archives: PrintableLabelRecord[];
   initialSelectedKeys?: string[];
   initialSourceTab?: SourceTab;
@@ -563,6 +564,12 @@ export function BarcodeStudioClient({
   const [locationFilter, setLocationFilter] = React.useState<string>("ALL");
   const [categoryFilter, setCategoryFilter] = React.useState<string>("ALL");
   const [typeFilter, setTypeFilter] = React.useState<TypeFilter>("ALL");
+  const [hideSubItems, setHideSubItems] = React.useState(true);
+
+  const subItemTotalCount = React.useMemo(
+    () => items.filter((rec) => Boolean(rec.parentItemId)).length,
+    [items],
+  );
 
   // Configuration panel active tab
   const [configTab, setConfigTab] = React.useState<ConfigTab>("layout");
@@ -754,6 +761,13 @@ export function BarcodeStudioClient({
   const filteredRecords = React.useMemo(() => {
     const q = deferredSearchQuery.trim().toLowerCase();
     return allRecords.filter((rec) => {
+      if (
+        hideSubItems &&
+        rec.source === "INVENTORY" &&
+        Boolean((rec as BarcodeStudioItemRecord).parentItemId)
+      ) {
+        return false;
+      }
       if (sourceTab !== "ALL" && rec.source !== sourceTab) return false;
       if (locationFilter !== "ALL" && rec.locationCode !== locationFilter) {
         return false;
@@ -796,6 +810,7 @@ export function BarcodeStudioClient({
     });
   }, [
     allRecords,
+    hideSubItems,
     sourceTab,
     locationFilter,
     categoryFilter,
@@ -1804,6 +1819,33 @@ export function BarcodeStudioClient({
                 )}
               </div>
 
+              {sourceTab !== "ARCHIVE" && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/80 bg-[#EDE9FE]/55 px-3 py-2 dark:border-stone-600 dark:bg-violet-950/25">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Layers className="size-4 shrink-0 text-[#4C1D95] dark:text-violet-300" />
+                    <div className="min-w-0">
+                      <Label
+                        htmlFor="toggle-hide-sub-items"
+                        className="cursor-pointer text-xs font-extrabold text-[#2C2623] dark:text-stone-100"
+                      >
+                        Hanya Barcode Utama (Parent &amp; Simple)
+                      </Label>
+                      <p className="text-[11px] text-[#574E49] dark:text-stone-300">
+                        {hideSubItems
+                          ? `${subItemTotalCount} Sub-Item disembunyikan agar cukup cetak 1 stiker Parent.`
+                          : `Menampilkan seluruh ${subItemTotalCount} Sub-Item varian di daftar.`}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    id="toggle-hide-sub-items"
+                    checked={hideSubItems}
+                    onCheckedChange={setHideSubItems}
+                    className="shrink-0 border border-[#2C2623]/60 data-[state=checked]:bg-[#2AB673] dark:border-stone-500"
+                  />
+                </div>
+              )}
+
               {/* Records Table */}
               <div className="max-h-[560px] min-w-0 overflow-x-auto overflow-y-auto rounded-2xl border-2 border-[#2C2623] bg-white dark:border-stone-500 dark:bg-stone-950/40">
                 <Table>
@@ -1869,6 +1911,12 @@ export function BarcodeStudioClient({
                       filteredRecords.map((rec) => {
                         const qty = selectedQuantities[rec.key];
                         const isSelected = Boolean(qty);
+                        const itemMeta = rec as BarcodeStudioItemRecord;
+                        const isParentCard =
+                          rec.source === "INVENTORY" &&
+                          (Boolean(itemMeta.hasSubItems) || (itemMeta.subItemCount ?? 0) > 0);
+                        const isSubCard =
+                          rec.source === "INVENTORY" && Boolean(itemMeta.parentItemId);
                         return (
                           <TableRow
                             key={rec.key}
@@ -1915,6 +1963,22 @@ export function BarcodeStudioClient({
                                     ? "Arsip"
                                     : "Inventaris"}
                                 </Badge>
+                                {isParentCard && (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border border-[#2C2623] bg-[#EDE9FE] px-1.5 py-0 text-[10px] font-extrabold text-[#4C1D95] dark:border-stone-400 dark:bg-violet-950/70 dark:text-violet-200"
+                                  >
+                                    Parent • {itemMeta.subItemCount ?? 0} Varian
+                                  </Badge>
+                                )}
+                                {isSubCard && (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full border border-[#2C2623]/60 bg-[#FEF3C7] px-1.5 py-0 text-[10px] font-bold text-[#78350F] dark:border-stone-500 dark:bg-amber-950/60 dark:text-amber-200"
+                                  >
+                                    Sub-Item{itemMeta.parentCode ? ` · ${itemMeta.parentCode}` : ""}
+                                  </Badge>
+                                )}
                                 <Badge
                                   variant="outline"
                                   className="rounded-full border border-[#2C2623]/60 bg-white px-1.5 py-0 text-[10px] font-semibold dark:border-stone-500 dark:bg-stone-900"

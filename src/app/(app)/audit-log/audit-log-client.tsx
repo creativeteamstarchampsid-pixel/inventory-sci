@@ -82,6 +82,7 @@ type AuditLogClientProps = {
 
 const ACTION_OPTIONS = [
   "ALL",
+  "STOCK_OPNAME",
   "INSERT",
   "UPDATE",
   "SOFT_DELETE",

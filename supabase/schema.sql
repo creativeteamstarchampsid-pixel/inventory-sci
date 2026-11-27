@@ -545,6 +545,7 @@ create table if not exists public.items_master (
   id uuid primary key default gen_random_uuid(),
   item_code text not null unique,
   parent_item_id uuid references public.items_master(id) on delete set null,
+  has_sub_items boolean not null default false,
   barcode_format public.barcode_format not null default 'CODE128',
   name text not null,
   description text,
@@ -578,6 +579,7 @@ create table if not exists public.items_master (
 );
 
 create index if not exists idx_items_master_code on public.items_master (item_code);
+create index if not exists idx_items_master_parent_id on public.items_master (parent_item_id);
 create index if not exists idx_items_master_room_type on public.items_master (room_code, asset_type) where deleted_at is null;
 create index if not exists idx_items_master_condition on public.items_master (condition, hygiene_status) where deleted_at is null;
 create index if not exists idx_items_master_deleted on public.items_master (deleted_at) where deleted_at is not null;
@@ -3572,3 +3574,10 @@ from (
     )
 ) as v(name, description, is_default, config_json)
 where not exists (select 1 from public.barcode_label_presets);
+
+-- -----------------------------------------------------------------------------
+-- 14. HIERARCHY TRIGGERS, BARCODE ALIASES & DEDICATED STOCK OPNAME (2026-11-27)
+-- -----------------------------------------------------------------------------
+-- See supabase/migrations/20261127_inventory_hierarchy_and_opname.sql for full DDL
+-- of item_barcode_aliases, stock_opname_sessions, stock_opname_items,
+-- validate_item_hierarchy(), recalculate_parent_item_stock(), and submit_stock_opname_batch().

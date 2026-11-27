@@ -212,6 +212,78 @@ export function countAssignedSlots(json: Json): number {
   return Array.isArray(json) ? json.length : 0;
 }
 
+export function getItemHierarchyLabel(
+  item: Pick<ItemMaster, "has_sub_items" | "parent_item_id">,
+  parentCodeMap: Map<string, string>,
+): string {
+  if (item.has_sub_items) return "Parent Item";
+  if (item.parent_item_id) {
+    const parentCode = parentCodeMap.get(item.parent_item_id);
+    return parentCode ? `Sub-Item of ${parentCode}` : "Sub-Item";
+  }
+  return "Simple Item";
+}
+
+export function getInventoryHierarchySummary(items: ItemMaster[]) {
+  const parentCodeMap = new Map<string, string>();
+  const childrenByParentId = new Map<string, ItemMaster[]>();
+
+  for (const item of items) {
+    parentCodeMap.set(item.id, item.item_code);
+    if (item.parent_item_id) {
+      const list = childrenByParentId.get(item.parent_item_id) ?? [];
+      list.push(item);
+      childrenByParentId.set(item.parent_item_id, list);
+    }
+  }
+
+  const isParent = (item: ItemMaster) =>
+    item.has_sub_items || (childrenByParentId.get(item.id)?.length ?? 0) > 0;
+
+  const topLevelItems = items.filter((item) => item.parent_item_id === null);
+  const leafItems = items.filter((item) => !isParent(item));
+
+  const totalStockUnits = leafItems
+    .filter((item) => item.condition !== "DIHAPUSBUKU")
+    .reduce((sum, item) => sum + (Number(item.stock_qty) || 0), 0);
+
+  // Avoid double-counting valuation if both a Parent and its Sub-Items carry purchase_price.
+  const isValuationCounted = (item: ItemMaster) => {
+    if (!isParent(item)) return true;
+    const children = childrenByParentId.get(item.id) ?? [];
+    return !children.some((c) => (Number(c.purchase_price) || 0) > 0);
+  };
+
+  const valuationItems = items.filter(isValuationCounted);
+  const totalPurchase = valuationItems.reduce(
+    (sum, item) => sum + (Number(item.purchase_price) || 0),
+    0,
+  );
+  const totalBookValue = valuationItems.reduce(
+    (sum, item) =>
+      sum +
+      calculateBookValue(
+        item.purchase_price,
+        item.acquisition_date,
+        item.useful_life_months,
+        item.residual_value,
+      ),
+    0,
+  );
+
+  return {
+    parentCodeMap,
+    childrenByParentId,
+    topLevelItems,
+    leafItems,
+    totalStockUnits,
+    totalPurchase,
+    totalBookValue,
+    isParent,
+    isValuationCounted,
+  };
+}
+
 export function getStockAnomalies(
   items: ItemMaster[],
   todayWib: string,
@@ -228,14 +300,20 @@ export function getStockAnomalies(
   const damaged: ItemMaster[] = [];
   const rows: ExportAnomalyItem[] = [];
 
+  const { childrenByParentId, isParent } = getInventoryHierarchySummary(items);
+
   for (const item of items) {
+    const parentRow = isParent(item);
+    const children = childrenByParentId.get(item.id) ?? [];
+
     const reasons: string[] = [];
     const tags: ExportAnomalyItem["tags"] = [];
     const details: string[] = [];
 
     const isPartKurang =
-      item.condition === "PART_KURANG" ||
-      (item.total_parts > 1 && item.current_parts < item.total_parts);
+      !parentRow &&
+      (item.condition === "PART_KURANG" ||
+        (item.total_parts > 1 && item.current_parts < item.total_parts));
     if (isPartKurang) {
       partKurang.push(item);
       tags.push("PART_KURANG");
@@ -243,10 +321,12 @@ export function getStockAnomalies(
       details.push(`Kepingan ${item.current_parts}/${item.total_parts}`);
     }
 
+    const childHasThreshold = children.some((c) => c.min_stock_threshold > 0);
     const isLowStock =
+      (!parentRow || !childHasThreshold) &&
       item.asset_type === "CONSUMABLE" &&
       item.min_stock_threshold > 0 &&
-      item.stock_qty <= item.min_stock_threshold;
+      item.stock_qty < item.min_stock_threshold;
     if (isLowStock) {
       lowStock.push(item);
       tags.push("STOK_RENDAH");
@@ -257,6 +337,7 @@ export function getStockAnomalies(
     }
 
     const isSanitationOverdue =
+      !parentRow &&
       item.asset_type === "THERAPY_TOY" &&
       (item.hygiene_status !== "STERIL" ||
         (item.next_sanitization_due !== null &&
@@ -275,9 +356,10 @@ export function getStockAnomalies(
     }
 
     const isDamaged =
-      item.condition === "RUSAK_RINGAN" ||
-      item.condition === "RUSAK_BERAT" ||
-      item.condition === "DALAM_PERBAIKAN";
+      !parentRow &&
+      (item.condition === "RUSAK_RINGAN" ||
+        item.condition === "RUSAK_BERAT" ||
+        item.condition === "DALAM_PERBAIKAN");
     if (isDamaged) {
       damaged.push(item);
       tags.push("RUSAK");
@@ -510,6 +592,7 @@ function getInventoryCsvFields(canViewValuation: boolean): string[] {
   return [
     "Kode_Item",
     "Nama_Barang",
+    "Hierarki",
     "Tipe_Aset",
     "Prefix_Kategori",
     "Kategori",
@@ -615,10 +698,16 @@ function mapInventoryRows(
   canViewValuation: boolean,
   locationLabels?: Record<string, string>,
 ) {
+  const parentCodeMap = new Map<string, string>();
+  for (const item of items) {
+    parentCodeMap.set(item.id, item.item_code);
+  }
+
   return items.map((item) => {
     const base: Record<string, string | number> = {
       Kode_Item: item.item_code,
       Nama_Barang: item.name,
+      Hierarki: getItemHierarchyLabel(item, parentCodeMap),
       Tipe_Aset: ASSET_TYPE_LABELS[item.asset_type] ?? item.asset_type ?? "-",
       Prefix_Kategori: item.category_prefix,
       Kategori: item.category,
@@ -856,13 +945,17 @@ export function generateCsvString(
       ? "Sistem"
       : (ROLE_LABELS[dataset.actorRole]?.title ?? dataset.actorRole ?? "Sistem");
 
+  const hierarchySummary = getInventoryHierarchySummary(dataset.items);
+
   const summaryHeader: Record<string, string | number> = {
     Organisasi: "Star Champs Indonesia",
     Aplikasi: "StarOps",
     Periode: `${dataset.periodLabel} (${dataset.periodCode})`,
     Dicetak_Pada_WIB: dataset.generatedAtWib,
     Oleh: `${dataset.actorName} (${actorRoleLabel})`,
-    Total_Inventaris: dataset.items.length,
+    Total_Inventaris_Utama: hierarchySummary.topLevelItems.length,
+    Total_Baris_Inventaris: dataset.items.length,
+    Total_Stok_Unit: hierarchySummary.totalStockUnits,
     Total_Arsip: dataset.archives.length,
   };
 

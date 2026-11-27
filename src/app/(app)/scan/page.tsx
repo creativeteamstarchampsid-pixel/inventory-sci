@@ -15,27 +15,25 @@ function sanitizeLookupValuation(
   canViewValuation: boolean,
 ): ScanLookupResult | null {
   if (!lookup || canViewValuation) return lookup;
+  const zeroOut = <T extends { purchase_price: number; residual_value: number; useful_life_months: number | null; acquisition_date: string | null }>(it: T): T => ({
+    ...it,
+    purchase_price: 0,
+    residual_value: 0,
+    useful_life_months: null,
+    acquisition_date: null,
+  });
+
   if (lookup.kind === "item") {
     return {
       ...lookup,
-      item: {
-        ...lookup.item,
-        purchase_price: 0,
-        residual_value: 0,
-        useful_life_months: null,
-        acquisition_date: null,
-      },
+      item: zeroOut(lookup.item),
+      parentItem: lookup.parentItem ? zeroOut(lookup.parentItem) : null,
+      subItems: lookup.subItems.map(zeroOut),
     };
   }
   return {
     ...lookup,
-    bundledItems: lookup.bundledItems.map((it) => ({
-      ...it,
-      purchase_price: 0,
-      residual_value: 0,
-      useful_life_months: null,
-      acquisition_date: null,
-    })),
+    bundledItems: lookup.bundledItems.map(zeroOut),
   };
 }
 

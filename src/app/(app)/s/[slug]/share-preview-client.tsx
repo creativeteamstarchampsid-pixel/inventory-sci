@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ArrowLeftRight,
   Check,
+  ClipboardCheck,
   Coins,
   Copy,
   Download,
@@ -28,6 +29,7 @@ import {
 } from "lucide-react";
 
 import { KawaiiPageHeader } from "@/components/cartoon/kawaii-decor";
+import { QrSubItemStockPanel } from "@/components/inventory/qr-subitem-stock-panel";
 import {
   SharePreviewDialog,
   type ShareDialogTarget,
@@ -76,8 +78,10 @@ type SharePreviewClientProps =
       canCustomize: boolean;
       item: ItemMaster;
       roomLabel: string;
-      parentItem: Pick<ItemMaster, "id" | "item_code" | "name"> | null;
+      parentItem: ItemMaster | null;
+      subItems: ItemMaster[];
       childCount: number;
+      canUpdateStock: boolean;
       activeBorrow: {
         transactionCode: string;
         borrowerName: string;
@@ -304,13 +308,23 @@ export function SharePreviewClient(props: SharePreviewClientProps) {
       item,
       roomLabel,
       parentItem,
+      subItems,
       childCount,
+      canUpdateStock,
       activeBorrow,
       signedPhotoUrl,
       canViewValuation,
       bookValue,
       todayWib,
     } = props;
+
+    const isParentItem = item.has_sub_items || (!parentItem && subItems.length > 0);
+    const isLowStock =
+      !isParentItem &&
+      item.asset_type === "CONSUMABLE" &&
+      item.min_stock_threshold > 0 &&
+      item.stock_qty < item.min_stock_threshold;
+    const opnameTargetCode = parentItem?.item_code ?? item.item_code;
 
     const headerAccent =
       item.asset_type === "THERAPY_TOY"
@@ -366,6 +380,18 @@ export function SharePreviewClient(props: SharePreviewClientProps) {
                   Pinjam / Kembalikan
                 </Link>
               </Button>
+              {canUpdateStock && (
+                <Button
+                  asChild
+                  variant="outline"
+                  className="rounded-2xl border-2 border-[#2C2623] bg-[#DDD6FE] font-extrabold text-[#2C2623] shadow-[3px_3px_0px_0px_#2C2623] hover:bg-[#C4B5FD] dark:border-stone-500 dark:bg-violet-950/70 dark:text-violet-100"
+                >
+                  <Link href={`/stock-opname?code=${encodeURIComponent(opnameTargetCode)}`}>
+                    <ClipboardCheck className="size-4" />
+                    Stock Opname
+                  </Link>
+                </Button>
+              )}
               <Button
                 asChild
                 variant="outline"
@@ -493,24 +519,35 @@ export function SharePreviewClient(props: SharePreviewClientProps) {
               </div>
 
               <div className="rounded-2xl border border-[#2C2623]/20 bg-white p-3.5 dark:border-stone-700 dark:bg-stone-800/70">
-                {item.asset_type === "CONSUMABLE" ? (
+                {item.asset_type === "CONSUMABLE" || isParentItem ? (
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="text-muted-foreground text-[11px] font-semibold">
-                        Stok Habis Pakai Saat Ini
+                        {isParentItem
+                          ? `Total Stok Parent (Akumulasi ${subItems.length} Sub-Item)`
+                          : "Stok Habis Pakai Saat Ini"}
                       </p>
                       <p className="text-lg font-black text-[#2C2623] dark:text-stone-100">
                         {item.stock_qty} {item.unit_label}
                       </p>
                     </div>
-                    <Badge variant="outline" className="rounded-full font-bold">
-                      Min. Stok: {item.min_stock_threshold} {item.unit_label}
-                    </Badge>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {isLowStock && (
+                        <Badge className="rounded-full border-[1.5px] border-[#2C2623] bg-[#FECDD3] font-extrabold text-[#881337]">
+                          Low-Stock
+                        </Badge>
+                      )}
+                      {item.asset_type === "CONSUMABLE" && (
+                        <Badge variant="outline" className="rounded-full font-bold">
+                          Min. Stok: {item.min_stock_threshold} {item.unit_label}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-1.5">
                     <p className="text-muted-foreground text-[11px] font-semibold">
-                      Kelengkapan Kepingan / Komponen
+                      Kelengkapan Kepingan / Komponen &amp; Stok ({item.stock_qty} {item.unit_label})
                     </p>
                     <PartProgressIndicator
                       currentParts={item.current_parts}
@@ -545,6 +582,16 @@ export function SharePreviewClient(props: SharePreviewClientProps) {
             </CardContent>
           </Card>
         </div>
+
+        {/* Rincian Sub-Item & Update Stok Cepat langsung di halaman QR */}
+        <QrSubItemStockPanel
+          item={item}
+          parentItem={parentItem}
+          subItems={subItems}
+          canUpdateStock={canUpdateStock}
+          todayWib={todayWib}
+          variant="full"
+        />
 
         <SharePreviewDialog
           open={shareOpen}

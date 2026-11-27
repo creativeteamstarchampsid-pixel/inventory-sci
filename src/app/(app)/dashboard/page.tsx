@@ -69,7 +69,13 @@ type DashboardReconciliationSummary = Pick<
 
 type DashboardItemRow = Pick<
   ItemMaster,
-  "asset_type" | "condition" | "hygiene_status" | "stock_qty" | "min_stock_threshold"
+  | "parent_item_id"
+  | "has_sub_items"
+  | "asset_type"
+  | "condition"
+  | "hygiene_status"
+  | "stock_qty"
+  | "min_stock_threshold"
 > & {
   id?: string;
   item_code?: string;
@@ -156,6 +162,7 @@ const ROLE_QUICK_TIPS: Record<
       "Sebagai Owner, Anda memegang kendali penuh operasional serta wewenang pengesahan akhir untuk pembelian beranggaran, penghapusan aset, penguncian laporan bulanan, pemulihan database, kapasitas penyimpanan & egress, serta manajemen seluruh tim dan ruangan.",
     actions: [
       { label: "Pengesahan Menunggu Owner", href: "/requests" },
+      { label: "Stock Opname Terpadu", href: "/stock-opname" },
       { label: "Ruangan & Lemari Arsip", href: "/rooms" },
       { label: "Laporan & Penguncian Bulanan", href: "/backup" },
       { label: "Brankas Akun Digital", href: "/vault" },
@@ -173,9 +180,10 @@ const ROLE_QUICK_TIPS: Record<
     bubbleMascot: "dino",
     cheerLabel: "Siap Kelola Operasional! ♪",
     summary:
-      "Sebagai Admin Operasional, Anda mengelola daftar barang & alat terapi, nama ruangan & lemari arsip, kapasitas penyimpanan & egress, mencetak stiker barcode, mencatat pengiriman paket, Brankas Akun Digital, serta akun Terapis & Kepala Terapis.",
+      "Sebagai Admin Operasional, Anda mengelola daftar barang & alat terapi, Stock Opname varian, nama ruangan & lemari arsip, kapasitas penyimpanan & egress, mencetak stiker barcode, mencatat pengiriman paket, Brankas Akun Digital, serta akun Terapis & Kepala Terapis.",
     actions: [
       { label: "Kelola Barang & Alat", href: "/inventory" },
+      { label: "Stock Opname Terpadu", href: "/stock-opname" },
       { label: "Ruangan & Lemari Arsip", href: "/rooms" },
       { label: "Cetak Stiker Barcode", href: "/barcode-studio" },
       { label: "Paket & Pengiriman", href: "/deliveries" },
@@ -193,10 +201,11 @@ const ROLE_QUICK_TIPS: Record<
     bubbleMascot: "dino",
     cheerLabel: "Semangat Koordinasi Tim! 🌟",
     summary:
-      "Sebagai Kepala Terapis, Anda mendampingi tim terapis: meninjau pengajuan tahap pertama, memantau kondisi & kebersihan alat, melakukan stock opname ruangan, serta mengekspor laporan operasional.",
+      "Sebagai Kepala Terapis, Anda mendampingi tim terapis: meninjau pengajuan tahap pertama, memantau kondisi & kebersihan alat, melakukan Stock Opname ruangan & varian, serta mengekspor laporan operasional.",
     actions: [
       { label: "Setujui Pengajuan Tim", href: "/requests" },
-      { label: "Scan & Opname Ruangan", href: "/scan" },
+      { label: "Stock Opname Terpadu", href: "/stock-opname" },
+      { label: "Pinjam & Kembali Alat", href: "/scan" },
       { label: "Cek Ruangan & Ekspor", href: "/backup" },
       { label: "Lemari Arsip & SOP", href: "/archives" },
     ],
@@ -239,10 +248,17 @@ function getQuickShortcutTiles(role: Role): QuickShortcutTile[] {
   const tiles: QuickShortcutTile[] = [
     {
       href: "/scan",
-      label: isTeamLeader ? "Scan & Opname" : "Pinjam & Kembali",
+      label: "Pinjam & Kembali",
       hint: "Scan barcode cepat",
       mascot: "scan",
       tileBg: "bg-[#D1FAE5] dark:bg-emerald-950/55",
+    },
+    {
+      href: "/stock-opname",
+      label: "Stock Opname",
+      hint: "Cek fisik & varian",
+      mascot: "clipboard",
+      tileBg: "bg-[#FEF3C7] dark:bg-amber-950/55",
     },
     {
       href: "/inventory",
@@ -347,7 +363,7 @@ async function loadDashboardMetrics(
     ? supabase
         .from("items_master")
         .select(
-          "id, item_code, name, asset_type, condition, hygiene_status, stock_qty, min_stock_threshold",
+          "id, item_code, name, parent_item_id, has_sub_items, asset_type, condition, hygiene_status, stock_qty, min_stock_threshold",
           { count: "exact" },
         )
         .is("deleted_at", null)
@@ -358,9 +374,12 @@ async function loadDashboardMetrics(
         }))
     : supabase
         .from("items_master")
-        .select("asset_type, condition, hygiene_status, stock_qty, min_stock_threshold", {
-          count: "exact",
-        })
+        .select(
+          "parent_item_id, has_sub_items, asset_type, condition, hygiene_status, stock_qty, min_stock_threshold",
+          {
+            count: "exact",
+          },
+        )
         .is("deleted_at", null)
         .then((res) => ({
           data: (res.data ?? []) as DashboardItemRow[],
@@ -495,12 +514,15 @@ async function loadDashboardMetrics(
   }
 
   const items = itemsRes.data;
+  const topLevelItems = items.filter((item) => item.parent_item_id === null);
+  const leafItems = items.filter((item) => !item.has_sub_items);
+
   let partKurangCount = 0;
   let damagedCount = 0;
   let needsSanitationCount = 0;
   let lowStockCount = 0;
 
-  for (const item of items) {
+  for (const item of leafItems) {
     if (item.condition === "PART_KURANG") {
       partKurangCount += 1;
       damagedCount += 1;
@@ -513,7 +535,7 @@ async function loadDashboardMetrics(
     if (
       item.asset_type === "CONSUMABLE" &&
       item.min_stock_threshold > 0 &&
-      item.stock_qty <= item.min_stock_threshold
+      item.stock_qty < item.min_stock_threshold
     ) {
       lowStockCount += 1;
     }
@@ -590,7 +612,7 @@ async function loadDashboardMetrics(
 
   return {
     schemaReady: true,
-    totalItems: itemsRes.count ?? items.length,
+    totalItems: topLevelItems.length,
     partKurangCount,
     damagedCount,
     needsSanitationCount,
@@ -1252,10 +1274,14 @@ export default async function DashboardPage() {
                 </span>
                 <p className="text-[#2C2623] dark:text-stone-100">
                   <strong>Stock Opname &amp; Pengembalian:</strong> Gunakan{" "}
-                  <Link href="/scan" className="font-extrabold underline underline-offset-2">
-                    Pinjam, Kembali &amp; Opname
+                  <Link href="/stock-opname" className="font-extrabold underline underline-offset-2">
+                    Stock Opname Terpadu
                   </Link>{" "}
-                  untuk memvalidasi kelengkapan kepingan &amp; kebersihan ruangan.
+                  untuk audit fisik varian &amp;{" "}
+                  <Link href="/scan" className="font-extrabold underline underline-offset-2">
+                    Pinjam / Kembali
+                  </Link>{" "}
+                  untuk peminjaman harian.
                 </p>
               </div>
               <div className="flex items-start gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#E0F2FE]/75 p-3 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-sky-950/35">

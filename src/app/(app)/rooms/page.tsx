@@ -26,6 +26,7 @@ export default async function RoomsPage() {
         .from("items_master")
         .select("room_code")
         .is("deleted_at", null)
+        .is("parent_item_id", null)
         .limit(10000),
       supabase
         .from("item_kits")

@@ -5,8 +5,13 @@ import { requireRouteAccess } from "@/lib/auth";
 import type { BorrowHistoryEntry } from "@/lib/actions/scan";
 import { can } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import type { ItemMaster } from "@/types/database";
+import type { ItemBarcodeAlias, ItemMaster } from "@/types/database";
 import { ItemDetailClient } from "./item-detail-client";
+
+export type DetailBarcodeAlias = Pick<
+  ItemBarcodeAlias,
+  "id" | "alias_code" | "legacy_name" | "alias_reason" | "notes"
+>;
 
 export const metadata: Metadata = {
   title: "Detail Item Inventaris",
@@ -46,7 +51,7 @@ export default async function InventoryDetailPage({
     notFound();
   }
 
-  const [parentRes, childrenRes, allItemsRes, borrowsRes] = await Promise.all([
+  const [parentRes, childrenRes, allItemsRes, borrowsRes, aliasesRes] = await Promise.all([
     item.parent_item_id
       ? supabase
           .from("items_master")
@@ -74,7 +79,15 @@ export default async function InventoryDetailPage({
       .eq("item_id", item.id)
       .order("borrowed_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("item_barcode_aliases")
+      .select("id, alias_code, legacy_name, alias_reason, notes")
+      .eq("target_item_id", item.id)
+      .order("alias_code", { ascending: true }),
   ]);
+
+  const barcodeAliases: DetailBarcodeAlias[] =
+    !aliasesRes.error && Array.isArray(aliasesRes.data) ? aliasesRes.data : [];
 
   const borrows = borrowsRes.data ?? [];
   const profileIds = Array.from(
@@ -129,6 +142,7 @@ export default async function InventoryDetailPage({
         sanitizeValuation(entry, canViewValuation),
       )}
       borrowHistory={borrowHistory}
+      barcodeAliases={barcodeAliases}
       signedPhotoUrl={signedPhotoUrl}
       todayWib={todayWib}
     />

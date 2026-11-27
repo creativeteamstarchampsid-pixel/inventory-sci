@@ -15,8 +15,10 @@ import {
 } from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
 import type {
+  BarcodeAliasReason,
   BorrowTransaction,
   HygieneStatus,
+  ItemBarcodeAlias,
   ItemCondition,
   ItemKit,
   ItemMaster,
@@ -29,10 +31,19 @@ export type BorrowHistoryEntry = BorrowTransaction & {
   returned_by_name: string | null;
 };
 
+export type ScanResolvedAlias = {
+  aliasCode: string;
+  legacyName: string | null;
+  aliasReason: BarcodeAliasReason;
+};
+
 export type ScanLookupResult =
   | {
       kind: "item";
       item: ItemMaster;
+      parentItem: ItemMaster | null;
+      subItems: ItemMaster[];
+      resolvedAlias: ScanResolvedAlias | null;
       photoSignedUrl: string | null;
       activeBorrow: BorrowHistoryEntry | null;
       recentBorrows: BorrowHistoryEntry[];
@@ -204,6 +215,25 @@ export async function lookupScanTargetAction(
   const supabase = await createClient();
   let matchedItem: ItemMaster | null = null;
   let matchedKit: ItemKit | null = null;
+  let resolvedAlias: ScanResolvedAlias | null = null;
+
+  const resolveViaAliasRow = async (alias: ItemBarcodeAlias | null) => {
+    if (!alias) return null;
+    const { data: targetItem } = await supabase
+      .from("items_master")
+      .select("*")
+      .eq("id", alias.target_item_id)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (!targetItem) return null;
+    resolvedAlias = {
+      aliasCode: alias.alias_code,
+      legacyName: alias.legacy_name,
+      aliasReason: alias.alias_reason,
+    };
+    return targetItem;
+  };
 
   if (parsed.mode === "item_id") {
     const { data: item } = await supabase
@@ -223,6 +253,34 @@ export async function lookupScanTargetAction(
         .is("deleted_at", null)
         .maybeSingle();
       matchedKit = kit ?? null;
+
+      if (!matchedKit) {
+        const { data: aliasByLegacyId } = await supabase
+          .from("item_barcode_aliases")
+          .select("*")
+          .eq("legacy_item_id", parsed.value)
+          .limit(1)
+          .maybeSingle();
+
+        matchedItem = await resolveViaAliasRow(aliasByLegacyId ?? null);
+
+        if (!matchedItem) {
+          const { data: legacyItem } = await supabase
+            .from("items_master")
+            .select("item_code")
+            .eq("id", parsed.value)
+            .maybeSingle();
+
+          if (legacyItem?.item_code) {
+            const { data: aliasByCode } = await supabase
+              .from("item_barcode_aliases")
+              .select("*")
+              .eq("alias_code", legacyItem.item_code.toUpperCase())
+              .maybeSingle();
+            matchedItem = await resolveViaAliasRow(aliasByCode ?? null);
+          }
+        }
+      }
     }
   } else {
     const codeCandidate = parsed.mode === "short_slug" ? parsed.code : parsed.value;
@@ -280,20 +338,57 @@ export async function lookupScanTargetAction(
           .eq("id", shortLink.target_id)
           .is("deleted_at", null)
           .maybeSingle();
-        matchedItem = item ?? null;
+        if (item) {
+          matchedItem = item;
+        } else {
+          const { data: aliasByLegacyId } = await supabase
+            .from("item_barcode_aliases")
+            .select("*")
+            .eq("legacy_item_id", shortLink.target_id)
+            .limit(1)
+            .maybeSingle();
+          matchedItem = await resolveViaAliasRow(aliasByLegacyId ?? null);
+        }
       }
+    }
+
+    // Fallback to legacy / merged barcode aliases
+    if (!matchedItem && !matchedKit) {
+      const { data: aliasRow } = await supabase
+        .from("item_barcode_aliases")
+        .select("*")
+        .eq("alias_code", codeCandidate)
+        .maybeSingle();
+      matchedItem = await resolveViaAliasRow(aliasRow ?? null);
     }
   }
 
   if (matchedItem) {
-    const { data: borrows } = await supabase
-      .from("borrow_transactions")
-      .select("*")
-      .eq("item_id", matchedItem.id)
-      .order("borrowed_at", { ascending: false })
-      .limit(8);
+    const [borrowsRes, parentRes, childrenRes] = await Promise.all([
+      supabase
+        .from("borrow_transactions")
+        .select("*")
+        .eq("item_id", matchedItem.id)
+        .order("borrowed_at", { ascending: false })
+        .limit(8),
+      matchedItem.parent_item_id
+        ? supabase
+            .from("items_master")
+            .select("*")
+            .eq("id", matchedItem.parent_item_id)
+            .is("deleted_at", null)
+            .maybeSingle()
+        : Promise.resolve({ data: null as ItemMaster | null }),
+      supabase
+        .from("items_master")
+        .select("*")
+        .eq("parent_item_id", matchedItem.parent_item_id ?? matchedItem.id)
+        .is("deleted_at", null)
+        .order("item_code", { ascending: true })
+        .order("name", { ascending: true }),
+    ]);
 
-    const enriched = await enrichBorrowsWithNames(borrows ?? []);
+    const enriched = await enrichBorrowsWithNames(borrowsRes.data ?? []);
     const activeBorrow =
       enriched.find((row) => row.status === "DIPINJAM" || row.status === "TERLAMBAT") ??
       null;
@@ -316,12 +411,21 @@ export async function lookupScanTargetAction(
     }
 
     const canReturnActiveBorrow = true;
+    const sanitizedSubItems = (childrenRes.data ?? []).map((child) =>
+      sanitizeItemForRole(child, user.role),
+    );
+    const sanitizedParent = parentRes.data
+      ? sanitizeItemForRole(parentRes.data, user.role)
+      : null;
 
     return {
       ok: true,
       data: {
         kind: "item",
         item: sanitizeItemForRole(matchedItem, user.role),
+        parentItem: sanitizedParent,
+        subItems: sanitizedSubItems,
+        resolvedAlias,
         photoSignedUrl,
         activeBorrow,
         recentBorrows: enriched,
@@ -683,6 +787,14 @@ export async function quickStockOpnameAction(input: {
 
   if (itemErr || !item) {
     return { ok: false, error: "Item inventaris tidak ditemukan." };
+  }
+
+  if (item.has_sub_items) {
+    return {
+      ok: false,
+      error:
+        "Stok Parent Item dihitung otomatis dari Sub-Item. Gunakan halaman /stock-opname untuk menginput tiap varian.",
+    };
   }
 
   if (

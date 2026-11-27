@@ -23,6 +23,8 @@ import type { LocationCode } from "@/types/database";
 import {
   countAssignedSlots,
   formatAssignedUsers,
+  getInventoryHierarchySummary,
+  getItemHierarchyLabel,
   getStockAnomalies,
   loadExportDataset,
   type ExportDataset,
@@ -169,21 +171,9 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   );
 
   const anomalies = getStockAnomalies(dataset.items, dataset.todayWib);
-  const totalPurchase = dataset.items.reduce(
-    (sum, item) => sum + (Number(item.purchase_price) || 0),
-    0,
-  );
-  const totalBookValue = dataset.items.reduce(
-    (sum, item) =>
-      sum +
-      calculateBookValue(
-        item.purchase_price,
-        item.acquisition_date,
-        item.useful_life_months,
-        item.residual_value,
-      ),
-    0,
-  );
+  const summary = getInventoryHierarchySummary(dataset.items);
+  const totalPurchase = summary.totalPurchase;
+  const totalBookValue = summary.totalBookValue;
 
   const activeSubs = dataset.subscriptions.filter((s) => s.is_active);
   const monthlySubCost = activeSubs.reduce((sum, sub) => {
@@ -205,7 +195,18 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   const kpis: Array<[string, string | number, string, string, boolean?]> = [
     ["Periode Laporan", `${dataset.periodLabel} (${dataset.periodCode})`, "Zona Waktu WIB", dataset.generatedAtWib],
     ["Dicetak Oleh", dataset.actorName, `Peran: ${actorRoleLabel}`, "Ekspor terotorisasi RBAC"],
-    ["Total Item Inventaris Aktif", dataset.items.length, "Semua kategori aktif", `${dataset.items.filter((i) => i.asset_type === "THERAPY_TOY").length} mainan terapi, ${dataset.items.filter((i) => i.asset_type === "FIXED_ASSET").length} aset tetap, ${dataset.items.filter((i) => i.asset_type === "CONSUMABLE").length} habis pakai`],
+    [
+      "Total Item Inventaris Aktif",
+      summary.topLevelItems.length,
+      `${summary.leafItems.length} unit/varian aktif`,
+      `${summary.topLevelItems.filter((i) => i.asset_type === "THERAPY_TOY").length} mainan terapi, ${summary.topLevelItems.filter((i) => i.asset_type === "FIXED_ASSET").length} aset tetap, ${summary.topLevelItems.filter((i) => i.asset_type === "CONSUMABLE").length} habis pakai`,
+    ],
+    [
+      "Total Stok Fisik (Tanpa Duplikasi)",
+      summary.totalStockUnits,
+      "Akumulasi unit leaf",
+      "Menghitung Sub-Item & Simple Item saja (tidak menggandakan Parent + Sub-Item)",
+    ],
     ...(dataset.canViewValuation
       ? ([
           ["Total Nilai Perolehan Aset", totalPurchase, "IDR", "Akumulasi harga beli barang aktif", true],
@@ -213,7 +214,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
         ] as Array<[string, string | number, string, string, boolean?]>)
       : []),
     ["Anomali: Part Kurang", anomalies.partKurang.length, "Item PART_KURANG", "Mainan dengan kepingan belum lengkap"],
-    ["Anomali: Stok Minimum (Consumable)", anomalies.lowStock.length, "Item Low-Stock", "Stok <= batas minimum pengadaan"],
+    ["Anomali: Stok Minimum (Consumable)", anomalies.lowStock.length, "Item Low-Stock", "Stok < batas minimum pengadaan"],
     ["Anomali: Perlu Sanitasi", anomalies.needsSanitation.length, "Mainan Terapi", "Status belum steril atau melewati jadwal H+7"],
     ...(dataset.canExportFinancial
       ? ([
@@ -264,9 +265,11 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   const anomalyIds = new Set(anomalies.rows.map((r) => r.item.id));
   for (const item of dataset.items) {
     const current = byRoom.get(item.room_code) ?? { count: 0, anomaly: 0, value: 0 };
-    current.count += 1;
+    if (item.parent_item_id === null) {
+      current.count += 1;
+    }
     if (anomalyIds.has(item.id)) current.anomaly += 1;
-    if (dataset.canViewValuation) {
+    if (dataset.canViewValuation && summary.isValuationCounted(item)) {
       current.value += Number(item.purchase_price) || 0;
     }
     byRoom.set(item.room_code, current);
@@ -304,9 +307,11 @@ function addSummarySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
 function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   const sheet = workbook.addWorksheet("Inventaris & Part Mainan");
   const showVal = dataset.canViewValuation;
+  const summary = getInventoryHierarchySummary(dataset.items);
   const cols = [
     { width: 20 },
     { width: 28 },
+    { width: 24 },
     { width: 18 },
     { width: 20 },
     { width: 10 },
@@ -329,7 +334,7 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   styleTitleBanner(
     sheet,
     "INVENTARIS, ASET KANTOR & KELENGKAPAN PART MAINAN",
-    `Periode ${dataset.periodLabel} · Total ${dataset.items.length} item aktif`,
+    `Periode ${dataset.periodLabel} · ${summary.topLevelItems.length} item utama (${dataset.items.length} baris · Total stok ${summary.totalStockUnits} unit)`,
     cols.length,
   );
 
@@ -337,6 +342,7 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
   const header = sheet.addRow([
     "Kode Item",
     "Nama Barang",
+    "Hierarki",
     "Tipe Aset",
     "Kategori",
     "Prefix",
@@ -369,14 +375,18 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
           )
         : 0;
       const isPartKurang =
-        item.condition === "PART_KURANG" ||
-        (item.total_parts > 1 && item.current_parts < item.total_parts);
+        !summary.isParent(item) &&
+        (item.condition === "PART_KURANG" ||
+          (item.total_parts > 1 && item.current_parts < item.total_parts));
       const isLowStock =
+        !summary.isParent(item) &&
         item.asset_type === "CONSUMABLE" &&
         item.min_stock_threshold > 0 &&
-        item.stock_qty <= item.min_stock_threshold;
+        item.stock_qty < item.min_stock_threshold;
       const isSanitationDue =
-        item.asset_type === "THERAPY_TOY" && item.hygiene_status !== "STERIL";
+        !summary.isParent(item) &&
+        item.asset_type === "THERAPY_TOY" &&
+        item.hygiene_status !== "STERIL";
 
       const roomLabel = getLocationLabel(item.room_code, dataset.locationLabels);
       const roomDisplay =
@@ -387,6 +397,7 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
       const row = addSafeRow(sheet, [
         item.item_code,
         item.name,
+        getItemHierarchyLabel(item, summary.parentCodeMap),
         ASSET_TYPE_LABELS[item.asset_type] ?? item.asset_type ?? "-",
         item.category,
         item.category_prefix,
@@ -412,8 +423,8 @@ function addInventorySheet(workbook: ExcelJS.Workbook, dataset: ExportDataset) {
           : undefined;
       applyDataRowStyle(row, idx, highlight);
       if (showVal) {
-        row.getCell(17).numFmt = '"Rp"#,##0';
         row.getCell(18).numFmt = '"Rp"#,##0';
+        row.getCell(19).numFmt = '"Rp"#,##0';
       }
     });
   }

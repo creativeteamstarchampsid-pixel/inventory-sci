@@ -90,6 +90,13 @@ export type RequestStatus =
   | "DITOLAK"
   | "SELESAI";
 export type BackupType = "PRE_UPDATE" | "MONTHLY_CUTOFF" | "MANUAL";
+export type BarcodeAliasReason = "MERGED_DUPLICATE" | "LEGACY_BARCODE" | "SUB_ITEM_REDIRECT";
+export type OpnameSessionStatus = "DRAFT" | "IN_PROGRESS" | "COMPLETED";
+export type OpnameItemStatus =
+  | "BELUM_DIPERIKSA"
+  | "SEDANG_DIPERIKSA"
+  | "MENUNGGU_PENYIMPANAN"
+  | "SUDAH_DIPERIKSA";
 
 export type Database = {
   public: {
@@ -207,6 +214,7 @@ export type Database = {
           id: string;
           item_code: string;
           parent_item_id: string | null;
+          has_sub_items: boolean;
           barcode_format: BarcodeFormat;
           name: string;
           description: string | null;
@@ -242,6 +250,7 @@ export type Database = {
           id?: string;
           item_code?: string;
           parent_item_id?: string | null;
+          has_sub_items?: boolean;
           barcode_format?: BarcodeFormat;
           name: string;
           description?: string | null;
@@ -277,6 +286,7 @@ export type Database = {
           id?: string;
           item_code?: string;
           parent_item_id?: string | null;
+          has_sub_items?: boolean;
           barcode_format?: BarcodeFormat;
           name?: string;
           description?: string | null;
@@ -1091,6 +1101,180 @@ export type Database = {
           },
         ];
       };
+      item_barcode_aliases: {
+        Row: {
+          id: string;
+          alias_code: string;
+          target_item_id: string;
+          legacy_item_id: string | null;
+          legacy_name: string | null;
+          alias_reason: BarcodeAliasReason;
+          notes: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          alias_code: string;
+          target_item_id: string;
+          legacy_item_id?: string | null;
+          legacy_name?: string | null;
+          alias_reason?: BarcodeAliasReason;
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          alias_code?: string;
+          target_item_id?: string;
+          legacy_item_id?: string | null;
+          legacy_name?: string | null;
+          alias_reason?: BarcodeAliasReason;
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "item_barcode_aliases_target_item_id_fkey";
+            columns: ["target_item_id"];
+            referencedRelation: "items_master";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "item_barcode_aliases_legacy_item_id_fkey";
+            columns: ["legacy_item_id"];
+            referencedRelation: "items_master";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      stock_opname_sessions: {
+        Row: {
+          id: string;
+          session_code: string;
+          period_ym: string;
+          room_code: LocationCode | null;
+          title: string;
+          status: OpnameSessionStatus;
+          notes: string | null;
+          created_by: string | null;
+          completed_by: string | null;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_code?: string;
+          period_ym: string;
+          room_code?: LocationCode | null;
+          title: string;
+          status?: OpnameSessionStatus;
+          notes?: string | null;
+          created_by?: string | null;
+          completed_by?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          session_code?: string;
+          period_ym?: string;
+          room_code?: LocationCode | null;
+          title?: string;
+          status?: OpnameSessionStatus;
+          notes?: string | null;
+          created_by?: string | null;
+          completed_by?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      stock_opname_items: {
+        Row: {
+          id: string;
+          session_id: string;
+          item_id: string;
+          parent_item_id: string | null;
+          status: OpnameItemStatus;
+          system_stock: number;
+          actual_stock: number | null;
+          stock_diff: number | null;
+          system_parts: number;
+          actual_parts: number | null;
+          condition: ItemCondition | null;
+          hygiene_status: HygieneStatus | null;
+          notes: string | null;
+          checked_by: string | null;
+          checked_at: string | null;
+          saved_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          item_id: string;
+          parent_item_id?: string | null;
+          status?: OpnameItemStatus;
+          system_stock: number;
+          actual_stock?: number | null;
+          system_parts?: number;
+          actual_parts?: number | null;
+          condition?: ItemCondition | null;
+          hygiene_status?: HygieneStatus | null;
+          notes?: string | null;
+          checked_by?: string | null;
+          checked_at?: string | null;
+          saved_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          session_id?: string;
+          item_id?: string;
+          parent_item_id?: string | null;
+          status?: OpnameItemStatus;
+          system_stock?: number;
+          actual_stock?: number | null;
+          system_parts?: number;
+          actual_parts?: number | null;
+          condition?: ItemCondition | null;
+          hygiene_status?: HygieneStatus | null;
+          notes?: string | null;
+          checked_by?: string | null;
+          checked_at?: string | null;
+          saved_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "stock_opname_items_session_id_fkey";
+            columns: ["session_id"];
+            referencedRelation: "stock_opname_sessions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "stock_opname_items_item_id_fkey";
+            columns: ["item_id"];
+            referencedRelation: "items_master";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "stock_opname_items_parent_item_id_fkey";
+            columns: ["parent_item_id"];
+            referencedRelation: "items_master";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {
       subscriptions_vault_directory: {
@@ -1159,6 +1343,15 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: Json;
       };
+      submit_stock_opname_batch: {
+        Args: {
+          p_session_id: string;
+          p_entries: Json;
+          p_parent_item_id?: string | null;
+          p_notes?: string | null;
+        };
+        Returns: Json;
+      };
     };
     Enums: {
       user_role: UserRole;
@@ -1214,3 +1407,6 @@ export type AuditLog = Tables<"audit_logs">;
 export type ShareShortLink = Tables<"share_short_links">;
 export type DeliveryShareLink = Tables<"delivery_share_links">;
 export type BarcodeLabelPreset = Tables<"barcode_label_presets">;
+export type ItemBarcodeAlias = Tables<"item_barcode_aliases">;
+export type StockOpnameSession = Tables<"stock_opname_sessions">;
+export type StockOpnameItem = Tables<"stock_opname_items">;

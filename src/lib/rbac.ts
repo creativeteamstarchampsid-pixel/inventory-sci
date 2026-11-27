@@ -47,8 +47,10 @@ export const ROUTE_PERMISSIONS: Record<string, readonly Role[]> = {
   "/rooms": ADMINS,
   // Barcode & label print studio is an admin tool.
   "/barcode-studio": ADMINS,
-  // Borrow / return scanning – open to all; Stock Opname tab gated by inventory.validate_opname.
+  // Borrow / return scanning – open to all.
   "/scan": ALL,
+  // Dedicated Stock Opname workspace – Owner, Admin Operasional & Kepala Terapis.
+  "/stock-opname": MANAGEMENT,
   // Subscription Vault: Owner & Admin Operasional only.
   "/vault": ADMINS,
   // Hybrid archive: STAFF reads public SOPs only (enforced by RLS); TEAM_LEADER reads all docs; ADMINS manage.

@@ -5,8 +5,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requireRouteAccess } from "@/lib/auth";
 import { can } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
-import type { ItemMaster } from "@/types/database";
+import type { ItemBarcodeAlias, ItemMaster } from "@/types/database";
 import { InventoryClient } from "./inventory-client";
+
+export type InventoryAliasEntry = Pick<
+  ItemBarcodeAlias,
+  "alias_code" | "target_item_id" | "legacy_name" | "alias_reason"
+>;
 
 export const metadata: Metadata = {
   title: "Inventaris & Alat Terapi",
@@ -21,14 +26,22 @@ export default async function InventoryPage() {
   const supabase = await createClient();
 
   let rows: ItemMaster[];
+  let barcodeAliases: InventoryAliasEntry[] = [];
   let queryError: string | null = null;
 
+  const aliasesPromise = supabase
+    .from("item_barcode_aliases")
+    .select("alias_code, target_item_id, legacy_name, alias_reason");
+
   if (canViewValuation || canManageItem) {
-    const { data: items, error } = await supabase
-      .from("items_master")
-      .select("*")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false });
+    const [{ data: items, error }, aliasesRes] = await Promise.all([
+      supabase
+        .from("items_master")
+        .select("*")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false }),
+      aliasesPromise,
+    ]);
 
     if (error) {
       queryError = error.message;
@@ -46,16 +59,22 @@ export default async function InventoryPage() {
             },
       );
     }
+
+    barcodeAliases =
+      !aliasesRes.error && Array.isArray(aliasesRes.data) ? aliasesRes.data : [];
   } else {
     // Non-admin roles (STAFF / TEAM_LEADER) never open the edit modal or view valuation:
     // select only the display/filter columns so valuation & unused fields never leave Postgres.
-    const { data: items, error } = await supabase
-      .from("items_master")
-      .select(
-        "id, item_code, parent_item_id, name, category_prefix, category, asset_type, room_code, rack_location, pic_name, photo_url, total_parts, current_parts, unit_label, stock_qty, min_stock_threshold, condition, hygiene_status, next_sanitization_due, created_at",
-      )
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false });
+    const [{ data: items, error }, aliasesRes] = await Promise.all([
+      supabase
+        .from("items_master")
+        .select(
+          "id, item_code, parent_item_id, has_sub_items, name, category_prefix, category, asset_type, room_code, rack_location, pic_name, photo_url, total_parts, current_parts, unit_label, stock_qty, min_stock_threshold, condition, hygiene_status, next_sanitization_due, created_at",
+        )
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false }),
+      aliasesPromise,
+    ]);
 
     if (error) {
       queryError = error.message;
@@ -78,6 +97,9 @@ export default async function InventoryPage() {
         updated_at: item.created_at,
       }));
     }
+
+    barcodeAliases =
+      !aliasesRes.error && Array.isArray(aliasesRes.data) ? aliasesRes.data : [];
   }
 
   if (queryError) {
@@ -133,6 +155,7 @@ export default async function InventoryPage() {
   return (
     <InventoryClient
       items={rows}
+      barcodeAliases={barcodeAliases}
       signedPhotoUrls={signedPhotoUrls}
       todayWib={todayWib}
     />

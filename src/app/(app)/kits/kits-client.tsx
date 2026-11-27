@@ -14,6 +14,7 @@ import {
   QrCode,
   RotateCcw,
   Search,
+  Share2,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import {
 import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
+import { SharePreviewDialog } from "@/components/share/share-preview-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -118,6 +120,7 @@ export function KitsClient({
   const [statusFilter, setStatusFilter] = useState(ALL_OPTION);
 
   const [formOpen, setFormOpen] = useState(false);
+  const [shareItem, setShareItem] = useState<ItemMaster | null>(null);
   const [editingKit, setEditingKit] = useState<ItemKit | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ItemKit | null>(null);
   const [returnTarget, setReturnTarget] = useState<ItemKit | null>(null);
@@ -427,7 +430,7 @@ export function KitsClient({
 
       <Card className="rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
         <CardContent className="flex flex-wrap items-center gap-3 pt-6">
-          <div className="relative min-w-[220px] flex-1">
+          <div className="relative w-full min-w-0 sm:min-w-[220px] sm:flex-1">
             <Search className="text-muted-foreground absolute top-2.5 left-2.5 size-4" />
             <Input
               value={search}
@@ -437,7 +440,7 @@ export function KitsClient({
             />
           </div>
 
-          <div className="w-48">
+          <div className="w-full sm:w-48">
             <Select value={roomFilter} onValueChange={setRoomFilter}>
               <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-stone-500 dark:bg-stone-900">
                 <SelectValue placeholder="Ruangan" />
@@ -456,7 +459,7 @@ export function KitsClient({
             </Select>
           </div>
 
-          <div className="w-44">
+          <div className="w-full sm:w-44">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-stone-500 dark:bg-stone-900">
                 <SelectValue placeholder="Status Kit" />
@@ -528,7 +531,7 @@ export function KitsClient({
           }
         />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
           {filteredKits.map((kit) => {
             const bundledItems = kit.bundled_item_ids
               .map((id) => itemMap.get(id))
@@ -543,7 +546,7 @@ export function KitsClient({
               >
                 <CardHeader className={`border-b-2 border-[#2C2623]/15 dark:border-stone-700 ${getKitHeaderBg(kit.status)}`}>
                   <div className="flex items-start justify-between gap-2">
-                    <div className="space-y-1.5">
+                    <div className="min-w-0 flex-1 space-y-1.5">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge
                           variant="outline"
@@ -561,16 +564,16 @@ export function KitsClient({
                           </Badge>
                         )}
                       </div>
-                      <CardTitle className="text-lg font-extrabold">{kit.kit_name}</CardTitle>
+                      <CardTitle className="text-lg font-extrabold break-words">{kit.kit_name}</CardTitle>
                       {kit.description && (
-                        <CardDescription className="font-medium text-[#2C2623]/75 dark:text-stone-300">
+                        <CardDescription className="font-medium break-words text-[#2C2623]/75 dark:text-stone-300">
                           {kit.description}
                         </CardDescription>
                       )}
                     </div>
 
                     <Can action="kits.manage">
-                      <div className="flex items-center gap-1">
+                      <div className="flex shrink-0 items-center gap-1">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -651,6 +654,17 @@ export function KitsClient({
                                 nextDue={item.next_sanitization_due}
                                 todayWib={todayWib}
                               />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                title="Bagikan Link Pratinjau Item"
+                                onClick={() => setShareItem(item)}
+                                className="h-6 rounded-lg border-[1.5px] border-[#2C2623] bg-[#CCFBF1] px-2 text-[11px] font-extrabold text-[#115E59] hover:bg-[#99F6E4] dark:border-stone-500 dark:bg-teal-950/60 dark:text-teal-200"
+                              >
+                                <Share2 className="size-3" />
+                                Share
+                              </Button>
                             </div>
                           </li>
                         ))}
@@ -816,7 +830,7 @@ export function KitsClient({
           if (!open) setReturnTarget(null);
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-extrabold">
               Kembalikan Kit ({returnTarget?.kit_code})
@@ -951,6 +965,24 @@ export function KitsClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SharePreviewDialog
+        open={Boolean(shareItem)}
+        onOpenChange={(open) => {
+          if (!open) setShareItem(null);
+        }}
+        target={
+          shareItem
+            ? {
+                type: "ITEM",
+                id: shareItem.id,
+                code: shareItem.item_code,
+                title: shareItem.name,
+                locationCode: shareItem.room_code,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

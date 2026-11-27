@@ -58,7 +58,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "bg-[#FFFDF7] text-foreground dark:bg-card data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-3xl border-[2.5px] border-[#2C2623] p-6 shadow-[6px_6px_0px_0px_#2C2623] duration-200 sm:max-w-lg dark:border-[#6D5D54] dark:shadow-[6px_6px_0px_0px_#0E0B0A]",
+          "bg-[#FFFDF7] text-foreground dark:bg-card data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid max-h-[90dvh] w-[calc(100vw-1.5rem)] max-w-[calc(100vw-1.5rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-3xl border-[2.5px] border-[#2C2623] p-5 shadow-[6px_6px_0px_0px_#2C2623] duration-200 sm:max-w-lg sm:p-6 dark:border-[#6D5D54] dark:shadow-[6px_6px_0px_0px_#0E0B0A] [&>*]:min-w-0",
           className,
         )}
         {...props}
@@ -82,7 +82,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-left", className)}
+      className={cn("flex flex-col gap-2 pr-8 text-center sm:text-left", className)}
       {...props}
     />
   );

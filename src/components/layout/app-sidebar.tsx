@@ -113,7 +113,7 @@ export function AppSidebar() {
                 <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/brand:scale-110 group-hover/brand:-rotate-6 dark:border-[#6D5D54] dark:bg-[#2C2522] dark:shadow-[1.5px_1.5px_0px_0px_#0E0B0A]">
                   <KawaiiMascotSvg type="dino" className="size-6.5" />
                 </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
+                <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
                   <span className="flex items-center gap-1 truncate font-black tracking-tight">
                     <span>StarOps</span>
                     <span

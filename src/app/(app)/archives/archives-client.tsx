@@ -20,6 +20,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Share2,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -36,6 +37,7 @@ import {
 import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
+import { SharePreviewDialog } from "@/components/share/share-preview-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -472,6 +474,9 @@ export function ArchivesClient({
 
   // Delete Confirmation Dialog
   const [deleteTarget, setDeleteTarget] = useState<ArchiveListItem | null>(null);
+
+  // Share Preview Link Dialog
+  const [shareDoc, setShareDoc] = useState<ArchiveListItem | null>(null);
 
   // Signed URL loading marker
   const [openingKey, setOpeningKey] = useState<string | null>(null);
@@ -1431,7 +1436,7 @@ export function ArchivesClient({
               value={digitalTab}
               onValueChange={(v) => setDigitalTab(v as typeof digitalTab)}
             >
-              <TabsList className="h-auto flex-wrap gap-1 rounded-2xl border-2 border-[#2C2623] bg-white p-1 shadow-[2px_2px_0px_0px_#2C2623] dark:border-border dark:bg-background dark:shadow-none">
+              <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-2xl border-2 border-[#2C2623] bg-white p-1 shadow-[2px_2px_0px_0px_#2C2623] sm:w-auto dark:border-border dark:bg-background dark:shadow-none">
                 <TabsTrigger
                   value="all"
                   className="rounded-xl text-xs font-bold data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#DFF2FF] data-[state=active]:text-[#0C4A6E] dark:data-[state=active]:border-sky-400/50 dark:data-[state=active]:bg-sky-950/60 dark:data-[state=active]:text-sky-100"
@@ -1484,7 +1489,7 @@ export function ArchivesClient({
                       setCabinetFilter(v as "ALL" | LocationCode)
                     }
                   >
-                    <SelectTrigger className="w-40 rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-border dark:bg-background">
+                    <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold sm:w-40 dark:border-border dark:bg-background">
                       <SelectValue placeholder="Semua Lemari" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1506,7 +1511,7 @@ export function ArchivesClient({
                       setStatusFilter(v as "ALL" | ArchivePhysicalStatus)
                     }
                   >
-                    <SelectTrigger className="w-44 rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-border dark:bg-background">
+                    <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold sm:w-44 dark:border-border dark:bg-background">
                       <SelectValue placeholder="Semua Status Fisik" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1527,7 +1532,7 @@ export function ArchivesClient({
                 value={categoryFilter}
                 onValueChange={(v) => setCategoryFilter(v)}
               >
-                <SelectTrigger className="w-44 rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-border dark:bg-background">
+                <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold sm:w-44 dark:border-border dark:bg-background">
                   <SelectValue placeholder="Semua Kategori" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1570,7 +1575,7 @@ export function ArchivesClient({
             />
           ) : viewMode === "shelf" ? (
             /* Illustrated Shelf Cards Grid (SOP & Physical/Digital Archives) */
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
               {filteredArchives.map((doc) => {
                 const previewKey = `${doc.id}-active-view`;
                 const downloadKey = `${doc.id}-active-dl`;
@@ -1583,7 +1588,7 @@ export function ArchivesClient({
                 return (
                   <div
                     key={doc.id}
-                    className="flex flex-col justify-between overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-white shadow-[4px_4px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5EFE6]/25 dark:bg-background dark:shadow-[3px_3px_0px_0px_rgba(0,0,0,0.55)]"
+                    className="flex min-w-0 flex-col justify-between overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-white shadow-[4px_4px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5EFE6]/25 dark:bg-background dark:shadow-[3px_3px_0px_0px_rgba(0,0,0,0.55)]"
                   >
                     {/* Top Pastel Shelf Tab Ribbon */}
                     <div
@@ -1771,6 +1776,17 @@ export function ArchivesClient({
                             Berkas fisik saja (belum ada lampiran digital)
                           </p>
                         )}
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShareDoc(doc)}
+                          className="h-8 w-full rounded-xl border-2 border-[#2C2623] bg-[#CCFBF1] text-xs font-extrabold text-[#115E59] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#99F6E4] dark:border-teal-500/40 dark:bg-teal-950/50 dark:text-teal-200 dark:shadow-none"
+                        >
+                          <Share2 className="size-3.5" />
+                          Share Link Pratinjau
+                        </Button>
                       </div>
                     </div>
 
@@ -2058,6 +2074,18 @@ export function ArchivesClient({
                                 Versi Aktif v{doc.version_no}
                               </Badge>
                             )}
+                            <div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setShareDoc(doc)}
+                                className="h-7 rounded-xl border-2 border-[#2C2623] bg-[#CCFBF1] text-xs font-extrabold text-[#115E59] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#99F6E4] dark:border-teal-500/40 dark:bg-teal-950/50 dark:text-teal-200 dark:shadow-none"
+                              >
+                                <Share2 className="size-3.5" />
+                                Share Link
+                              </Button>
+                            </div>
                           </div>
                         </TableCell>
 
@@ -2115,7 +2143,7 @@ export function ArchivesClient({
 
       {/* Create / Edit Archive Dialog (OWNER & SUPER_ADMIN) */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[6px_6px_0px_0px_#2C2623] sm:max-w-2xl dark:border-[#F5EFE6]/30 dark:bg-card dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.6)]">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[6px_6px_0px_0px_#2C2623] sm:max-w-2xl dark:border-[#F5EFE6]/30 dark:bg-card dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.6)]">
           <DialogHeader className="space-y-2 border-b-2 border-dashed border-[#2C2623]/20 pb-3 dark:border-border">
             <div className="inline-flex w-fit items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#DFF2FF] px-3 py-0.5 text-[11px] font-extrabold text-[#0C4A6E] shadow-[2px_2px_0px_0px_#2C2623] dark:border-sky-400/40 dark:bg-sky-950/60 dark:text-sky-200 dark:shadow-none">
               <Sparkles className="size-3" />
@@ -2150,7 +2178,7 @@ export function ArchivesClient({
               </Alert>
             )}
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <div className="space-y-1.5">
                 <Label
                   htmlFor="arc-title"
@@ -2214,7 +2242,7 @@ export function ArchivesClient({
                 <MapPin className="size-3.5" />
                 <span>Pemetaan Lokasi Fisik</span>
               </div>
-              <div className="grid gap-3 sm:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
                 <div className="space-y-1.5">
                   <Label htmlFor="arc-branch" className="text-xs font-bold">
                     Gedung / Cabang
@@ -2556,15 +2584,15 @@ export function ArchivesClient({
           }
         }}
       >
-        <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[6px_6px_0px_0px_#2C2623] sm:max-w-xl dark:border-[#F5EFE6]/30 dark:bg-card dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.6)]">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[6px_6px_0px_0px_#2C2623] sm:max-w-xl dark:border-[#F5EFE6]/30 dark:bg-card dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.6)]">
           <DialogHeader className="border-b-2 border-dashed border-[#2C2623]/20 pb-3 dark:border-border">
             <DialogTitle className="flex items-center gap-2 font-extrabold text-[#2C2623] dark:text-foreground">
-              <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#DFF2FF] text-[#0C4A6E] shadow-[2px_2px_0px_0px_#2C2623] dark:border-sky-400/40 dark:bg-sky-950/60 dark:text-sky-200 dark:shadow-none">
+              <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#DFF2FF] text-[#0C4A6E] shadow-[2px_2px_0px_0px_#2C2623] dark:border-sky-400/40 dark:bg-sky-950/60 dark:text-sky-200 dark:shadow-none">
                 <History className="size-4" />
               </span>
               <span>Riwayat Versi Dokumen</span>
             </DialogTitle>
-            <DialogDescription className="font-mono text-xs font-semibold">
+            <DialogDescription className="font-mono text-xs font-semibold break-words">
               {historyDoc?.doc_code} · {historyDoc?.title}
             </DialogDescription>
           </DialogHeader>
@@ -2594,10 +2622,12 @@ export function ArchivesClient({
                         onClick={() =>
                           handleOpenSignedFile(historyDoc.id, false)
                         }
-                        className="rounded-xl border-2 border-[#2C2623] bg-white text-xs font-bold shadow-[2px_2px_0px_0px_#2C2623] dark:border-border dark:bg-background dark:shadow-none"
+                        className="max-w-full rounded-xl border-2 border-[#2C2623] bg-white text-xs font-bold shadow-[2px_2px_0px_0px_#2C2623] dark:border-border dark:bg-background dark:shadow-none"
                       >
-                        <ExternalLink className="size-3.5" />
-                        Pratinjau ({historyDoc.digital_file_name || "File"})
+                        <ExternalLink className="size-3.5 shrink-0" />
+                        <span className="max-w-[180px] truncate sm:max-w-[260px]">
+                          Pratinjau ({historyDoc.digital_file_name || "File"})
+                        </span>
                       </Button>
                       <Button
                         type="button"
@@ -2721,10 +2751,12 @@ export function ArchivesClient({
                                     ver.id,
                                   )
                                 }
-                                className="h-7 rounded-xl border-2 border-[#2C2623] bg-white text-xs font-bold shadow-[2px_2px_0px_0px_#2C2623] dark:border-border dark:bg-background dark:shadow-none"
+                                className="h-7 max-w-full rounded-xl border-2 border-[#2C2623] bg-white text-xs font-bold shadow-[2px_2px_0px_0px_#2C2623] dark:border-border dark:bg-background dark:shadow-none"
                               >
-                                <ExternalLink className="size-3.5" />
-                                Pratinjau ({ver.digital_file_name || "File"})
+                                <ExternalLink className="size-3.5 shrink-0" />
+                                <span className="max-w-[180px] truncate sm:max-w-[260px]">
+                                  Pratinjau ({ver.digital_file_name || "File"})
+                                </span>
                               </Button>
                               <Button
                                 type="button"
@@ -2920,6 +2952,24 @@ export function ArchivesClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SharePreviewDialog
+        open={Boolean(shareDoc)}
+        onOpenChange={(open) => {
+          if (!open) setShareDoc(null);
+        }}
+        target={
+          shareDoc
+            ? {
+                type: "ARCHIVE",
+                id: shareDoc.id,
+                code: shareDoc.doc_code,
+                title: shareDoc.title,
+                locationCode: shareDoc.cabinet_code,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

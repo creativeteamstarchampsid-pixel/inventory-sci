@@ -46,7 +46,7 @@ export default async function AuthenticatedAppLayout({
         <CartoonFeedbackProvider>
         <SidebarProvider defaultOpen={defaultOpen}>
           <AppSidebar />
-          <SidebarInset className="kawaii-paper-bg relative print:bg-white">
+          <SidebarInset className="kawaii-paper-bg relative min-w-0 overflow-x-clip print:bg-white">
             <KawaiiBackdrop />
 
             {/* Pastel Rainbow Doodle Top Stripe */}
@@ -56,17 +56,17 @@ export default async function AuthenticatedAppLayout({
             />
 
             {/* Sticky 2D Japanese Cartoon Header */}
-            <header className="sticky top-0 z-10 flex h-15 shrink-0 items-center justify-between gap-2 border-b-2 border-[#2C2623] bg-[#FFFDF7]/92 px-3.5 backdrop-blur-md sm:px-4 dark:border-[#5E5048] dark:bg-[#231E1B]/92 print:hidden">
-              <div className="flex min-w-0 items-center gap-2">
-                <SidebarTrigger className="-ml-0.5 size-9 rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:-translate-y-0.5 hover:bg-[#FEF3C7] hover:shadow-[3px_3px_0px_0px_#2C2623] active:translate-x-[1px] active:translate-y-[1px] active:scale-95 active:shadow-none dark:border-[#6D5D54] dark:bg-[#2C2522] dark:text-[#FDF8F0] dark:shadow-[2px_2px_0px_0px_#0E0B0A] dark:hover:bg-[#3A311E] dark:hover:shadow-[3px_3px_0px_0px_#0E0B0A]" />
+            <header className="sticky top-0 z-10 flex h-15 shrink-0 items-center justify-between gap-1.5 border-b-2 border-[#2C2623] bg-[#FFFDF7]/92 px-2.5 backdrop-blur-md sm:gap-2 sm:px-4 dark:border-[#5E5048] dark:bg-[#231E1B]/92 print:hidden">
+              <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+                <SidebarTrigger className="-ml-0.5 size-9 shrink-0 rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:-translate-y-0.5 hover:bg-[#FEF3C7] hover:shadow-[3px_3px_0px_0px_#2C2623] active:translate-x-[1px] active:translate-y-[1px] active:scale-95 active:shadow-none dark:border-[#6D5D54] dark:bg-[#2C2522] dark:text-[#FDF8F0] dark:shadow-[2px_2px_0px_0px_#0E0B0A] dark:hover:bg-[#3A311E] dark:hover:shadow-[3px_3px_0px_0px_#0E0B0A]" />
                 <Separator
                   orientation="vertical"
-                  className="mx-1 bg-[#2C2623]/25 data-[orientation=vertical]:h-5 dark:bg-[#6D5D54]/50"
+                  className="mx-0.5 shrink-0 bg-[#2C2623]/25 data-[orientation=vertical]:h-5 sm:mx-1 dark:bg-[#6D5D54]/50"
                 />
                 <Link
                   href="/dashboard"
                   aria-label="Beranda StarOps"
-                  className="group flex min-w-0 items-center gap-2.5"
+                  className="group flex min-w-0 items-center gap-2 sm:gap-2.5"
                 >
                   <span className="hidden size-9 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FEF3C7] shadow-[2px_2px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110 group-hover:-rotate-6 group-active:scale-95 sm:flex dark:border-[#6D5D54] dark:bg-[#3A311E] dark:shadow-[2px_2px_0px_0px_#0E0B0A]">
                     <KawaiiMascotSvg
@@ -75,34 +75,34 @@ export default async function AuthenticatedAppLayout({
                     />
                   </span>
                   <div className="flex min-w-0 flex-col">
-                    <div className="flex items-center gap-1.5">
-                      <span className="inline-flex items-center rounded-full border-[1.5px] border-[#2C2623] bg-[#2AB673] px-2 py-0.5 text-[11px] font-black tracking-wide text-white shadow-[1.5px_1.5px_0px_0px_#2C2623] transition-transform duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:-translate-y-[1px] group-hover:scale-105 dark:border-[#6D5D54] dark:bg-[#4ADE9B] dark:text-[#1B1715]">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="inline-flex shrink-0 items-center rounded-full border-[1.5px] border-[#2C2623] bg-[#2AB673] px-2 py-0.5 text-[11px] font-black tracking-wide text-white shadow-[1.5px_1.5px_0px_0px_#2C2623] transition-transform duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:-translate-y-[1px] group-hover:scale-105 dark:border-[#6D5D54] dark:bg-[#4ADE9B] dark:text-[#1B1715]">
                         StarOps
                       </span>
-                      <span className="truncate text-sm font-extrabold tracking-tight text-[#2C2623] dark:text-[#FDF8F0]">
+                      <span className="hidden truncate text-sm font-extrabold tracking-tight text-[#2C2623] min-[420px]:inline dark:text-[#FDF8F0]">
                         Star Champs Indonesia
                       </span>
                     </div>
-                    <span className="text-muted-foreground hidden text-xs font-semibold sm:inline">
+                    <span className="text-muted-foreground hidden truncate text-xs font-semibold sm:inline">
                       {todayLabel} (WIB)
                     </span>
                   </div>
                 </Link>
               </div>
 
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
                 <Button
                   asChild
                   variant="outline"
                   size="sm"
-                  className="group/guide h-8 gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#FDE68A] px-3 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:-translate-y-0.5 hover:bg-[#FCD34D] hover:shadow-[3px_3px_0px_0px_#2C2623] active:translate-x-[1px] active:translate-y-[1px] active:scale-95 active:shadow-none dark:border-[#6D5D54] dark:bg-[#4A3B1E] dark:text-[#FDE68A] dark:shadow-[2px_2px_0px_0px_#0E0B0A] dark:hover:bg-[#5A4723] dark:hover:shadow-[3px_3px_0px_0px_#0E0B0A]"
+                  className="group/guide h-8 gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#FDE68A] px-2.5 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:-translate-y-0.5 hover:bg-[#FCD34D] hover:shadow-[3px_3px_0px_0px_#2C2623] active:translate-x-[1px] active:translate-y-[1px] active:scale-95 active:shadow-none sm:px-3 dark:border-[#6D5D54] dark:bg-[#4A3B1E] dark:text-[#FDE68A] dark:shadow-[2px_2px_0px_0px_#0E0B0A] dark:hover:bg-[#5A4723] dark:hover:shadow-[3px_3px_0px_0px_#0E0B0A]"
                 >
-                  <Link href="/guide">
+                  <Link href="/guide" aria-label="Panduan Penggunaan" title="Panduan Penggunaan">
                     <BookOpen
-                      className="size-3.5 transition-transform duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/guide:scale-110 group-hover/guide:-rotate-12"
+                      className="size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/guide:scale-110 group-hover/guide:-rotate-12"
                       aria-hidden
                     />
-                    <span>Panduan</span>
+                    <span className="hidden sm:inline">Panduan</span>
                   </Link>
                 </Button>
                 <RoleBadge role={user.role} showSubtitle />
@@ -111,13 +111,13 @@ export default async function AuthenticatedAppLayout({
 
             {/* Warm Comic End-of-Month Opname Banner */}
             {period.active && can(user.role, "inventory.validate_opname") && (
-              <div className="relative z-[1] border-b-2 border-[#2C2623] bg-[linear-gradient(90deg,#FEF3C7_0%,#FFECD6_50%,#FFE4EA_100%)] px-4 py-2.5 text-[#2C2623] dark:border-[#5E5048] dark:bg-[linear-gradient(90deg,#3A2F1B_0%,#3D291C_50%,#3A2128_100%)] dark:text-[#FDF8F0] print:hidden">
-                <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 text-sm">
-                  <div className="flex items-center gap-2.5">
+              <div className="relative z-[1] border-b-2 border-[#2C2623] bg-[linear-gradient(90deg,#FEF3C7_0%,#FFECD6_50%,#FFE4EA_100%)] px-3 py-2.5 text-[#2C2623] sm:px-5 lg:px-6 xl:px-8 dark:border-[#5E5048] dark:bg-[linear-gradient(90deg,#3A2F1B_0%,#3D291C_50%,#3A2128_100%)] dark:text-[#FDF8F0] print:hidden">
+                <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2 text-sm">
+                  <div className="flex min-w-0 items-center gap-2.5">
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] text-[#D97706] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:bg-[#28221F] dark:text-[#FDE68A]">
                       <CalendarClock className="size-4" aria-hidden />
                     </span>
-                    <span className="font-semibold">
+                    <span className="min-w-0 font-semibold">
                       <strong className="font-black">
                         Waktunya Cek Barang Akhir Bulan ({period.periodLabel})
                       </strong>{" "}
@@ -130,7 +130,7 @@ export default async function AuthenticatedAppLayout({
                   {canAccessRoute(user.role, "/backup") && (
                     <Link
                       href="/backup"
-                      className="inline-flex items-center gap-1 rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] px-3 py-1 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:-translate-y-0.5 hover:bg-[#D8F8E7] hover:shadow-[3px_3px_0px_0px_#2C2623] active:translate-x-[1px] active:translate-y-[1px] active:scale-95 active:shadow-none dark:border-[#6D5D54] dark:bg-[#28221F] dark:text-[#FDE68A] dark:hover:bg-[#1E352B]"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] px-3 py-1 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] hover:-translate-y-0.5 hover:bg-[#D8F8E7] hover:shadow-[3px_3px_0px_0px_#2C2623] active:translate-x-[1px] active:translate-y-[1px] active:scale-95 active:shadow-none dark:border-[#6D5D54] dark:bg-[#28221F] dark:text-[#FDE68A] dark:hover:bg-[#1E352B]"
                     >
                       {can(user.role, "backup.view")
                         ? "Buka Laporan Akhir Bulan →"
@@ -141,7 +141,7 @@ export default async function AuthenticatedAppLayout({
               </div>
             )}
 
-            <div className="relative z-[1] mx-auto w-full max-w-7xl flex-1 p-4 sm:p-6">
+            <div className="relative z-[1] mx-auto w-full min-w-0 max-w-[1600px] flex-1 px-3 py-4 sm:px-5 sm:py-5 lg:px-6 xl:px-8">
               <KawaiiPageTransition>{children}</KawaiiPageTransition>
             </div>
           </SidebarInset>

@@ -1008,7 +1008,7 @@ export function VaultClient({
               value={filterTab}
               onValueChange={(v) => setFilterTab(v as typeof filterTab)}
             >
-              <TabsList className="h-auto flex-wrap rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-background">
+              <TabsList className="h-auto w-full flex-wrap justify-start rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] sm:w-auto dark:border-stone-600 dark:bg-background">
                 <TabsTrigger
                   value="all"
                   className="rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#E0F2FE] data-[state=active]:text-[#0C4A6E]"
@@ -1151,7 +1151,7 @@ export function VaultClient({
                 return (
                   <div
                     key={sub.id}
-                    className={`flex flex-col overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-stone-600 dark:bg-card dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)] ${
+                    className={`flex min-w-0 flex-col overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-stone-600 dark:bg-card dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)] ${
                       hasOffboardWarning ? "ring-2 ring-rose-400/50" : ""
                     }`}
                   >
@@ -1284,7 +1284,7 @@ export function VaultClient({
                         </div>
 
                         {/* Renewal & Billing Grid */}
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 gap-2 min-[400px]:grid-cols-2 [&>*]:min-w-0">
                           <div className="rounded-2xl border-[1.5px] border-[#2C2623]/25 bg-[#FEFCE8]/80 p-2.5 dark:border-stone-700 dark:bg-amber-950/20">
                             <p className="text-muted-foreground text-[10px] font-extrabold uppercase">
                               Jatuh Tempo
@@ -1365,7 +1365,7 @@ export function VaultClient({
 
                         {/* Assigned Users & Password Rotation */}
                         <div className="space-y-1.5">
-                          <div className="text-muted-foreground flex items-center justify-between text-[11px] font-semibold">
+                          <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-1 text-[11px] font-semibold">
                             <span className="flex items-center gap-1">
                               <Users className="size-3.5" />
                               {sub.assigned_users.length} / {sub.max_slots} slot
@@ -1775,7 +1775,7 @@ export function VaultClient({
 
       {/* Create / Edit Subscription Dialog (OWNER & Admin Operasional) */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="font-extrabold">
               {formMode === "create"
@@ -2090,7 +2090,7 @@ export function VaultClient({
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
                   placeholder="Filter staf..."
-                  className="h-8 w-48 bg-white dark:bg-background"
+                  className="h-8 w-full bg-white sm:w-48 dark:bg-background"
                 />
               </div>
               <div className="max-h-40 space-y-1.5 overflow-y-auto pr-1">
@@ -2100,16 +2100,17 @@ export function VaultClient({
                   return (
                     <label
                       key={p.id}
-                      className="flex cursor-pointer items-center justify-between rounded-xl px-2 py-1 text-sm hover:bg-white/80 dark:hover:bg-muted/50"
+                      className="flex cursor-pointer items-center justify-between gap-2 rounded-xl px-2 py-1 text-sm hover:bg-white/80 dark:hover:bg-muted/50"
                     >
-                      <span className="flex items-center gap-2">
+                      <span className="flex min-w-0 items-center gap-2">
                         <Checkbox
                           checked={checked}
                           onCheckedChange={(val) =>
                             handleToggleAssignedUser(p.id, val === true)
                           }
+                          className="shrink-0"
                         />
-                        <span>
+                        <span className="min-w-0 truncate">
                           {p.full_name || p.email || p.id}{" "}
                           <span className="text-muted-foreground text-xs">
                             ({ROLE_LABELS[p.role]?.title ?? p.role})
@@ -2119,7 +2120,7 @@ export function VaultClient({
                       {isOffboarded && (
                         <Badge
                           variant="destructive"
-                          className="rounded-full text-[10px]"
+                          className="shrink-0 rounded-full text-[10px]"
                         >
                           Nonaktif / Offboard
                         </Badge>

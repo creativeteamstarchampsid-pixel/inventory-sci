@@ -191,7 +191,7 @@ export function RequestFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[6px_6px_0px_0px_#2C2623] sm:max-w-xl dark:border-[#F5EFE6]/30 dark:bg-card dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.6)]">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[6px_6px_0px_0px_#2C2623] sm:max-w-xl dark:border-[#F5EFE6]/30 dark:bg-card dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.6)]">
         <DialogHeader className="space-y-2 border-b-2 border-dashed border-[#2C2623]/20 pb-3 dark:border-border">
           <div className="inline-flex w-fit items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#FFE4EC] px-3 py-0.5 text-[11px] font-extrabold text-[#7A1C3C] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5EFE6]/30 dark:bg-pink-950/60 dark:text-pink-200 dark:shadow-none">
             <Sparkles className="size-3" />
@@ -289,7 +289,7 @@ export function RequestFormDialog({
 
           {/* Optional Links & Cost Box */}
           <div className="space-y-3.5 rounded-2xl border-2 border-[#2C2623] bg-[#F2FBF7] p-4 shadow-[3px_3px_0px_0px_#2C2623] dark:border-[#F5EFE6]/25 dark:bg-muted/30 dark:shadow-none">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
               <div className="space-y-1.5">
                 <Label className="flex items-center gap-1.5 text-xs font-bold text-[#2C2623] dark:text-foreground">
                   <Package className="size-3.5 text-[#1D8F59]" />

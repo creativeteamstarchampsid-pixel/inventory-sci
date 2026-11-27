@@ -80,13 +80,22 @@ function sanitizeItemForRole(item: ItemMaster, role: Role): ItemMaster {
 
 type ParsedScanToken =
   | { mode: "item_id"; value: string; display: string }
+  | { mode: "short_slug"; slug: string; code: string; display: string }
   | { mode: "code"; value: string; display: string };
+
+function safeDecodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment).trim();
+  } catch {
+    return segment.trim();
+  }
+}
 
 function parseScannedToken(rawInput: string): ParsedScanToken | null {
   const trimmed = sanitizeTextInput(rawInput, 500);
   if (!trimmed) return null;
 
-  // Handle full URLs or relative URLs e.g. https://.../inventory/<uuid> or /inventory/<uuid>
+  // Handle full URLs or relative URLs e.g. https://.../inventory/<uuid> or https://.../s/<slug>
   if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("/")) {
     try {
       const parsed = new URL(trimmed, "https://starops.local");
@@ -102,13 +111,30 @@ function parseScannedToken(rawInput: string): ParsedScanToken | null {
         return { mode: "item_id", value: invMatch[1].toLowerCase(), display: trimmed };
       }
 
+      const shortMatch = parsed.pathname.match(/^\/s\/([^/]+)\/*$/i);
+      if (shortMatch?.[1]) {
+        const decoded = safeDecodeSegment(shortMatch[1]);
+        if (decoded) {
+          if (isValidUuid(String(decoded))) {
+            return { mode: "item_id", value: decoded.toLowerCase(), display: decoded };
+          }
+          return {
+            mode: "short_slug",
+            slug: decoded.toLowerCase(),
+            code: decoded.toUpperCase(),
+            display: decoded,
+          };
+        }
+      }
+
       const segments = parsed.pathname.split("/").filter(Boolean);
       const last = segments[segments.length - 1];
       if (last) {
-        if (isValidUuid(String(last))) {
-          return { mode: "item_id", value: last.toLowerCase(), display: trimmed };
+        const decodedLast = safeDecodeSegment(last);
+        if (isValidUuid(String(decodedLast))) {
+          return { mode: "item_id", value: decodedLast.toLowerCase(), display: trimmed };
         }
-        return { mode: "code", value: last.toUpperCase(), display: last };
+        return { mode: "code", value: decodedLast.toUpperCase(), display: decodedLast };
       }
     } catch {
       // Fallback to raw token handling below
@@ -199,11 +225,15 @@ export async function lookupScanTargetAction(
       matchedKit = kit ?? null;
     }
   } else {
-    if (parsed.value.startsWith("KIT-")) {
+    const codeCandidate = parsed.mode === "short_slug" ? parsed.code : parsed.value;
+    const slugCandidate =
+      parsed.mode === "short_slug" ? parsed.slug : parsed.value.toLowerCase();
+
+    if (codeCandidate.startsWith("KIT-")) {
       const { data: kit } = await supabase
         .from("item_kits")
         .select("*")
-        .eq("kit_code", parsed.value)
+        .eq("kit_code", codeCandidate)
         .is("deleted_at", null)
         .maybeSingle();
       matchedKit = kit ?? null;
@@ -213,7 +243,7 @@ export async function lookupScanTargetAction(
       const { data: item } = await supabase
         .from("items_master")
         .select("*")
-        .eq("item_code", parsed.value)
+        .eq("item_code", codeCandidate)
         .is("deleted_at", null)
         .maybeSingle();
       matchedItem = item ?? null;
@@ -223,10 +253,35 @@ export async function lookupScanTargetAction(
       const { data: kit } = await supabase
         .from("item_kits")
         .select("*")
-        .eq("kit_code", parsed.value)
+        .eq("kit_code", codeCandidate)
         .is("deleted_at", null)
         .maybeSingle();
       matchedKit = kit ?? null;
+    }
+
+    // Resolve short preview links (`/s/<custom-slug>`) or raw custom slugs via `share_short_links`
+    if (
+      !matchedItem &&
+      !matchedKit &&
+      slugCandidate &&
+      (parsed.mode === "short_slug" || /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slugCandidate))
+    ) {
+      const { data: shortLink } = await supabase
+        .from("share_short_links")
+        .select("target_type, target_id")
+        .eq("slug", slugCandidate)
+        .eq("target_type", "ITEM")
+        .maybeSingle();
+
+      if (shortLink?.target_id) {
+        const { data: item } = await supabase
+          .from("items_master")
+          .select("*")
+          .eq("id", shortLink.target_id)
+          .is("deleted_at", null)
+          .maybeSingle();
+        matchedItem = item ?? null;
+      }
     }
   }
 

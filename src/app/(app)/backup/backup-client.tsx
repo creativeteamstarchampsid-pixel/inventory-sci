@@ -890,7 +890,7 @@ export function BackupClient({
                 : `Unduh laporan operasional barang, anomali, dan arsip (tanpa data harga, pengiriman, brankas akun, atau audit) untuk peran ${ROLE_LABELS[role].title}.`}
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 pt-5 md:grid-cols-3">
+          <CardContent className="grid gap-4 pt-5 md:grid-cols-3 [&>*]:min-w-0">
             {/* CSV Card */}
             <div className="flex flex-col justify-between gap-4 rounded-2xl border-2 border-[#2C2623] bg-[#E8FBF1]/85 p-4 shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/35 dark:bg-emerald-950/30">
               <div className="space-y-1.5">
@@ -1113,7 +1113,7 @@ export function BackupClient({
                 )}
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
               {opnameRoomCodes.map((roomCode) => {
                 const entry = checklist[roomCode];
                 const stat = roomStatMap.get(roomCode);
@@ -1123,7 +1123,7 @@ export function BackupClient({
                 return (
                   <label
                     key={roomCode}
-                    className={`flex cursor-pointer items-start gap-3 rounded-2xl border-2 border-[#2C2623] p-3.5 transition-all dark:border-[#F5E9D6]/35 ${
+                    className={`flex min-w-0 cursor-pointer items-start gap-3 rounded-2xl border-2 border-[#2C2623] p-3.5 transition-all dark:border-[#F5E9D6]/35 ${
                       checked
                         ? "bg-[#E8FBF1] shadow-[3px_3px_0px_0px_#2C2623] dark:bg-emerald-950/35"
                         : "bg-[#FFFDF7] shadow-[2px_2px_0px_0px_#2C2623] hover:-translate-y-0.5 hover:bg-[#FFFBE6]/70 dark:bg-card dark:hover:bg-muted/40"
@@ -1183,7 +1183,7 @@ export function BackupClient({
               </span>
               Alur Persetujuan &amp; Pengesahan Bulanan (3 Tahap)
             </h3>
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-3 [&>*]:min-w-0">
               {/* Approval 1: Team Leader */}
               <div className="flex flex-col justify-between gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#E8F6FF]/85 p-4 shadow-[3px_3px_0px_0px_#2C2623] dark:border-[#F5E9D6]/35 dark:bg-sky-950/30">
                 <div>
@@ -1525,17 +1525,17 @@ export function BackupClient({
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:grid-cols-6">
+                  <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:grid-cols-6 [&>*]:min-w-0">
                     {Object.entries(restoreJsonPreview.tableCounts).map(
                       ([tbl, count]) => (
                         <div
                           key={tbl}
-                          className="flex items-center justify-between gap-1 rounded-xl border border-[#2C2623]/50 bg-[#FFFDF7] px-2.5 py-1.5 dark:border-emerald-500/30 dark:bg-background"
+                          className="flex min-w-0 items-center justify-between gap-1 rounded-xl border border-[#2C2623]/50 bg-[#FFFDF7] px-2.5 py-1.5 dark:border-emerald-500/30 dark:bg-background"
                         >
                           <span className="truncate font-mono text-[11px]">
                             {tbl}
                           </span>
-                          <span className="font-extrabold">{count}</span>
+                          <span className="shrink-0 font-extrabold">{count}</span>
                         </div>
                       ),
                     )}
@@ -1559,7 +1559,7 @@ export function BackupClient({
                 }
               />
             ) : (
-              <div className="overflow-x-auto rounded-2xl border-2 border-[#2C2623] dark:border-[#F5E9D6]/35">
+              <div className="min-w-0 overflow-x-auto rounded-2xl border-2 border-[#2C2623] dark:border-[#F5E9D6]/35">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1670,12 +1670,12 @@ export function BackupClient({
           open={Boolean(diffBackup)}
           onOpenChange={(open) => !open && setDiffBackup(null)}
         >
-          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 font-extrabold">
-                <GitCompare className="size-4" />
-                Snapshot Diff Viewer —{" "}
-                <span className="font-mono">{diffBackup?.backup_code}</span>
+              <DialogTitle className="flex flex-wrap items-center gap-2 font-extrabold">
+                <GitCompare className="size-4 shrink-0" />
+                <span>Snapshot Diff Viewer —</span>
+                <span className="font-mono break-all">{diffBackup?.backup_code}</span>
               </DialogTitle>
               <DialogDescription>
                 {selectedDiff?.previous_backup_code
@@ -1686,7 +1686,7 @@ export function BackupClient({
 
             {selectedDiff ? (
               <div className="space-y-4 text-sm">
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                   <div className="rounded-2xl border-2 border-[#2C2623] bg-[#E8FBF1]/80 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:bg-emerald-950/30">
                     <p className="text-muted-foreground text-xs font-bold">
                       Item Baru Ditambahkan
@@ -1716,7 +1716,7 @@ export function BackupClient({
                 </div>
 
                 <div className="rounded-2xl border-2 border-[#2C2623] bg-[#FFFBE6]/90 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:bg-amber-950/30">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="text-muted-foreground text-xs font-bold">
                         Estimasi Biaya Langganan Brankas Digital / Bulan
@@ -1725,7 +1725,7 @@ export function BackupClient({
                         {formatRupiah(selectedDiff.subscription_monthly_cost_current)}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-left sm:text-right">
                       <p className="text-muted-foreground text-xs font-bold">Delta Biaya</p>
                       {formatDeltaBadge(selectedDiff.subscription_cost_delta, true)}
                     </div>
@@ -1741,13 +1741,13 @@ export function BackupClient({
                       {selectedDiff.new_items.map((item) => (
                         <div
                           key={item.id}
-                          className="flex items-center justify-between py-1"
+                          className="flex flex-wrap items-center justify-between gap-2 py-1"
                         >
-                          <span>
+                          <span className="min-w-0 break-words">
                             <span className="font-mono font-bold">{item.item_code}</span> —{" "}
                             {item.name}
                           </span>
-                          <Badge variant="outline">
+                          <Badge variant="outline" className="shrink-0">
                             {item.room_code} · {getLabel(item.room_code)}
                           </Badge>
                         </div>
@@ -1765,13 +1765,13 @@ export function BackupClient({
                       {selectedDiff.part_kurang_items.map((item) => (
                         <div
                           key={item.id}
-                          className="flex items-center justify-between py-1"
+                          className="flex flex-wrap items-center justify-between gap-2 py-1"
                         >
-                          <span>
+                          <span className="min-w-0 break-words">
                             <span className="font-mono font-bold">{item.item_code}</span> —{" "}
                             {item.name} ({item.room_code} · {getLabel(item.room_code)})
                           </span>
-                          <Badge variant="destructive">
+                          <Badge variant="destructive" className="shrink-0">
                             {item.current_parts}/{item.total_parts} part
                           </Badge>
                         </div>
@@ -1782,14 +1782,14 @@ export function BackupClient({
 
                 <div className="space-y-1.5">
                   <p className="text-xs font-extrabold uppercase">Perubahan Jumlah Baris</p>
-                  <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                  <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 [&>*]:min-w-0">
                     {Object.entries(selectedDiff.row_deltas).map(([table, info]) => (
                       <div
                         key={table}
-                        className="flex items-center justify-between rounded-xl border-2 border-[#2C2623]/70 bg-[#FFFDF7] px-2.5 py-1.5 dark:bg-card"
+                        className="flex min-w-0 items-center justify-between gap-1 rounded-xl border-2 border-[#2C2623]/70 bg-[#FFFDF7] px-2.5 py-1.5 dark:bg-card"
                       >
                         <span className="truncate font-mono">{table}</span>
-                        <span className="font-extrabold">
+                        <span className="shrink-0 font-extrabold">
                           {info.current} ({info.delta >= 0 ? `+${info.delta}` : info.delta})
                         </span>
                       </div>

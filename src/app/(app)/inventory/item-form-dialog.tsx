@@ -344,7 +344,7 @@ export function ItemFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <Badge
@@ -375,7 +375,7 @@ export function ItemFormDialog({
             </Alert>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="item-parent" className="font-bold">
                 Induk Item (Opsional — untuk Sub-Kode Anak)
@@ -732,7 +732,7 @@ export function ItemFormDialog({
                 </span>
               )}
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
               <div className="space-y-1.5">
                 <Label htmlFor="item-acq-date" className="text-xs font-bold">
                   Tanggal Beli

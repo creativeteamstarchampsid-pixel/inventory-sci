@@ -65,6 +65,8 @@ export const ROUTE_PERMISSIONS: Record<string, readonly Role[]> = {
   "/recycle-bin": ADMINS,
   // Personal settings for everyone; user management gated by users.manage / users.manage_admins.
   "/settings": ALL,
+  // Login-required short readable preview links for items & archives (per-target role checks on page).
+  "/s": ALL,
 };
 
 /** Routes that never require a session. */
@@ -172,6 +174,7 @@ export const ACTION_PERMISSIONS = {
   "backup.download": ADMINS,
   "backup.run_manual": ADMINS, // create manual / pre-update / cut-off backup
   "backup.restore": ["OWNER"], // destructive point-in-time DB restore (OWNER only)
+  "infrastructure.view": ADMINS, // storage capacity & PostgreSQL egress telemetry charts
 
   // Recycle bin
   "recycle.view": ADMINS,

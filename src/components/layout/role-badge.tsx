@@ -41,7 +41,7 @@ export function RoleBadge({
     <Badge
       variant="outline"
       className={cn(
-        "gap-1.5 rounded-full border-2 px-2.5 py-0.5 text-xs font-extrabold print:border print:shadow-none",
+        "max-w-full shrink-0 gap-1.5 rounded-full border-2 px-2.5 py-0.5 text-xs font-extrabold print:border print:shadow-none",
         style.classes,
         className,
       )}
@@ -52,7 +52,7 @@ export function RoleBadge({
       </span>
       <span>{label.title}</span>
       {showSubtitle && (
-        <span className="hidden font-semibold opacity-80 sm:inline">· {label.subtitle}</span>
+        <span className="hidden font-semibold opacity-80 md:inline">· {label.subtitle}</span>
       )}
     </Badge>
   );

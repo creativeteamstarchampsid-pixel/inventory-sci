@@ -103,7 +103,7 @@ export function KawaiiPageHeader({
   return (
     <section
       className={cn(
-        "relative overflow-hidden rounded-3xl border-2 border-[#2C2623] p-5 shadow-[4px_4px_0px_0px_#2C2623] sm:p-6 dark:border-[#6D5D54] dark:shadow-[4px_4px_0px_0px_#0E0B0A] print:border print:border-neutral-300 print:bg-white print:shadow-none",
+        "relative overflow-hidden rounded-3xl border-2 border-[#2C2623] p-4 shadow-[4px_4px_0px_0px_#2C2623] sm:p-6 dark:border-[#6D5D54] dark:shadow-[4px_4px_0px_0px_#0E0B0A] print:border print:border-neutral-300 print:bg-white print:shadow-none",
         palette.bannerBg,
         className,
       )}
@@ -170,8 +170,8 @@ export function KawaiiPageHeader({
         />
       </svg>
 
-      <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3.5 sm:items-center sm:gap-4">
+      <div className="relative z-10 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center sm:gap-4">
           {/* Mascot Sticker Badge */}
           <div
             className={cn(
@@ -185,23 +185,23 @@ export function KawaiiPageHeader({
             />
           </div>
 
-          <div className="min-w-0 space-y-1">
+          <div className="min-w-0 flex-1 space-y-1">
             {badge && (
               <span
                 className={cn(
-                  "animate-kawaii-pop inline-flex items-center gap-1 rounded-full border-[1.5px] border-[#2C2623] px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide uppercase shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:shadow-[2px_2px_0px_0px_#0E0B0A]",
+                  "animate-kawaii-pop inline-flex max-w-full items-center gap-1 rounded-full border-[1.5px] border-[#2C2623] px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide break-words uppercase shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:shadow-[2px_2px_0px_0px_#0E0B0A]",
                   palette.badgeBg,
                 )}
               >
-                <span aria-hidden="true">★</span>
-                {badge}
+                <span aria-hidden="true" className="shrink-0">★</span>
+                <span className="min-w-0 break-words">{badge}</span>
               </span>
             )}
-            <h1 className="text-xl font-black tracking-tight text-[#2C2623] sm:text-2xl dark:text-[#FDF8F0]">
+            <h1 className="text-xl font-black tracking-tight break-words text-[#2C2623] sm:text-2xl dark:text-[#FDF8F0]">
               {title}
             </h1>
             {description && (
-              <p className="max-w-2xl text-sm leading-relaxed font-semibold text-[#5A4D46] dark:text-[#D5C6BA]">
+              <p className="max-w-2xl text-sm leading-relaxed font-semibold break-words text-[#5A4D46] dark:text-[#D5C6BA]">
                 {description}
               </p>
             )}
@@ -209,7 +209,7 @@ export function KawaiiPageHeader({
         </div>
 
         {actions && (
-          <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
+          <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
         )}
       </div>
     </section>
@@ -323,15 +323,15 @@ export function KawaiiStatCard({
   const cardBody = (
     <div
       className={cn(
-        "group/stat relative flex h-full flex-col justify-between gap-3 overflow-hidden rounded-2xl border-2 border-[#2C2623] p-4 shadow-[3px_3px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-x-[1.5px] hover:-translate-y-[2px] hover:shadow-[5px_5px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:shadow-[3px_3px_0px_0px_#0E0B0A] dark:hover:shadow-[5px_5px_0px_0px_#0E0B0A] print:border print:border-neutral-300 print:bg-white print:shadow-none",
+        "group/stat relative flex h-full min-w-0 flex-col justify-between gap-3 overflow-hidden rounded-2xl border-2 border-[#2C2623] p-4 shadow-[3px_3px_0px_0px_#2C2623] transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-x-[1.5px] hover:-translate-y-[2px] hover:shadow-[5px_5px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:shadow-[3px_3px_0px_0px_#0E0B0A] dark:hover:shadow-[5px_5px_0px_0px_#0E0B0A] print:border print:border-neutral-300 print:bg-white print:shadow-none",
         palette.statBg,
         href &&
           "group-hover:-translate-x-[1.5px] group-hover:-translate-y-[2px] group-hover:shadow-[5px_5px_0px_0px_#2C2623] group-active:translate-x-[1px] group-active:translate-y-[1px] group-active:shadow-[1px_1px_0px_0px_#2C2623] dark:group-hover:shadow-[5px_5px_0px_0px_#0E0B0A] dark:group-active:shadow-[1px_1px_0px_0px_#0E0B0A]",
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <span className="text-xs font-extrabold tracking-wide text-[#5A4D46] uppercase dark:text-[#D5C6BA]">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <span className="min-w-0 text-xs font-extrabold tracking-wide break-words text-[#5A4D46] uppercase dark:text-[#D5C6BA]">
           {label}
         </span>
         {icon && (
@@ -346,12 +346,12 @@ export function KawaiiStatCard({
         )}
       </div>
 
-      <div className="space-y-1">
-        <div className="text-2xl font-black tracking-tight text-[#2C2623] tabular-nums sm:text-3xl dark:text-[#FDF8F0]">
+      <div className="min-w-0 space-y-1">
+        <div className="text-2xl font-black tracking-tight break-words text-[#2C2623] tabular-nums sm:text-3xl dark:text-[#FDF8F0]">
           {value}
         </div>
         {hint && (
-          <p className="text-xs font-semibold text-[#6B5E57] dark:text-[#C8B9AE]">
+          <p className="text-xs font-semibold break-words text-[#6B5E57] dark:text-[#C8B9AE]">
             {hint}
           </p>
         )}

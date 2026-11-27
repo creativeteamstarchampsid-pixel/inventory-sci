@@ -22,6 +22,7 @@ import {
 } from "@/lib/security";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { recordStorageObjectEgress } from "@/lib/telemetry";
 import type {
   BackupType,
   Json,
@@ -690,6 +691,7 @@ export async function getBackupDownloadUrlAction(input: {
       .createSignedUrl(safeStoragePath, 60, { download: true });
 
     if (!signErr && signed?.signedUrl) {
+      await recordStorageObjectEgress("backups", safeStoragePath, 165_000);
       return { ok: true, data: { url: signed.signedUrl, isFallback: false } };
     }
   }

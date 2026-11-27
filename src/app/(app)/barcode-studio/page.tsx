@@ -72,8 +72,8 @@ export default async function BarcodeStudioPage({
         ? "INVENTORY"
         : "ALL";
 
-  const initialTemplate: LabelTemplateId =
-    templateParam ?? (archiveParam && !itemParam ? "ARCHIVE_SPINE" : "THERMAL");
+  const initialTemplate: LabelTemplateId | undefined =
+    templateParam ?? (archiveParam && !itemParam ? "ARCHIVE_SPINE" : undefined);
 
   return (
     <BarcodeStudioClient
@@ -84,6 +84,7 @@ export default async function BarcodeStudioPage({
       initialSelectedKeys={initialSelectedKeys}
       initialSourceTab={initialSourceTab}
       initialTemplate={initialTemplate}
+      initialPresets={data.presets}
     />
   );
 }

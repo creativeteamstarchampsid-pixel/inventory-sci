@@ -703,7 +703,7 @@ export function RequestsClient({
               value={activeTab}
               onValueChange={(v) => setActiveTab(v as RequestTab)}
             >
-              <TabsList className="h-auto flex-wrap gap-1 rounded-2xl border-2 border-[#2C2623] bg-white p-1 shadow-[2px_2px_0px_0px_#2C2623] dark:border-border dark:bg-background dark:shadow-none">
+              <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-2xl border-2 border-[#2C2623] bg-white p-1 shadow-[2px_2px_0px_0px_#2C2623] sm:w-auto dark:border-border dark:bg-background dark:shadow-none">
                 {isManagement && (
                   <TabsTrigger
                     value="ACTIONABLE"
@@ -754,7 +754,7 @@ export function RequestsClient({
                 value={typeFilter}
                 onValueChange={(v) => setTypeFilter(v as "ALL" | RequestType)}
               >
-                <SelectTrigger className="w-[185px] rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-border dark:bg-background">
+                <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold sm:w-[185px] dark:border-border dark:bg-background">
                   <SelectValue placeholder="Semua Jenis" />
                 </SelectTrigger>
                 <SelectContent>
@@ -773,7 +773,7 @@ export function RequestsClient({
                   setStatusFilter(v as "ALL" | RequestStatus)
                 }
               >
-                <SelectTrigger className="w-[205px] rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-border dark:bg-background">
+                <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold sm:w-[205px] dark:border-border dark:bg-background">
                   <SelectValue placeholder="Semua Status" />
                 </SelectTrigger>
                 <SelectContent>

@@ -594,8 +594,8 @@ export function AuditLogClient({
             Filter Jejak Audit
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 pt-4 md:grid-cols-5">
-          <div className="relative md:col-span-2">
+        <CardContent className="grid gap-3 pt-4 sm:grid-cols-2 lg:grid-cols-5 [&>*]:min-w-0">
+          <div className="relative sm:col-span-2">
             <Search className="text-muted-foreground absolute top-2.5 left-3 size-4" />
             <Input
               value={searchTerm}
@@ -648,7 +648,7 @@ export function AuditLogClient({
             </SelectContent>
           </Select>
 
-          <div className="flex flex-wrap items-center gap-2 md:col-span-5">
+          <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-5">
             <Button size="sm" onClick={applyServerSearch} disabled={isPending}>
               <Search className="mr-1.5 size-3.5" />
               Cari di Database
@@ -673,9 +673,9 @@ export function AuditLogClient({
       <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40">
         <CardHeader className="border-b-2 border-dashed border-[#2C2623]/20 bg-[#FFFBE6]/70 dark:bg-amber-950/20">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <div>
+            <div className="min-w-0">
               <CardTitle className="flex items-center gap-2 text-base font-extrabold">
-                <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDE68A] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDE68A] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
                   <Activity className="size-4" />
                 </span>
                 Aliran Aktivitas Kronologis
@@ -686,7 +686,7 @@ export function AuditLogClient({
               </CardDescription>
             </div>
 
-            <div className="inline-flex rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40 dark:bg-card">
+            <div className="inline-flex w-fit shrink-0 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40 dark:bg-card">
               <button
                 type="button"
                 onClick={() => setViewMode("timeline")}
@@ -737,7 +737,7 @@ export function AuditLogClient({
                   : "Sistem";
 
                 return (
-                  <div key={log.id} className="relative">
+                  <div key={log.id} className="relative min-w-0">
                     {/* Cute Comic Timeline Node */}
                     <span
                       aria-hidden
@@ -747,7 +747,7 @@ export function AuditLogClient({
                     </span>
 
                     <div
-                      className={`rounded-2xl border-2 border-[#2C2623] border-l-[6px] bg-[#FFFDF7] p-4 shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/35 dark:bg-card ${style.cardTint}`}
+                      className={`min-w-0 rounded-2xl border-2 border-[#2C2623] border-l-[6px] bg-[#FFFDF7] p-4 shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/35 dark:bg-card ${style.cardTint}`}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -775,7 +775,7 @@ export function AuditLogClient({
                         </span>
                       </div>
 
-                      <p className="mt-2 text-sm leading-relaxed font-semibold">
+                      <p className="mt-2 text-sm leading-relaxed font-semibold break-words">
                         {log.summary}
                       </p>
 
@@ -875,7 +875,7 @@ export function AuditLogClient({
         open={Boolean(selectedLog)}
         onOpenChange={(open) => !open && setSelectedLog(null)}
       >
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex flex-wrap items-center gap-2 text-base font-extrabold">
               Detail Audit —{" "}
@@ -891,10 +891,10 @@ export function AuditLogClient({
 
           {selectedLog && (
             <div className="space-y-4 text-xs">
-              <div className="grid grid-cols-1 gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#F3EEFF]/75 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] sm:grid-cols-2 dark:bg-violet-950/30">
+              <div className="grid grid-cols-1 gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#F3EEFF]/75 p-3.5 shadow-[2px_2px_0px_0px_#2C2623] sm:grid-cols-2 dark:bg-violet-950/30 [&>*]:min-w-0">
                 <div>
                   <span className="text-muted-foreground font-bold">Aktor: </span>
-                  <span className="font-extrabold">
+                  <span className="font-extrabold break-words">
                     {selectedLog.actor_name || "Sistem"} (
                     {selectedLog.actor_role
                       ? ROLE_LABELS[selectedLog.actor_role]?.title ??
@@ -905,7 +905,7 @@ export function AuditLogClient({
                 </div>
                 <div>
                   <span className="text-muted-foreground font-bold">Entitas: </span>
-                  <span className="font-mono font-bold">
+                  <span className="font-mono font-bold break-all">
                     {selectedLog.entity_type} /{" "}
                     {selectedLog.entity_code || selectedLog.entity_id || "-"}
                   </span>

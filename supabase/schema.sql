@@ -505,6 +505,41 @@ create trigger trg_locations_master_code_immutable
   before update on public.locations_master
   for each row execute function public.prevent_code_mutation('code');
 
+create or replace function public.guard_locations_master_by_role()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    if not (
+      coalesce(current_setting('role', true), '') = 'service_role'
+      or (
+        session_user = 'postgres'
+        and coalesce(nullif(current_setting('role', true), ''), 'none') in ('none', 'postgres')
+      )
+    ) then
+      raise exception 'Akses ditolak: pengelolaan nama ruangan dan lemari arsip hanya untuk Owner dan Admin Operasional.'
+        using errcode = '42501';
+    end if;
+  elsif not public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]) then
+    raise exception 'Akses ditolak: pengelolaan nama ruangan dan lemari arsip hanya untuk Owner dan Admin Operasional.'
+      using errcode = '42501';
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_guard_locations_master_role on public.locations_master;
+create trigger trg_guard_locations_master_role
+  before insert or update or delete on public.locations_master
+  for each row execute function public.guard_locations_master_by_role();
+
 -- 6.1 items_master — Inventaris, Aset Kantor & Mainan Terapi
 create table if not exists public.items_master (
   id uuid primary key default gen_random_uuid(),
@@ -1733,6 +1768,71 @@ create table if not exists public.audit_logs (
 create index if not exists idx_audit_logs_created on public.audit_logs (created_at desc);
 create index if not exists idx_audit_logs_entity on public.audit_logs (entity_type, entity_id);
 
+-- 6.11 system_telemetry_daily — Kapasitas Penyimpanan & Egress PostgreSQL Harian
+create table if not exists public.system_telemetry_daily (
+  metric_date date primary key,
+  db_size_bytes bigint not null default 0 check (db_size_bytes >= 0),
+  storage_size_bytes bigint not null default 0 check (storage_size_bytes >= 0),
+  db_egress_bytes bigint not null default 0 check (db_egress_bytes >= 0),
+  storage_egress_bytes bigint not null default 0 check (storage_egress_bytes >= 0),
+  export_egress_bytes bigint not null default 0 check (export_egress_bytes >= 0),
+  pg_tuples_snapshot bigint not null default 0 check (pg_tuples_snapshot >= 0),
+  query_count bigint not null default 0 check (query_count >= 0),
+  updated_at timestamptz not null default now()
+);
+
+-- 6.12 share_short_links — Link Pendek Kustom Pratinjau Item & Arsip (/s/<slug>)
+create table if not exists public.share_short_links (
+  id uuid primary key default gen_random_uuid(),
+  slug text not null unique check (
+    slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+    and char_length(slug) between 2 and 60
+  ),
+  target_type text not null check (target_type in ('ITEM', 'ARCHIVE')),
+  target_id uuid not null,
+  created_by uuid references public.profiles(id) on delete set null,
+  updated_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint uq_share_short_links_target unique (target_type, target_id)
+);
+
+create index if not exists idx_share_short_links_created_by
+  on public.share_short_links (created_by);
+
+create index if not exists idx_share_short_links_updated_by
+  on public.share_short_links (updated_by);
+
+drop trigger if exists trg_share_short_links_updated_at on public.share_short_links;
+create trigger trg_share_short_links_updated_at
+  before update on public.share_short_links
+  for each row execute function public.set_updated_at();
+
+-- 6.13 delivery_share_links — Link Pendek Surat Jalan, BAST & Pengiriman (/s/<slug>)
+create table if not exists public.delivery_share_links (
+  id uuid primary key default gen_random_uuid(),
+  slug text not null unique check (
+    slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+    and char_length(slug) between 2 and 60
+  ),
+  delivery_id uuid not null unique references public.deliveries_log(id) on delete cascade,
+  created_by uuid references public.profiles(id) on delete set null,
+  updated_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_delivery_share_links_created_by
+  on public.delivery_share_links (created_by);
+
+create index if not exists idx_delivery_share_links_updated_by
+  on public.delivery_share_links (updated_by);
+
+drop trigger if exists trg_delivery_share_links_updated_at on public.delivery_share_links;
+create trigger trg_delivery_share_links_updated_at
+  before update on public.delivery_share_links
+  for each row execute function public.set_updated_at();
+
 -- -----------------------------------------------------------------------------
 -- 7. AUDIT TRAIL TRIGGERS
 -- -----------------------------------------------------------------------------
@@ -2137,6 +2237,354 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- 9B. TELEMETRI KAPASITAS & EGRESS POSTGRESQL (OWNER & SUPER_ADMIN ONLY)
+-- -----------------------------------------------------------------------------
+create or replace function public.record_egress_telemetry(
+  p_db_bytes bigint default 0,
+  p_storage_bytes bigint default 0,
+  p_export_bytes bigint default 0,
+  p_queries bigint default 1
+)
+returns void
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_today date := (now() at time zone 'Asia/Jakarta')::date;
+  v_db_size bigint;
+  v_storage_size bigint;
+begin
+  if auth.uid() is null then
+    if not (
+      coalesce(current_setting('role', true), '') = 'service_role'
+      or (
+        session_user = 'postgres'
+        and coalesce(nullif(current_setting('role', true), ''), 'none') in ('none', 'postgres')
+      )
+    ) then
+      raise exception 'Akses ditolak: telemetri sistem hanya dapat dicatat oleh server atau Admin.'
+        using errcode = '42501';
+    end if;
+  elsif not public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]) then
+    raise exception 'Akses ditolak: telemetri sistem hanya untuk Owner dan Admin Operasional.'
+      using errcode = '42501';
+  end if;
+
+  v_db_size := pg_database_size(current_database())::bigint;
+  v_storage_size := coalesce(
+    (select sum((metadata->>'size')::bigint) from storage.objects),
+    0
+  )::bigint;
+
+  insert into public.system_telemetry_daily (
+    metric_date,
+    db_size_bytes,
+    storage_size_bytes,
+    db_egress_bytes,
+    storage_egress_bytes,
+    export_egress_bytes,
+    pg_tuples_snapshot,
+    query_count,
+    updated_at
+  ) values (
+    v_today,
+    v_db_size,
+    v_storage_size,
+    greatest(0, coalesce(p_db_bytes, 0)),
+    greatest(0, coalesce(p_storage_bytes, 0)),
+    greatest(0, coalesce(p_export_bytes, 0)),
+    coalesce((select tup_fetched from pg_stat_database where datname = current_database()), 0),
+    greatest(0, coalesce(p_queries, 0)),
+    now()
+  )
+  on conflict (metric_date) do update
+    set db_size_bytes = excluded.db_size_bytes,
+        storage_size_bytes = excluded.storage_size_bytes,
+        db_egress_bytes = public.system_telemetry_daily.db_egress_bytes + greatest(0, coalesce(p_db_bytes, 0)),
+        storage_egress_bytes = public.system_telemetry_daily.storage_egress_bytes + greatest(0, coalesce(p_storage_bytes, 0)),
+        export_egress_bytes = public.system_telemetry_daily.export_egress_bytes + greatest(0, coalesce(p_export_bytes, 0)),
+        query_count = public.system_telemetry_daily.query_count + greatest(0, coalesce(p_queries, 0)),
+        updated_at = now();
+end;
+$$;
+
+create or replace function public.get_admin_infrastructure_metrics()
+returns jsonb
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  v_today date := (now() at time zone 'Asia/Jakarta')::date;
+  v_month_start date := date_trunc('month', (now() at time zone 'Asia/Jakarta')::date)::date;
+  v_db_bytes bigint;
+  v_public_bytes bigint;
+  v_storage_bytes bigint;
+  v_total_files bigint;
+  v_tup_fetched bigint := 0;
+  v_tup_returned bigint := 0;
+  v_tup_inserted bigint := 0;
+  v_tup_updated bigint := 0;
+  v_tup_deleted bigint := 0;
+  v_xact_commit bigint := 0;
+  v_xact_rollback bigint := 0;
+  v_blks_hit bigint := 0;
+  v_blks_read bigint := 0;
+  v_backends bigint := 0;
+  v_sessions bigint := 0;
+  v_stats_reset timestamptz;
+  v_prev_snapshot bigint := null;
+  v_delta_tuples bigint := 0;
+  v_delta_bytes bigint := 0;
+  v_delta_queries bigint := 0;
+  v_tables_json jsonb;
+  v_buckets_json jsonb;
+  v_daily_json jsonb;
+  v_month_json jsonb;
+  v_cache_ratio numeric := 100;
+begin
+  if auth.uid() is null then
+    if not (
+      coalesce(current_setting('role', true), '') = 'service_role'
+      or (
+        session_user = 'postgres'
+        and coalesce(nullif(current_setting('role', true), ''), 'none') in ('none', 'postgres')
+      )
+    ) then
+      raise exception 'Akses ditolak: telemetri kapasitas hanya untuk Owner dan Admin Operasional.'
+        using errcode = '42501';
+    end if;
+  elsif not public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]) then
+    raise exception 'Akses ditolak: telemetri kapasitas hanya untuk Owner dan Admin Operasional.'
+      using errcode = '42501';
+  end if;
+
+  v_db_bytes := pg_database_size(current_database())::bigint;
+
+  select
+    coalesce(sum((metadata->>'size')::bigint), 0)::bigint,
+    count(*)::bigint
+  into v_storage_bytes, v_total_files
+  from storage.objects;
+
+  select
+    coalesce(tup_fetched, 0)::bigint,
+    coalesce(tup_returned, 0)::bigint,
+    coalesce(tup_inserted, 0)::bigint,
+    coalesce(tup_updated, 0)::bigint,
+    coalesce(tup_deleted, 0)::bigint,
+    coalesce(xact_commit, 0)::bigint,
+    coalesce(xact_rollback, 0)::bigint,
+    coalesce(blks_hit, 0)::bigint,
+    coalesce(blks_read, 0)::bigint,
+    coalesce(numbackends, 0)::bigint,
+    coalesce(sessions, 0)::bigint,
+    stats_reset
+  into
+    v_tup_fetched,
+    v_tup_returned,
+    v_tup_inserted,
+    v_tup_updated,
+    v_tup_deleted,
+    v_xact_commit,
+    v_xact_rollback,
+    v_blks_hit,
+    v_blks_read,
+    v_backends,
+    v_sessions,
+    v_stats_reset
+  from pg_stat_database
+  where datname = current_database();
+
+  if (v_blks_hit + v_blks_read) > 0 then
+    v_cache_ratio := round((v_blks_hit::numeric / (v_blks_hit + v_blks_read)::numeric) * 100.0, 2);
+  end if;
+
+  select pg_tuples_snapshot
+  into v_prev_snapshot
+  from public.system_telemetry_daily
+  where metric_date = v_today;
+
+  if v_prev_snapshot is null then
+    select coalesce(
+      (
+        select pg_tuples_snapshot
+        from public.system_telemetry_daily
+        where metric_date < v_today and pg_tuples_snapshot > 0
+        order by metric_date desc
+        limit 1
+      ),
+      0
+    ) into v_prev_snapshot;
+  end if;
+
+  if v_prev_snapshot > 0 and v_tup_fetched >= v_prev_snapshot then
+    v_delta_tuples := v_tup_fetched - v_prev_snapshot;
+    v_delta_bytes := v_delta_tuples * 340;
+    if v_delta_tuples > 0 then
+      v_delta_queries := greatest(1, round(v_delta_tuples::numeric / 140.0)::bigint);
+    end if;
+  end if;
+
+  insert into public.system_telemetry_daily (
+    metric_date,
+    db_size_bytes,
+    storage_size_bytes,
+    db_egress_bytes,
+    storage_egress_bytes,
+    export_egress_bytes,
+    pg_tuples_snapshot,
+    query_count,
+    updated_at
+  ) values (
+    v_today,
+    v_db_bytes,
+    v_storage_bytes,
+    v_delta_bytes,
+    0,
+    0,
+    v_tup_fetched,
+    greatest(1, v_delta_queries),
+    now()
+  )
+  on conflict (metric_date) do update
+    set db_size_bytes = excluded.db_size_bytes,
+        storage_size_bytes = excluded.storage_size_bytes,
+        db_egress_bytes = public.system_telemetry_daily.db_egress_bytes + v_delta_bytes,
+        pg_tuples_snapshot = v_tup_fetched,
+        query_count = public.system_telemetry_daily.query_count + v_delta_queries,
+        updated_at = now();
+
+  select
+    coalesce(sum(t.total_bytes), 0)::bigint,
+    coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'table_name', t.table_name,
+          'total_bytes', t.total_bytes,
+          'estimated_rows', t.estimated_rows
+        )
+        order by t.total_bytes desc, t.table_name asc
+      ),
+      '[]'::jsonb
+    )
+  into v_public_bytes, v_tables_json
+  from (
+    select
+      c.relname::text as table_name,
+      pg_total_relation_size(c.oid)::bigint as total_bytes,
+      greatest(c.reltuples::bigint, 0)::bigint as estimated_rows
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relkind = 'r'
+  ) t;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'bucket_id', bk.bucket_id,
+        'is_public', bk.is_public,
+        'file_size_limit', bk.file_size_limit,
+        'used_bytes', bk.used_bytes,
+        'file_count', bk.file_count
+      )
+      order by bk.used_bytes desc, bk.bucket_id asc
+    ),
+    '[]'::jsonb
+  )
+  into v_buckets_json
+  from (
+    select
+      b.id::text as bucket_id,
+      coalesce(b.public, false) as is_public,
+      b.file_size_limit,
+      coalesce(sum((o.metadata->>'size')::bigint), 0)::bigint as used_bytes,
+      count(o.id)::bigint as file_count
+    from storage.buckets b
+    left join storage.objects o on o.bucket_id = b.id
+    group by b.id, b.public, b.file_size_limit
+  ) bk;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'date', to_char(d.day_date, 'YYYY-MM-DD'),
+        'db_size_bytes', coalesce(st.db_size_bytes, v_db_bytes),
+        'storage_size_bytes', coalesce(st.storage_size_bytes, v_storage_bytes),
+        'db_egress_bytes', coalesce(st.db_egress_bytes, 0),
+        'storage_egress_bytes', coalesce(st.storage_egress_bytes, 0),
+        'export_egress_bytes', coalesce(st.export_egress_bytes, 0),
+        'total_egress_bytes',
+          coalesce(st.db_egress_bytes, 0)
+          + coalesce(st.storage_egress_bytes, 0)
+          + coalesce(st.export_egress_bytes, 0),
+        'query_count', coalesce(st.query_count, 0)
+      )
+      order by d.day_date asc
+    ),
+    '[]'::jsonb
+  )
+  into v_daily_json
+  from (
+    select gs::date as day_date
+    from generate_series(v_today - 13, v_today, interval '1 day') as gs
+  ) d
+  left join public.system_telemetry_daily st on st.metric_date = d.day_date;
+
+  select jsonb_build_object(
+    'month_start', to_char(v_month_start, 'YYYY-MM-DD'),
+    'db_egress_bytes', coalesce(sum(db_egress_bytes), 0)::bigint,
+    'storage_egress_bytes', coalesce(sum(storage_egress_bytes), 0)::bigint,
+    'export_egress_bytes', coalesce(sum(export_egress_bytes), 0)::bigint,
+    'total_egress_bytes',
+      (
+        coalesce(sum(db_egress_bytes), 0)
+        + coalesce(sum(storage_egress_bytes), 0)
+        + coalesce(sum(export_egress_bytes), 0)
+      )::bigint,
+    'query_count', coalesce(sum(query_count), 0)::bigint
+  )
+  into v_month_json
+  from public.system_telemetry_daily
+  where metric_date >= v_month_start;
+
+  return jsonb_build_object(
+    'captured_at', now(),
+    'database', jsonb_build_object(
+      'total_bytes', v_db_bytes,
+      'public_tables_bytes', v_public_bytes,
+      'system_catalog_bytes', greatest(0, v_db_bytes - v_public_bytes),
+      'tables', v_tables_json
+    ),
+    'storage', jsonb_build_object(
+      'total_bytes', v_storage_bytes,
+      'total_files', v_total_files,
+      'buckets', v_buckets_json
+    ),
+    'pg_performance', jsonb_build_object(
+      'cache_hit_ratio', v_cache_ratio,
+      'blks_hit', v_blks_hit,
+      'blks_read', v_blks_read,
+      'xact_commit', v_xact_commit,
+      'xact_rollback', v_xact_rollback,
+      'tup_returned', v_tup_returned,
+      'tup_fetched', v_tup_fetched,
+      'tup_inserted', v_tup_inserted,
+      'tup_updated', v_tup_updated,
+      'tup_deleted', v_tup_deleted,
+      'active_backends', v_backends,
+      'sessions', v_sessions,
+      'stats_reset', v_stats_reset
+    ),
+    'daily_series', v_daily_json,
+    'month_summary', v_month_json
+  );
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- 10. ROW LEVEL SECURITY (RLS) POLICIES
 -- -----------------------------------------------------------------------------
 alter table public.profiles enable row level security;
@@ -2153,6 +2601,9 @@ alter table public.system_backups enable row level security;
 alter table public.monthly_reconciliations enable row level security;
 alter table public.internal_requests enable row level security;
 alter table public.audit_logs enable row level security;
+alter table public.system_telemetry_daily enable row level security;
+alter table public.share_short_links enable row level security;
+alter table public.delivery_share_links enable row level security;
 
 -- profiles
 drop policy if exists "profiles_select_active_or_self" on public.profiles;
@@ -2582,6 +3033,85 @@ create policy "audit_logs_insert_active" on public.audit_logs
     )
   );
 
+-- system_telemetry_daily (khusus OWNER & SUPER_ADMIN)
+drop policy if exists "system_telemetry_daily_select_admins" on public.system_telemetry_daily;
+create policy "system_telemetry_daily_select_admins" on public.system_telemetry_daily
+  for select to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
+
+drop policy if exists "system_telemetry_daily_insert_admins" on public.system_telemetry_daily;
+create policy "system_telemetry_daily_insert_admins" on public.system_telemetry_daily
+  for insert to authenticated
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
+
+drop policy if exists "system_telemetry_daily_update_admins" on public.system_telemetry_daily;
+create policy "system_telemetry_daily_update_admins" on public.system_telemetry_daily
+  for update to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
+
+-- share_short_links (pengguna aktif login; edit oleh pembuat atau MANAGEMENT)
+drop policy if exists "share_short_links_select_active" on public.share_short_links;
+create policy "share_short_links_select_active" on public.share_short_links
+  for select to authenticated
+  using ((select public.is_active_user()));
+
+drop policy if exists "share_short_links_insert_active" on public.share_short_links;
+create policy "share_short_links_insert_active" on public.share_short_links
+  for insert to authenticated
+  with check (
+    (select public.is_active_user())
+    and (created_by is null or created_by = (select auth.uid()))
+  );
+
+drop policy if exists "share_short_links_update_allowed" on public.share_short_links;
+create policy "share_short_links_update_allowed" on public.share_short_links
+  for update to authenticated
+  using (
+    (select public.is_active_user())
+    and (
+      (select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]))
+      or created_by = (select auth.uid())
+    )
+  )
+  with check (
+    (select public.is_active_user())
+    and (
+      (select public.has_role(array['OWNER', 'SUPER_ADMIN', 'TEAM_LEADER']::public.user_role[]))
+      or created_by = (select auth.uid())
+    )
+  );
+
+drop policy if exists "share_short_links_delete_admins" on public.share_short_links;
+create policy "share_short_links_delete_admins" on public.share_short_links
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
+
+-- delivery_share_links (khusus OWNER & SUPER_ADMIN)
+drop policy if exists "delivery_share_links_select_admins" on public.delivery_share_links;
+create policy "delivery_share_links_select_admins" on public.delivery_share_links
+  for select to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
+
+drop policy if exists "delivery_share_links_insert_admins" on public.delivery_share_links;
+create policy "delivery_share_links_insert_admins" on public.delivery_share_links
+  for insert to authenticated
+  with check (
+    (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+    and (created_by is null or created_by = (select auth.uid()))
+  );
+
+drop policy if exists "delivery_share_links_update_admins" on public.delivery_share_links;
+create policy "delivery_share_links_update_admins" on public.delivery_share_links
+  for update to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])))
+  with check ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
+
+drop policy if exists "delivery_share_links_delete_admins" on public.delivery_share_links;
+create policy "delivery_share_links_delete_admins" on public.delivery_share_links
+  for delete to authenticated
+  using ((select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[])));
+
 -- -----------------------------------------------------------------------------
 -- 11. SUPABASE PRIVATE STORAGE BUCKETS & POLICIES
 -- -----------------------------------------------------------------------------
@@ -2739,6 +3269,15 @@ alter default privileges in schema public
 revoke all on public.locations_master from public, anon;
 grant select, insert, update, delete on public.locations_master to authenticated, service_role;
 
+revoke all on public.system_telemetry_daily from public, anon;
+grant select, insert, update on public.system_telemetry_daily to authenticated, service_role;
+
+revoke all on public.share_short_links from public, anon;
+grant select, insert, update, delete on public.share_short_links to authenticated, service_role;
+
+revoke all on public.delivery_share_links from public, anon;
+grant select, insert, update, delete on public.delivery_share_links to authenticated, service_role;
+
 revoke all on public.subscriptions_vault_directory from public, anon;
 grant select on public.subscriptions_vault_directory to authenticated, service_role;
 
@@ -2832,6 +3371,15 @@ grant execute on function public.guard_internal_requests_transition() to service
 revoke all on function public.log_table_audit() from public, anon, authenticated;
 grant execute on function public.log_table_audit() to service_role;
 
+revoke all on function public.guard_locations_master_by_role() from public, anon, authenticated;
+grant execute on function public.guard_locations_master_by_role() to service_role;
+
+revoke all on function public.record_egress_telemetry(bigint, bigint, bigint, bigint) from public, anon, authenticated;
+grant execute on function public.record_egress_telemetry(bigint, bigint, bigint, bigint) to service_role;
+
+revoke all on function public.get_admin_infrastructure_metrics() from public, anon, authenticated;
+grant execute on function public.get_admin_infrastructure_metrics() to service_role;
+
 -- -----------------------------------------------------------------------------
 -- 13. CATATAN PENJADWALAN CRON (OPSIONAL pg_cron / VERCEL CRON)
 -- -----------------------------------------------------------------------------
@@ -2840,3 +3388,187 @@ grant execute on function public.log_table_audit() to service_role;
 --   select cron.schedule('starops-recycle-purge', '0 18 * * *', $$select public.purge_expired_recycle_bin(30);$$);
 -- Sementara jadwal Pre-Update, H-7 Pengkinian Data (tgl 24), dan Cut-Off Akhir
 -- Bulan (23:59 WIB) dieksekusi oleh Vercel Cron /api/cron/monthly-backup.
+
+-- -----------------------------------------------------------------------------
+-- 14. BARCODE & LABEL PRINT STUDIO PRESETS (barcode_label_presets)
+-- -----------------------------------------------------------------------------
+create table if not exists public.barcode_label_presets (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (char_length(trim(name)) between 2 and 80),
+  description text,
+  is_default boolean not null default false,
+  config_json jsonb not null check (jsonb_typeof(config_json) = 'object'),
+  created_by uuid references public.profiles(id) on delete set null,
+  updated_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_barcode_label_presets_single_default
+  on public.barcode_label_presets (is_default)
+  where is_default = true;
+
+create index if not exists idx_barcode_label_presets_created_by
+  on public.barcode_label_presets (created_by);
+
+create index if not exists idx_barcode_label_presets_updated_by
+  on public.barcode_label_presets (updated_by);
+
+drop trigger if exists trg_barcode_label_presets_updated_at on public.barcode_label_presets;
+create trigger trg_barcode_label_presets_updated_at
+  before update on public.barcode_label_presets
+  for each row execute function public.set_updated_at();
+
+alter table public.barcode_label_presets enable row level security;
+
+revoke all on public.barcode_label_presets from public, anon;
+grant select, insert, update, delete on public.barcode_label_presets to authenticated, service_role;
+
+drop policy if exists "barcode_label_presets_select_admins" on public.barcode_label_presets;
+create policy "barcode_label_presets_select_admins" on public.barcode_label_presets
+  for select to authenticated
+  using (
+    (select public.is_active_user())
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+  );
+
+drop policy if exists "barcode_label_presets_insert_admins" on public.barcode_label_presets;
+create policy "barcode_label_presets_insert_admins" on public.barcode_label_presets
+  for insert to authenticated
+  with check (
+    (select public.is_active_user())
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+    and (created_by is null or created_by = (select auth.uid()))
+  );
+
+drop policy if exists "barcode_label_presets_update_admins" on public.barcode_label_presets;
+create policy "barcode_label_presets_update_admins" on public.barcode_label_presets
+  for update to authenticated
+  using (
+    (select public.is_active_user())
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+  )
+  with check (
+    (select public.is_active_user())
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+  );
+
+drop policy if exists "barcode_label_presets_delete_admins" on public.barcode_label_presets;
+create policy "barcode_label_presets_delete_admins" on public.barcode_label_presets
+  for delete to authenticated
+  using (
+    (select public.is_active_user())
+    and (select public.has_role(array['OWNER', 'SUPER_ADMIN']::public.user_role[]))
+  );
+
+insert into public.barcode_label_presets (name, description, is_default, config_json)
+select v.name, v.description, v.is_default, v.config_json
+from (
+  values
+    (
+      'Sekali Tempel 50×30 (QR Besar)',
+      'Stiker thermal permanen 50×30 mm dengan QR besar 65% link pendek tanpa stok/part dinamis.',
+      true,
+      '{
+        "symbology": "QR",
+        "template": "THERMAL",
+        "thermalSize": "50x30",
+        "customThermalSize": { "widthMm": 60, "heightMm": 40 },
+        "a4Preset": "TJ_121_24",
+        "spineSize": "150x35",
+        "spinePaperMode": "A4_SHEET",
+        "content": {
+          "showHeader": true,
+          "customHeaderText": "STAR CHAMPS INDONESIA",
+          "showHeaderSubtitle": true,
+          "showTitle": true,
+          "showCategory": true,
+          "showCodeText": true,
+          "showLocation": true,
+          "showStockQty": false,
+          "showPartCounter": false,
+          "showArchiveDigitalIndicator": true,
+          "showStatusTag": false,
+          "showScanHint": true,
+          "customScanHint": "Scan QR untuk detail & stok",
+          "showBorderFrame": false,
+          "qrPayloadMode": "SHORT_PREVIEW",
+          "qrErrorLevel": "L",
+          "qrSizePercent": 65,
+          "qrLayout": "SIDE_BY_SIDE",
+          "qrQuietZone": 1
+        }
+      }'::jsonb
+    ),
+    (
+      'QR Dominan 80% Persegi 50×50',
+      'Stiker persegi 50×50 mm dengan blok QR raksasa 80% untuk pindai cepat dan teks ringkas.',
+      false,
+      '{
+        "symbology": "QR",
+        "template": "THERMAL",
+        "thermalSize": "50x50",
+        "customThermalSize": { "widthMm": 60, "heightMm": 40 },
+        "a4Preset": "A4_SQUARE_12",
+        "spineSize": "150x35",
+        "spinePaperMode": "A4_SHEET",
+        "content": {
+          "showHeader": false,
+          "customHeaderText": "STAR CHAMPS INDONESIA",
+          "showHeaderSubtitle": false,
+          "showTitle": true,
+          "showCategory": false,
+          "showCodeText": true,
+          "showLocation": false,
+          "showStockQty": false,
+          "showPartCounter": false,
+          "showArchiveDigitalIndicator": false,
+          "showStatusTag": false,
+          "showScanHint": false,
+          "customScanHint": "Scan QR untuk detail & stok",
+          "showBorderFrame": false,
+          "qrPayloadMode": "SHORT_PREVIEW",
+          "qrErrorLevel": "L",
+          "qrSizePercent": 80,
+          "qrLayout": "QR_DOMINANT",
+          "qrQuietZone": 1
+        }
+      }'::jsonb
+    ),
+    (
+      'Label A4 Grid 24/Hal (Combo)',
+      'Kertas label Tom & Jerry No. 121 (24 stiker/halaman A4) mode Combo 1D + QR tanpa stok/part.',
+      false,
+      '{
+        "symbology": "COMBO",
+        "template": "A4_GRID",
+        "thermalSize": "50x30",
+        "customThermalSize": { "widthMm": 60, "heightMm": 40 },
+        "a4Preset": "TJ_121_24",
+        "spineSize": "150x35",
+        "spinePaperMode": "A4_SHEET",
+        "content": {
+          "showHeader": true,
+          "customHeaderText": "STAR CHAMPS INDONESIA",
+          "showHeaderSubtitle": true,
+          "showTitle": true,
+          "showCategory": true,
+          "showCodeText": true,
+          "showLocation": true,
+          "showStockQty": false,
+          "showPartCounter": false,
+          "showArchiveDigitalIndicator": true,
+          "showStatusTag": false,
+          "showScanHint": true,
+          "customScanHint": "Scan QR untuk detail & stok",
+          "showBorderFrame": false,
+          "qrPayloadMode": "SHORT_PREVIEW",
+          "qrErrorLevel": "L",
+          "qrSizePercent": 65,
+          "qrLayout": "SIDE_BY_SIDE",
+          "qrQuietZone": 1
+        }
+      }'::jsonb
+    )
+) as v(name, description, is_default, config_json)
+where not exists (select 1 from public.barcode_label_presets);

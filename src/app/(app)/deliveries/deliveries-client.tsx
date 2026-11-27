@@ -19,6 +19,7 @@ import {
   Printer,
   RotateCcw,
   Search,
+  Share2,
   Sparkles,
   Trash2,
   Truck,
@@ -33,6 +34,7 @@ import {
 import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
+import { SharePreviewDialog } from "@/components/share/share-preview-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -165,6 +167,7 @@ export function DeliveriesClient({
 
   const [deleteTarget, setDeleteTarget] = useState<DeliveryLog | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [shareDelivery, setShareDelivery] = useState<DeliveryLog | null>(null);
 
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [bannerError, setBannerError] = useState<string | null>(null);
@@ -614,7 +617,7 @@ export function DeliveriesClient({
                 setDirectionTab(val as "ALL" | DeliveryDirection)
               }
             >
-              <TabsList className="rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-background">
+              <TabsList className="h-auto w-full flex-wrap justify-start rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] sm:w-auto dark:border-stone-600 dark:bg-background">
                 <TabsTrigger
                   value="ALL"
                   className="rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#FFE8D6] data-[state=active]:text-[#2C2623]"
@@ -653,7 +656,7 @@ export function DeliveriesClient({
                   setStatusFilter(v as "ALL" | DeliveryStatus)
                 }
               >
-                <SelectTrigger className="w-[180px] rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-stone-600 dark:bg-background">
+                <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold sm:w-[180px] dark:border-stone-600 dark:bg-background">
                   <SelectValue placeholder="Semua Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -668,7 +671,7 @@ export function DeliveriesClient({
                 </SelectContent>
               </Select>
 
-              <label className="flex cursor-pointer items-center gap-2 rounded-xl border-2 border-[#2C2623] bg-[#FEF9C3]/85 px-3 py-2 text-xs font-bold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-colors hover:bg-[#FEF08A] dark:border-amber-400/50 dark:bg-amber-950/50 dark:text-amber-100">
+              <label className="flex w-full cursor-pointer items-center gap-2 rounded-xl border-2 border-[#2C2623] bg-[#FEF9C3]/85 px-3 py-2 text-xs font-bold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] transition-colors hover:bg-[#FEF08A] sm:w-auto dark:border-amber-400/50 dark:bg-amber-950/50 dark:text-amber-100">
                 <Checkbox
                   checked={onlyUnconverted}
                   onCheckedChange={(checked) =>
@@ -960,6 +963,17 @@ export function DeliveriesClient({
 
                             <Button
                               size="sm"
+                              variant="outline"
+                              onClick={() => setShareDelivery(d)}
+                              title="Bagikan Link Pendek Pratinjau Surat Jalan / Pengiriman"
+                              className="rounded-xl border-2 border-[#2C2623] bg-[#CCFBF1] font-extrabold text-[#115E59] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#99F6E4] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none dark:border-teal-400/50 dark:bg-teal-950/60 dark:text-teal-200"
+                            >
+                              <Share2 className="size-3.5" />
+                              Share
+                            </Button>
+
+                            <Button
+                              size="sm"
                               variant="ghost"
                               onClick={() => openDetailDialog(d)}
                               title="Lihat Detail & Bukti Foto"
@@ -1036,7 +1050,7 @@ export function DeliveriesClient({
           if (!open) setDetailDelivery(null);
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
           {detailDelivery && (
             <>
               <DialogHeader>
@@ -1073,7 +1087,7 @@ export function DeliveriesClient({
               </DialogHeader>
 
               <div className="space-y-4 text-sm">
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                   <div className="rounded-2xl border-2 border-[#2C2623]/70 bg-[#FFF4E6] p-3.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-orange-950/25">
                     <p className="text-muted-foreground text-[11px] font-extrabold tracking-wide uppercase">
                       Pengirim / Pihak Pertama
@@ -1098,7 +1112,7 @@ export function DeliveriesClient({
                   </div>
                 </div>
 
-                <div className="grid gap-2 rounded-2xl border-2 border-[#2C2623]/60 bg-[#FEFCE8] p-3.5 text-xs sm:grid-cols-4 dark:border-stone-600 dark:bg-amber-950/20">
+                <div className="grid grid-cols-2 gap-2 rounded-2xl border-2 border-[#2C2623]/60 bg-[#FEFCE8] p-3.5 text-xs sm:grid-cols-4 dark:border-stone-600 dark:bg-amber-950/20 [&>*]:min-w-0">
                   <div>
                     <span className="text-muted-foreground">PIC:</span>{" "}
                     <strong>{detailDelivery.pic_name || "-"}</strong>
@@ -1123,7 +1137,7 @@ export function DeliveriesClient({
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-2xl border-2 border-[#2C2623]/60 bg-white p-3.5 dark:border-stone-600 dark:bg-card">
+                <div className="min-w-0 overflow-hidden rounded-2xl border-2 border-[#2C2623]/60 bg-white p-3.5 dark:border-stone-600 dark:bg-card">
                   <p className="mb-2 text-xs font-extrabold tracking-wide uppercase">
                     Rincian Barang
                   </p>
@@ -1167,7 +1181,7 @@ export function DeliveriesClient({
                   </Table>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
                   <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-[#2C2623]/70 bg-white p-3.5 text-slate-900">
                     <p className="mb-2 text-xs font-extrabold tracking-wide text-slate-600 uppercase">
                       Barcode Pengiriman (Code-128)
@@ -1208,6 +1222,15 @@ export function DeliveriesClient({
               </div>
 
               <DialogFooter className="flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShareDelivery(detailDelivery)}
+                  className="rounded-xl border-2 border-[#2C2623] bg-[#CCFBF1] font-extrabold text-[#115E59] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#99F6E4]"
+                >
+                  <Share2 className="size-4" />
+                  Share Link
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
@@ -1281,10 +1304,10 @@ export function DeliveriesClient({
                 (item, idx) => (
                   <div
                     key={item.id || idx}
-                    className="flex items-center justify-between border-b border-[#2C2623]/15 pb-2 last:border-b-0 last:pb-0"
+                    className="flex flex-wrap items-center justify-between gap-2 border-b border-[#2C2623]/15 pb-2 last:border-b-0 last:pb-0"
                   >
-                    <div>
-                      <p className="font-bold">{item.name}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold break-words">{item.name}</p>
                       <p className="text-muted-foreground">
                         Prefix: <strong>{item.category_prefix}</strong> · Lokasi:{" "}
                         <strong>{item.room_code}</strong> ({getLabel(item.room_code)}) ·{" "}
@@ -1293,7 +1316,7 @@ export function DeliveriesClient({
                     </div>
                     <Badge
                       variant="outline"
-                      className="rounded-full border-[1.5px] border-[#2C2623] bg-white font-bold text-[#2C2623] dark:bg-background dark:text-foreground"
+                      className="shrink-0 rounded-full border-[1.5px] border-[#2C2623] bg-white font-bold text-[#2C2623] dark:bg-background dark:text-foreground"
                     >
                       {item.split_units &&
                       item.asset_type !== "CONSUMABLE" &&
@@ -1371,6 +1394,26 @@ export function DeliveriesClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SharePreviewDialog
+        open={Boolean(shareDelivery)}
+        onOpenChange={(open) => {
+          if (!open) setShareDelivery(null);
+        }}
+        target={
+          shareDelivery
+            ? {
+                type: "DELIVERY",
+                id: shareDelivery.id,
+                code: shareDelivery.delivery_code,
+                title:
+                  shareDelivery.package_type?.trim() ||
+                  `${shareDelivery.sender_name} → ${shareDelivery.receiver_name}`,
+                locationCode: null,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

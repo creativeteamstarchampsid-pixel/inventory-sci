@@ -1,5 +1,24 @@
 /* Print-ready layout rules for Barcode & Label Print Studio */
 
+.barcode-sticker-root {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.barcode-text-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  hyphens: none;
+}
+
+.barcode-qr-svg,
+.barcode-qr-svg path,
+.barcode-sticker-root svg {
+  shape-rendering: crispEdges;
+}
+
 @media screen {
   .barcode-print-only {
     display: none;
@@ -21,10 +40,12 @@
   body {
     margin: 0 !important;
     padding: 0 !important;
+    width: auto !important;
+    height: auto !important;
     background: #ffffff !important;
     color: #000000 !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   [data-slot="sidebar-wrapper"],
@@ -34,11 +55,12 @@
     margin: 0 !important;
     padding: 0 !important;
     max-width: none !important;
-    width: 100% !important;
+    width: auto !important;
     min-height: 0 !important;
     background: #ffffff !important;
     box-shadow: none !important;
     border-radius: 0 !important;
+    overflow: visible !important;
   }
 
   .barcode-print-only {
@@ -53,6 +75,7 @@
 
   .barcode-print-page {
     box-sizing: border-box;
+    margin: 0 !important;
     background: #ffffff !important;
     color: #000000 !important;
     overflow: hidden;
@@ -68,5 +91,22 @@
   .barcode-print-page--last {
     page-break-after: auto;
     break-after: auto;
+  }
+
+  .barcode-sticker-root {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .barcode-text-wrap {
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+    text-overflow: clip !important;
+  }
+
+  .barcode-qr-svg,
+  .barcode-sticker-root svg {
+    shape-rendering: crispEdges !important;
   }
 }

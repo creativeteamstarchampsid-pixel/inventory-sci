@@ -246,8 +246,8 @@ function DocumentSheetContent({
           />
         </div>
 
-        <div className="mt-3 overflow-hidden rounded border border-slate-400">
-          <table className="w-full border-collapse text-xs">
+        <div className="mt-3 overflow-x-auto rounded border border-slate-400 print:overflow-visible">
+          <table className="w-full min-w-[540px] border-collapse text-xs print:min-w-0">
             <thead>
               <tr className="border-b border-slate-400 bg-slate-100 text-left">
                 <th className="w-10 px-2.5 py-2 font-semibold">No</th>
@@ -298,7 +298,7 @@ function DocumentSheetContent({
           </div>
         )}
 
-        <div className="mt-6 grid grid-cols-3 gap-4 text-center text-xs">
+        <div className="mt-6 grid grid-cols-1 gap-4 text-center text-xs sm:grid-cols-3 print:grid-cols-3">
           <div className="rounded border border-slate-200 p-3">
             <p className="font-semibold">Pengirim</p>
             <p className="text-[11px] text-slate-500">{delivery.sender_name}</p>
@@ -402,8 +402,8 @@ function DocumentSheetContent({
         />
       </div>
 
-      <div className="mt-3 overflow-hidden rounded border border-slate-400">
-        <table className="w-full border-collapse text-xs">
+      <div className="mt-3 overflow-x-auto rounded border border-slate-400 print:overflow-visible">
+        <table className="w-full min-w-[540px] border-collapse text-xs print:min-w-0">
           <thead>
             <tr className="border-b border-slate-400 bg-slate-100 text-left">
               <th className="w-10 px-2.5 py-2 font-semibold">No</th>
@@ -463,7 +463,7 @@ function DocumentSheetContent({
         Kedua.
       </p>
 
-      <div className="mt-6 grid grid-cols-3 gap-4 text-center text-xs">
+      <div className="mt-6 grid grid-cols-1 gap-4 text-center text-xs sm:grid-cols-3 print:grid-cols-3">
         <div className="rounded border border-slate-200 p-3">
           <p className="font-semibold">Pihak Pertama (Yang Menyerahkan)</p>
           <p className="text-[11px] text-slate-500">{delivery.sender_name}</p>
@@ -588,7 +588,7 @@ export function DeliveryPrintDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle className="flex flex-wrap items-center gap-2 font-extrabold">
               <span>Dokumen Logistik &amp; Cetak</span>
@@ -611,7 +611,7 @@ export function DeliveryPrintDialog({
             className="mt-1"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <TabsList className="rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-600 dark:bg-background">
+              <TabsList className="h-auto w-full flex-wrap justify-start rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1 shadow-[2px_2px_0px_0px_#2C2623] sm:w-auto dark:border-stone-600 dark:bg-background">
                 <TabsTrigger
                   value="label"
                   className="gap-1.5 rounded-xl font-bold data-[state=active]:border-[1.5px] data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#FFE8D6] data-[state=active]:text-[#2C2623]"
@@ -635,7 +635,7 @@ export function DeliveryPrintDialog({
                 </TabsTrigger>
               </TabsList>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -717,7 +717,7 @@ export function DeliveryPrintDialog({
               </div>
             </TabsContent>
 
-            <div className="mt-3 rounded-2xl border-2 border-[#2C2623]/40 bg-[#F5EFE6]/80 p-4 dark:border-stone-700 dark:bg-muted/50">
+            <div className="mt-3 overflow-x-auto rounded-2xl border-2 border-[#2C2623]/40 bg-[#F5EFE6]/80 p-3 sm:p-4 dark:border-stone-700 dark:bg-muted/50">
               <DocumentSheetContent
                 docType={activeTab}
                 delivery={delivery}

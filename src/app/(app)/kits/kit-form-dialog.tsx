@@ -153,7 +153,7 @@ export function KitFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <Badge
@@ -184,7 +184,7 @@ export function KitFormDialog({
             </Alert>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="kit-name" className="font-bold">
                 Nama Paket Kit *
@@ -299,20 +299,21 @@ export function KitFormDialog({
                           : "hover:bg-[#FEF3C7]/35 dark:hover:bg-stone-800/50"
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex min-w-0 flex-1 items-center gap-2.5">
                         <Checkbox
                           checked={checked}
                           onCheckedChange={() => toggleItem(item.id)}
                           disabled={isPending}
+                          className="shrink-0"
                         />
-                        <div>
-                          <p className="font-bold leading-tight">{item.name}</p>
-                          <p className="text-muted-foreground font-mono text-xs">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-bold leading-tight">{item.name}</p>
+                          <p className="text-muted-foreground truncate font-mono text-xs">
                             {item.item_code} · {item.room_code}
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex shrink-0 items-center gap-1.5">
                         <Badge
                           variant="outline"
                           className="rounded-full border-[1.5px] border-[#2C2623] bg-[#FFFDF7] font-mono text-[11px] font-bold dark:border-stone-400 dark:bg-stone-900"

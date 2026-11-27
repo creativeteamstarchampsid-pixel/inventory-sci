@@ -32,6 +32,8 @@ import { getLocationsDirectory } from "@/lib/locations";
 import { formatJakartaDate, getJakartaGreeting, getMonthlyUpdatePeriod } from "@/lib/period";
 import { can, canAccessRoute, ROLE_LABELS, type Role } from "@/lib/rbac";
 import { createClient } from "@/lib/supabase/server";
+import { loadAdminInfrastructureMetrics } from "@/lib/telemetry";
+import { InfrastructureChartsCard } from "./infrastructure-charts-card";
 import type {
   AuditLog,
   BorrowStatus,
@@ -151,9 +153,10 @@ const ROLE_QUICK_TIPS: Record<
     bubbleMascot: "chiikawa",
     cheerLabel: "Mode Kendali Penuh ✨",
     summary:
-      "Sebagai Owner, Anda memegang kendali penuh operasional serta wewenang pengesahan akhir untuk pembelian beranggaran, penghapusan aset, penguncian laporan bulanan, pemulihan database, dan manajemen seluruh tim.",
+      "Sebagai Owner, Anda memegang kendali penuh operasional serta wewenang pengesahan akhir untuk pembelian beranggaran, penghapusan aset, penguncian laporan bulanan, pemulihan database, kapasitas penyimpanan & egress, serta manajemen seluruh tim dan ruangan.",
     actions: [
       { label: "Pengesahan Menunggu Owner", href: "/requests" },
+      { label: "Ruangan & Lemari Arsip", href: "/rooms" },
       { label: "Laporan & Penguncian Bulanan", href: "/backup" },
       { label: "Brankas Akun Digital", href: "/vault" },
       { label: "Kelola Seluruh Tim", href: "/settings" },
@@ -170,9 +173,10 @@ const ROLE_QUICK_TIPS: Record<
     bubbleMascot: "dino",
     cheerLabel: "Siap Kelola Operasional! ♪",
     summary:
-      "Sebagai Admin Operasional, Anda mengelola daftar barang & alat terapi, mencetak stiker barcode, mencatat pengiriman paket, mengatur Brankas Akun Digital, membuat cadangan data, dan mengelola akun Terapis & Kepala Terapis.",
+      "Sebagai Admin Operasional, Anda mengelola daftar barang & alat terapi, nama ruangan & lemari arsip, kapasitas penyimpanan & egress, mencetak stiker barcode, mencatat pengiriman paket, Brankas Akun Digital, serta akun Terapis & Kepala Terapis.",
     actions: [
       { label: "Kelola Barang & Alat", href: "/inventory" },
+      { label: "Ruangan & Lemari Arsip", href: "/rooms" },
       { label: "Cetak Stiker Barcode", href: "/barcode-studio" },
       { label: "Paket & Pengiriman", href: "/deliveries" },
       { label: "Kelola Akun Tim", href: "/settings" },
@@ -253,6 +257,13 @@ function getQuickShortcutTiles(role: Role): QuickShortcutTile[] {
       hint: "Kotak siap pakai",
       mascot: "star",
       tileBg: "bg-[#FEF3C7] dark:bg-amber-950/55",
+    },
+    {
+      href: "/rooms",
+      label: "Ruangan & Lemari",
+      hint: "Ubah nama lokasi",
+      mascot: "room",
+      tileBg: "bg-[#CCFBF1] dark:bg-teal-950/55",
     },
     {
       href: "/requests",
@@ -605,9 +616,13 @@ export default async function DashboardPage() {
   const greeting = getJakartaGreeting();
   const todayLabel = formatJakartaDate();
   const todayMs = getJakartaTodayMs();
-  const [metrics, locationsDir] = await Promise.all([
+  const canViewInfrastructure = can(user.role, "infrastructure.view");
+  const [metrics, locationsDir, infraMetrics] = await Promise.all([
     loadDashboardMetrics(user.id, user.role, period.periodCode, todayMs),
     getLocationsDirectory(),
+    canViewInfrastructure
+      ? loadAdminInfrastructureMetrics(user.role)
+      : Promise.resolve(null),
   ]);
   const roleTip = ROLE_QUICK_TIPS[user.role];
   const visibleActions = roleTip.actions.filter((act) => canAccessRoute(user.role, act.href));
@@ -705,7 +720,7 @@ export default async function DashboardPage() {
               </span>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="min-w-0 flex-1 space-y-1.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={`animate-kawaii-pop inline-flex items-center gap-1 rounded-full border-2 border-[#2C2623] px-3 py-0.5 text-xs font-extrabold shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 ${roleTip.pillBg}`}
@@ -718,7 +733,7 @@ export default async function DashboardPage() {
                 </span>
               </div>
 
-              <h1 className="text-2xl font-black tracking-tight text-[#2C2623] sm:text-3xl dark:text-stone-100">
+              <h1 className="text-2xl font-black tracking-tight break-words text-[#2C2623] sm:text-3xl dark:text-stone-100">
                 {greeting}, {user.fullName} 👋
               </h1>
               <p className="text-sm font-medium text-[#574E49] dark:text-stone-300">
@@ -761,7 +776,7 @@ export default async function DashboardPage() {
 
         {/* Speech Bubble Container */}
         <div
-          className={`relative flex-1 rounded-3xl border-2 border-[#2C2623] p-5 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)] ${roleTip.bubbleBg}`}
+          className={`relative min-w-0 flex-1 rounded-3xl border-2 border-[#2C2623] p-5 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)] ${roleTip.bubbleBg}`}
         >
           {/* Speech Bubble Comic Tail (Desktop) */}
           <span
@@ -770,7 +785,7 @@ export default async function DashboardPage() {
           />
 
           <div className="relative z-10 flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] px-3 py-0.5 text-xs font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100">
                   💬 Peran Anda: {ROLE_LABELS[user.role].title} ({ROLE_LABELS[user.role].subtitle})
@@ -985,7 +1000,7 @@ export default async function DashboardPage() {
                 <div className="flex size-12 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1.5 shadow-[2px_2px_0px_0px_#2C2623] transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110 group-hover:-rotate-6 dark:border-stone-500 dark:bg-stone-900">
                   <KawaiiMascotSvg type={tile.mascot} className="size-9" />
                 </div>
-                <div className="min-w-0">
+                <div className="w-full min-w-0">
                   <p className="truncate text-xs font-extrabold text-[#2C2623] dark:text-stone-100">
                     {tile.label}
                   </p>
@@ -999,17 +1014,25 @@ export default async function DashboardPage() {
         </section>
       )}
 
+      {/* Storage Capacity & PostgreSQL Egress Charts (OWNER & SUPER_ADMIN ONLY) */}
+      {canViewInfrastructure && infraMetrics && (
+        <InfrastructureChartsCard
+          telemetry={infraMetrics}
+          canManageLocations={can(user.role, "locations.manage")}
+        />
+      )}
+
       {/* Role-Specific Operational Widgets (Balanced 2-Column Grid) */}
       {isStaff && (
         <div className="kawaii-stagger grid gap-5 lg:grid-cols-2">
           <Card className="gap-0 overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] py-0 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
             <CardHeader className="border-b-2 border-[#2C2623] bg-[#E0F2FE] px-5 py-4 dark:border-stone-500 dark:bg-sky-950/55">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="flex items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
-                  <span className="flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-sky-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-sky-300">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle className="flex min-w-0 items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-sky-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-sky-300">
                     <ArrowLeftRight className="size-4" />
                   </span>
-                  Pinjaman Aktif Anda Saat Ini
+                  <span className="min-w-0 break-words">Pinjaman Aktif Anda Saat Ini</span>
                 </CardTitle>
                 <Button
                   asChild
@@ -1135,12 +1158,12 @@ export default async function DashboardPage() {
         <div className="kawaii-stagger grid gap-5 lg:grid-cols-2">
           <Card className="gap-0 overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] py-0 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
             <CardHeader className="border-b-2 border-[#2C2623] bg-[#EDE9FE] px-5 py-4 dark:border-stone-500 dark:bg-violet-950/55">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="flex items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
-                  <span className="flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-violet-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-violet-300">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle className="flex min-w-0 items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-violet-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-violet-300">
                     <DatabaseBackup className="size-4" />
                   </span>
-                  Cek Ruangan Akhir Bulan ({period.periodLabel})
+                  <span className="min-w-0 break-words">Cek Ruangan Akhir Bulan ({period.periodLabel})</span>
                 </CardTitle>
                 <Button
                   asChild
@@ -1157,7 +1180,7 @@ export default async function DashboardPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3.5 p-5 text-sm">
-              <div className="flex items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2.5 dark:border-stone-700 dark:bg-stone-800/60">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2.5 dark:border-stone-700 dark:bg-stone-800/60">
                 <span className="text-muted-foreground font-medium">Status Jadwal Bulan Ini</span>
                 <Badge
                   variant={period.active ? "default" : "outline"}
@@ -1168,7 +1191,7 @@ export default async function DashboardPage() {
               </div>
 
               <div className="space-y-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-3 dark:border-stone-700 dark:bg-stone-800/60">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-muted-foreground font-medium">Kelengkapan Cek Ruangan</span>
                   <span className="font-black text-[#2C2623] dark:text-stone-100">
                     {opnameProgress}% Ruangan Selesai
@@ -1182,7 +1205,7 @@ export default async function DashboardPage() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2.5 dark:border-stone-700 dark:bg-stone-800/60">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2.5 dark:border-stone-700 dark:bg-stone-800/60">
                 <span className="text-muted-foreground font-medium">
                   Persetujuan Kepala Terapis
                 </span>
@@ -1261,12 +1284,12 @@ export default async function DashboardPage() {
           {can(user.role, "vault.view_limited") && (
             <Card className="gap-0 overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] py-0 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
               <CardHeader className="border-b-2 border-[#2C2623] bg-[#E0F2FE] px-5 py-4 dark:border-stone-500 dark:bg-sky-950/55">
-                <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="flex items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
-                    <span className="flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-sky-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-sky-300">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <CardTitle className="flex min-w-0 items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-sky-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-sky-300">
                       <KeyRound className="size-4" />
                     </span>
-                    Pengingat Tagihan Langganan Digital (7 Hari)
+                    <span className="min-w-0 break-words">Pengingat Tagihan Langganan Digital (7 Hari)</span>
                   </CardTitle>
                   <Button
                     asChild
@@ -1326,12 +1349,12 @@ export default async function DashboardPage() {
           {can(user.role, "backup.view") && (
             <Card className="gap-0 overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] py-0 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
               <CardHeader className="border-b-2 border-[#2C2623] bg-[#EDE9FE] px-5 py-4 dark:border-stone-500 dark:bg-violet-950/55">
-                <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="flex items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
-                    <span className="flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-violet-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-violet-300">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <CardTitle className="flex min-w-0 items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-violet-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-violet-300">
                       <DatabaseBackup className="size-4" />
                     </span>
-                    Akhir Bulan &amp; Cadangan Data ({period.periodLabel})
+                    <span className="min-w-0 break-words">Akhir Bulan &amp; Cadangan Data ({period.periodLabel})</span>
                   </CardTitle>
                   <Button
                     asChild
@@ -1348,7 +1371,7 @@ export default async function DashboardPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 p-5 text-sm">
-                <div className="flex items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2 dark:border-stone-700 dark:bg-stone-800/60">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2 dark:border-stone-700 dark:bg-stone-800/60">
                   <span className="text-muted-foreground font-medium">Status Jadwal Bulan Ini</span>
                   <Badge
                     variant={period.active ? "default" : "outline"}
@@ -1361,7 +1384,7 @@ export default async function DashboardPage() {
                 </div>
 
                 <div className="space-y-1.5 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2.5 dark:border-stone-700 dark:bg-stone-800/60">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-muted-foreground font-medium">
                       Kelengkapan Cek Ruangan
                     </span>
@@ -1377,7 +1400,7 @@ export default async function DashboardPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2 dark:border-stone-700 dark:bg-stone-800/60">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2 dark:border-stone-700 dark:bg-stone-800/60">
                   <span className="text-muted-foreground font-medium">Cadangan Data Awal</span>
                   <span className="rounded-full border border-[#2C2623]/40 bg-[#D1FAE5] px-2.5 py-0.5 text-xs font-extrabold text-[#2C2623] dark:border-stone-500 dark:bg-emerald-950/70 dark:text-emerald-200">
                     {metrics.reconciliation?.pre_update_backup_id
@@ -1386,7 +1409,7 @@ export default async function DashboardPage() {
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2 dark:border-stone-700 dark:bg-stone-800/60">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2 dark:border-stone-700 dark:bg-stone-800/60">
                   <span className="text-muted-foreground font-medium">Status Kunci Owner</span>
                   <Badge
                     variant={metrics.reconciliation?.locked_at ? "secondary" : "outline"}
@@ -1397,7 +1420,7 @@ export default async function DashboardPage() {
                 </div>
 
                 {can(user.role, "delivery.view") && (
-                  <div className="flex items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#FFEDD5] px-3.5 py-2.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-orange-950/45">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#FFEDD5] px-3.5 py-2.5 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-orange-950/45">
                     <span className="flex items-center gap-2 font-bold text-[#2C2623] dark:text-orange-100">
                       <Truck className="size-4 text-orange-600 dark:text-orange-300" />
                       Paket Pengiriman Sedang Jalan
@@ -1420,12 +1443,12 @@ export default async function DashboardPage() {
       {can(user.role, "audit.view") && (
         <Card className="gap-0 overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] py-0 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
           <CardHeader className="border-b-2 border-[#2C2623] bg-[#FFE4E6] px-5 py-4 dark:border-stone-500 dark:bg-rose-950/50">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
-                <span className="flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-rose-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-rose-300">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="flex min-w-0 items-center gap-2.5 text-base font-black text-[#2C2623] dark:text-stone-100">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FFFDF7] text-rose-700 shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-rose-300">
                   <History className="size-4" />
                 </span>
-                Kegiatan Terbaru Tim
+                <span className="min-w-0 break-words">Kegiatan Terbaru Tim</span>
               </CardTitle>
               <Button
                 asChild
@@ -1465,13 +1488,13 @@ export default async function DashboardPage() {
                       key={log.id}
                       className="flex flex-col justify-between gap-2 rounded-2xl border-2 border-[#2C2623]/20 bg-white px-3.5 py-2.5 transition-all hover:border-[#2C2623] hover:shadow-[2px_2px_0px_0px_#2C2623] sm:flex-row sm:items-center dark:border-stone-700 dark:bg-stone-800/60 dark:hover:border-stone-400"
                     >
-                      <div className="flex items-start gap-2.5">
+                      <div className="flex min-w-0 items-start gap-2.5">
                         <span
                           aria-hidden
                           className={`mt-1.5 size-3 shrink-0 rounded-full border-2 border-[#2C2623] dark:border-stone-400 ${dotBg}`}
                         />
-                        <div>
-                          <p className="font-bold text-[#2C2623] dark:text-stone-100">
+                        <div className="min-w-0">
+                          <p className="font-bold break-words text-[#2C2623] dark:text-stone-100">
                             {log.summary}
                           </p>
                           <p className="text-muted-foreground text-xs font-medium">

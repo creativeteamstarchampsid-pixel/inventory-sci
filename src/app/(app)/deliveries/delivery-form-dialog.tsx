@@ -431,7 +431,7 @@ export function DeliveryFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle className="font-extrabold">
             {isEditing
@@ -667,14 +667,14 @@ export function DeliveryFormDialog({
                     : "pelacakan item keluar."}
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 {inventoryItems.length > 0 && (
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex w-full items-center gap-1.5 sm:w-auto">
                     <Select
                       value={pickerItemId}
                       onValueChange={(val) => addInventoryItemToPayload(val)}
                     >
-                      <SelectTrigger size="sm" className="w-[210px]">
+                      <SelectTrigger size="sm" className="w-full sm:w-[220px]">
                         <SelectValue placeholder="Ambil dari Inventaris..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -727,7 +727,7 @@ export function DeliveryFormDialog({
                     </Button>
                   </div>
 
-                  <div className="grid gap-2.5 sm:grid-cols-12">
+                  <div className="grid gap-2.5 sm:grid-cols-12 [&>*]:min-w-0">
                     <div className="space-y-1 sm:col-span-5">
                       <Label className="text-xs font-semibold">
                         Nama Barang / Aset / Kunci
@@ -801,7 +801,7 @@ export function DeliveryFormDialog({
                   </div>
 
                   {/* Inventory mapping fields (crucial for Inbound 1-Click Stock Conversion) */}
-                  <div className="grid gap-2.5 border-t border-dashed border-[#2C2623]/20 pt-2.5 sm:grid-cols-12">
+                  <div className="grid gap-2.5 border-t border-dashed border-[#2C2623]/20 pt-2.5 sm:grid-cols-12 [&>*]:min-w-0">
                     <div className="space-y-1 sm:col-span-3">
                       <Label className="text-xs font-semibold">
                         Prefix Kode

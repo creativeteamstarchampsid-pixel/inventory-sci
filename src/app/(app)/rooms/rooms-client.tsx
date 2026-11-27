@@ -812,7 +812,7 @@ export function RoomsClient({
             </Tabs>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="relative flex-1">
+              <div className="relative min-w-0 flex-1">
                 <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
                 <Input
                   value={search}
@@ -822,7 +822,7 @@ export function RoomsClient({
                 />
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Select
                   value={statusFilter}
                   onValueChange={(val) => setStatusFilter(val as StatusFilter)}
@@ -879,7 +879,7 @@ export function RoomsClient({
             }
           />
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 [&>*]:min-w-0">
             {filteredLocations.map((loc) => {
               const style = GROUP_STYLES[loc.location_group];
               const GroupIcon = style.icon;
@@ -908,7 +908,7 @@ export function RoomsClient({
                 <div
                   key={loc.code}
                   className={cn(
-                    "flex flex-col justify-between overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] transition-transform duration-200 hover:-translate-y-0.5 dark:border-[#6D5D54] dark:bg-[#28221F] dark:shadow-[4px_4px_0px_0px_#0E0B0A]",
+                    "flex min-w-0 flex-col justify-between overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] transition-transform duration-200 hover:-translate-y-0.5 dark:border-[#6D5D54] dark:bg-[#28221F] dark:shadow-[4px_4px_0px_0px_#0E0B0A]",
                     !loc.is_active && "opacity-80",
                   )}
                 >
@@ -1160,7 +1160,7 @@ export function RoomsClient({
 
         {/* Create Location Dialog */}
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 font-extrabold">
                 <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#6EE7B7] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
@@ -1186,7 +1186,7 @@ export function RoomsClient({
             )}
 
             <form onSubmit={handleCreateSubmit} className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                 <div className="space-y-1.5">
                   <Label className="font-bold">Grup Lokasi *</Label>
                   <Select
@@ -1284,10 +1284,10 @@ export function RoomsClient({
               {showLegacyArchiveWarning && (
                 <div className="flex items-start gap-2 rounded-2xl border-2 border-[#2C2623]/60 bg-[#FFFBE6] px-3 py-2.5 text-xs font-semibold text-[#57493F] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:bg-amber-950/40 dark:text-amber-100">
                   <Info className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-300" />
-                  <span>
+                  <span className="min-w-0">
                     <strong>Catatan Lemari Baru ({normalizedCreateCode}):</strong>{" "}
                     Jika Anda belum menjalankan migrasi{" "}
-                    <code className="font-mono">
+                    <code className="font-mono break-all">
                       supabase/migrations/20261124_locations_master.sql
                     </code>{" "}
                     di Supabase SQL Editor, batasan tabel arsip lama hanya
@@ -1303,10 +1303,10 @@ export function RoomsClient({
               {showCustomEnumWarning && (
                 <div className="flex items-start gap-2 rounded-2xl border-2 border-[#2C2623]/60 bg-[#FFFBE6] px-3 py-2.5 text-xs font-semibold text-[#57493F] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:bg-amber-950/40 dark:text-amber-100">
                   <Info className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-300" />
-                  <span>
+                  <span className="min-w-0">
                     <strong>Catatan Kode Kustom ({normalizedCreateCode}):</strong>{" "}
                     Kode di luar daftar preset standar memerlukan migrasi{" "}
-                    <code className="font-mono">
+                    <code className="font-mono break-all">
                       supabase/migrations/20261124_locations_master.sql
                     </code>{" "}
                     di Supabase SQL Editor (konversi kolom lokasi ke{" "}
@@ -1316,7 +1316,7 @@ export function RoomsClient({
                 </div>
               )}
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                 <div className="space-y-1.5">
                   <Label htmlFor="create-loc-name" className="font-bold">
                     Nama Lokasi *
@@ -1453,7 +1453,7 @@ export function RoomsClient({
           }}
         >
           <DialogContent
-            className="max-h-[90vh] overflow-y-auto sm:max-w-xl"
+            className="max-h-[90dvh] overflow-y-auto sm:max-w-xl"
             onOpenAutoFocus={(event) => {
               event.preventDefault();
               editNameInputRef.current?.focus();
@@ -1509,7 +1509,7 @@ export function RoomsClient({
                 )}
 
                 <form onSubmit={handleEditSubmit} className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                     <div className="space-y-1.5">
                       <Label htmlFor="edit-loc-name" className="font-bold">
                         Nama Lokasi *
@@ -1573,7 +1573,7 @@ export function RoomsClient({
                     </div>
                   )}
 
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                     <div className="space-y-1.5">
                       <Label htmlFor="edit-loc-pic" className="font-bold">
                         Penanggung Jawab / PIC (Opsional)
@@ -1619,7 +1619,7 @@ export function RoomsClient({
                     />
                   </div>
 
-                  <div className="grid gap-3 rounded-2xl border-2 border-[#2C2623]/20 bg-[#FAF6EE]/80 p-3.5 sm:grid-cols-2 dark:border-[#6D5D54]/40 dark:bg-[#221D1A]">
+                  <div className="grid gap-3 rounded-2xl border-2 border-[#2C2623]/20 bg-[#FAF6EE]/80 p-3.5 sm:grid-cols-2 dark:border-[#6D5D54]/40 dark:bg-[#221D1A] [&>*]:min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <div className="space-y-0.5">
                         <Label
@@ -1698,7 +1698,7 @@ export function RoomsClient({
             }
           }}
         >
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 font-extrabold text-[#9F1239] dark:text-rose-300">
                 <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDA4AF] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">

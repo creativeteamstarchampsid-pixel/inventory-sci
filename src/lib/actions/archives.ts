@@ -14,6 +14,7 @@ import {
   sanitizeTextInput,
 } from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
+import { recordStorageObjectEgress } from "@/lib/telemetry";
 import type { ArchivePhysicalStatus, Database, LocationCode } from "@/types/database";
 
 export type ActionResult<T = void> =
@@ -378,6 +379,8 @@ export async function getArchiveSignedUrlAction(input: {
       ),
     };
   }
+
+  await recordStorageObjectEgress("archives", safePath, 250_000);
 
   return {
     ok: true,

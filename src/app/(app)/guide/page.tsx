@@ -561,7 +561,7 @@ export default async function UserGuidePage() {
         title="Cara Mudah Menggunakan StarOps"
         description={`Panduan ini disusun khusus untuk peran ${ROLE_LABELS[user.role].title} (${ROLE_LABELS[user.role].subtitle}) agar seluruh tugas harian Anda di StarOps berjalan cepat, jelas, dan rapi.`}
         actions={
-          <div className="flex flex-col items-start gap-1.5 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] px-3.5 py-2.5 shadow-[3px_3px_0px_0px_#2C2623] sm:items-end dark:border-stone-500 dark:bg-stone-900">
+          <div className="flex max-w-full flex-col items-start gap-1.5 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] px-3.5 py-2.5 shadow-[3px_3px_0px_0px_#2C2623] sm:items-end dark:border-stone-500 dark:bg-stone-900">
             <span className="text-muted-foreground text-[11px] font-bold">
               Anda sedang masuk sebagai:
             </span>
@@ -649,7 +649,7 @@ export default async function UserGuidePage() {
               <div className="flex size-16 shrink-0 -rotate-2 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1.5 shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900">
                 <KawaiiMascotSvg type={currentRoleGuide.mascot} className="size-13" />
               </div>
-              <div className="space-y-1.5">
+              <div className="min-w-0 flex-1 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
                   <RoleBadge
                     role={currentRoleGuide.role}
@@ -663,7 +663,7 @@ export default async function UserGuidePage() {
                     Peran Anda Saat Ini
                   </Badge>
                 </div>
-                <CardTitle className="text-xl font-black text-[#2C2623] dark:text-stone-100">
+                <CardTitle className="text-xl font-black break-words text-[#2C2623] dark:text-stone-100">
                   {currentRoleGuide.badgeTitle}
                 </CardTitle>
                 <CardDescription className="text-sm leading-relaxed font-medium text-[#463F3A] dark:text-stone-200">
@@ -684,7 +684,7 @@ export default async function UserGuidePage() {
                 </span>
                 <span>Apa Saja yang Perlu Anda Ketahui?</span>
               </h3>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                 {currentRoleGuide.whatToKnow.map((point, idx) => {
                   const style = STEP_STICKER_STYLES[idx % STEP_STICKER_STYLES.length];
                   return (
@@ -697,7 +697,7 @@ export default async function UserGuidePage() {
                       >
                         {idx + 1}
                       </span>
-                      <span>{point}</span>
+                      <span className="min-w-0 break-words">{point}</span>
                     </div>
                   );
                 })}
@@ -714,13 +714,13 @@ export default async function UserGuidePage() {
                 </span>
                 <span>Cara Penggunaan Sehari-hari (Langkah Demi Langkah)</span>
               </h3>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
                 {visibleSteps.map((step, idx) => {
                   const style = STEP_STICKER_STYLES[idx % STEP_STICKER_STYLES.length];
                   return (
                     <div
                       key={step.step}
-                      className={`group flex flex-col justify-between gap-4 rounded-2xl border-2 border-[#2C2623] p-4 shadow-[4px_4px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:shadow-[5px_5px_0px_0px_#2C2623] dark:border-stone-500 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)] ${style.tint}`}
+                      className={`group flex min-w-0 flex-col justify-between gap-4 rounded-2xl border-2 border-[#2C2623] p-4 shadow-[4px_4px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:shadow-[5px_5px_0px_0px_#2C2623] dark:border-stone-500 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)] ${style.tint}`}
                     >
                       <div className="space-y-2.5">
                         <div className="flex items-center gap-3">
@@ -730,14 +730,14 @@ export default async function UserGuidePage() {
                           >
                             {idx + 1}
                           </span>
-                          <div className="space-y-0.5">
+                          <div className="min-w-0 flex-1 space-y-0.5">
                             <Badge
                               variant="outline"
                               className={`border-2 border-[#2C2623] text-[11px] font-black dark:border-stone-500 ${style.pill}`}
                             >
                               {step.step}
                             </Badge>
-                            <h4 className="text-sm leading-snug font-black text-[#2C2623] dark:text-stone-100">
+                            <h4 className="text-sm leading-snug font-black break-words text-[#2C2623] dark:text-stone-100">
                               {step.title}
                             </h4>
                           </div>
@@ -778,7 +778,7 @@ export default async function UserGuidePage() {
                   <Badge
                     key={m}
                     variant="secondary"
-                    className="rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] px-3 py-1 text-xs font-bold whitespace-normal text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
+                    className="rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] px-3 py-1 text-left text-xs font-bold whitespace-normal text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
                   >
                     ✓ {m}
                   </Badge>
@@ -836,11 +836,11 @@ export default async function UserGuidePage() {
       {/* Footer Callout */}
       <Card className="gap-0 overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-gradient-to-r from-[#D1FAE5] via-[#FEF3C7]/85 to-[#E0F2FE] py-0 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:from-emerald-950/50 dark:via-amber-950/30 dark:to-sky-950/50 dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.45)]">
         <CardContent className="flex flex-col items-start justify-between gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 items-center gap-4">
             <div className="flex size-15 shrink-0 rotate-2 items-center justify-center rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1.5 shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900">
               <KawaiiMascotSvg type="chiikawa" className="size-12" />
             </div>
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <h3 className="text-base font-black text-[#2C2623] dark:text-stone-100">
                 Siap Mulai Bekerja Hari Ini? ♪
               </h3>

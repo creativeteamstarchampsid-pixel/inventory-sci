@@ -73,7 +73,7 @@ export function UserMenu() {
                   {getInitials(user.fullName)}
                 </AvatarFallback>
               </Avatar>
-              <div className="grid flex-1 text-left text-sm leading-tight">
+              <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-extrabold">{user.fullName}</span>
                 <span className="text-muted-foreground truncate text-xs font-semibold">
                   {ROLE_LABELS[role].title}
@@ -83,7 +83,7 @@ export function UserMenu() {
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            className="w-(--radix-dropdown-menu-trigger-width) min-w-60 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1.5 shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:bg-[#28221F] dark:shadow-[4px_4px_0px_0px_#0E0B0A]"
+            className="w-(--radix-dropdown-menu-trigger-width) max-w-[calc(100vw-1.5rem)] min-w-60 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] p-1.5 shadow-[4px_4px_0px_0px_#2C2623] dark:border-[#6D5D54] dark:bg-[#28221F] dark:shadow-[4px_4px_0px_0px_#0E0B0A]"
             side={isMobile ? "bottom" : "right"}
             align="end"
             sideOffset={6}

@@ -439,7 +439,7 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
         </CardHeader>
         <CardContent className="pt-5">
           <Tabs value={activeTab} onValueChange={handleTabChange}>
-            <TabsList className="mb-5 flex h-auto flex-wrap justify-start gap-1.5">
+            <TabsList className="mb-5 flex h-auto w-full flex-wrap justify-start gap-1.5">
               {TAB_CONFIG.map((tab) => {
                 const count = recordsByTable[tab.table].length;
                 return (
@@ -459,7 +459,7 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
             {/* Bulk Selection Action Bar */}
             {canSelectRows && activeRows.length > 0 && (
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-[#2C2623] bg-[#FFFBE6]/90 px-4 py-2.5 shadow-[3px_3px_0px_0px_#2C2623] dark:border-[#F5E9D6]/40 dark:bg-amber-950/30">
-                <div className="flex items-center gap-2.5">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <Button
                     type="button"
                     size="sm"
@@ -522,7 +522,7 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
                       description={`Tidak ada data terhapus di modul ${tab.label}. Semua catatan masih aman rapi di tempatnya~`}
                     />
                   ) : (
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-4 md:grid-cols-2 [&>*]:min-w-0">
                       {rows.map((row) => {
                         const isSelected = validSelectedIds.includes(row.id);
                         const isUrgent = row.daysRemaining <= 5;
@@ -545,15 +545,15 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
                         return (
                           <div
                             key={row.id}
-                            className={`flex flex-col justify-between overflow-hidden rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/40 dark:bg-card ${
+                            className={`flex min-w-0 flex-col justify-between overflow-hidden rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/40 dark:bg-card ${
                               isSelected ? "ring-2 ring-[#2AB673] ring-offset-2" : ""
                             }`}
                           >
                             {/* Card Top Pastel Strip */}
                             <div
-                              className={`flex items-center justify-between gap-2 border-b-2 border-dashed border-[#2C2623]/25 px-4 py-2.5 ${topStripClass}`}
+                              className={`flex flex-wrap items-center justify-between gap-2 border-b-2 border-dashed border-[#2C2623]/25 px-4 py-2.5 ${topStripClass}`}
                             >
-                              <div className="flex items-center gap-2.5">
+                              <div className="flex min-w-0 items-center gap-2.5">
                                 {canSelectRows && (
                                   <Checkbox
                                     checked={isSelected}
@@ -565,7 +565,7 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
                                     className="border-2 border-[#2C2623] bg-[#FFFDF7]"
                                   />
                                 )}
-                                <span className="rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] px-2.5 py-0.5 font-mono text-xs font-extrabold text-[#2C2623] dark:bg-background dark:text-foreground">
+                                <span className="truncate rounded-full border-2 border-[#2C2623] bg-[#FFFDF7] px-2.5 py-0.5 font-mono text-xs font-extrabold text-[#2C2623] dark:bg-background dark:text-foreground">
                                   {row.code}
                                 </span>
                               </div>
@@ -573,8 +573,8 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
                                 variant={isUrgent ? "destructive" : "outline"}
                                 className={
                                   isUrgent
-                                    ? "font-extrabold"
-                                    : "border-[#2C2623] bg-[#FFFDF7] font-bold text-[#2C2623] dark:bg-background dark:text-foreground"
+                                    ? "shrink-0 font-extrabold"
+                                    : "shrink-0 border-[#2C2623] bg-[#FFFDF7] font-bold text-[#2C2623] dark:bg-background dark:text-foreground"
                                 }
                               >
                                 <Clock className="mr-1 size-3" />
@@ -586,11 +586,11 @@ export function RecycleBinClient({ recordsByTable }: RecycleBinClientProps) {
 
                             {/* Card Body */}
                             <div className="space-y-3 p-4">
-                              <div>
-                                <h3 className="text-sm leading-snug font-extrabold">
+                              <div className="min-w-0">
+                                <h3 className="text-sm leading-snug font-extrabold break-words">
                                   {row.title}
                                 </h3>
-                                <p className="text-muted-foreground mt-0.5 text-xs">
+                                <p className="text-muted-foreground mt-0.5 text-xs break-words">
                                   {row.subtitle}
                                 </p>
                               </div>

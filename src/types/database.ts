@@ -911,6 +911,186 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      system_telemetry_daily: {
+        Row: {
+          metric_date: string;
+          db_size_bytes: number;
+          storage_size_bytes: number;
+          db_egress_bytes: number;
+          storage_egress_bytes: number;
+          export_egress_bytes: number;
+          pg_tuples_snapshot: number;
+          query_count: number;
+          updated_at: string;
+        };
+        Insert: {
+          metric_date: string;
+          db_size_bytes?: number;
+          storage_size_bytes?: number;
+          db_egress_bytes?: number;
+          storage_egress_bytes?: number;
+          export_egress_bytes?: number;
+          pg_tuples_snapshot?: number;
+          query_count?: number;
+          updated_at?: string;
+        };
+        Update: {
+          metric_date?: string;
+          db_size_bytes?: number;
+          storage_size_bytes?: number;
+          db_egress_bytes?: number;
+          storage_egress_bytes?: number;
+          export_egress_bytes?: number;
+          pg_tuples_snapshot?: number;
+          query_count?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      share_short_links: {
+        Row: {
+          id: string;
+          slug: string;
+          target_type: "ITEM" | "ARCHIVE";
+          target_id: string;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          slug: string;
+          target_type: "ITEM" | "ARCHIVE";
+          target_id: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          slug?: string;
+          target_type?: "ITEM" | "ARCHIVE";
+          target_id?: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "share_short_links_created_by_fkey";
+            columns: ["created_by"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "share_short_links_updated_by_fkey";
+            columns: ["updated_by"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      delivery_share_links: {
+        Row: {
+          id: string;
+          slug: string;
+          delivery_id: string;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          slug: string;
+          delivery_id: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          slug?: string;
+          delivery_id?: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "delivery_share_links_delivery_id_fkey";
+            columns: ["delivery_id"];
+            referencedRelation: "deliveries_log";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "delivery_share_links_created_by_fkey";
+            columns: ["created_by"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "delivery_share_links_updated_by_fkey";
+            columns: ["updated_by"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      barcode_label_presets: {
+        Row: {
+          id: string;
+          name: string;
+          description: string | null;
+          is_default: boolean;
+          config_json: Json;
+          created_by: string | null;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          description?: string | null;
+          is_default?: boolean;
+          config_json: Json;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          description?: string | null;
+          is_default?: boolean;
+          config_json?: Json;
+          created_by?: string | null;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "barcode_label_presets_created_by_fkey";
+            columns: ["created_by"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "barcode_label_presets_updated_by_fkey";
+            columns: ["updated_by"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {
       subscriptions_vault_directory: {
@@ -966,6 +1146,19 @@ export type Database = {
         Args: { p_days?: number };
         Returns: Json;
       };
+      record_egress_telemetry: {
+        Args: {
+          p_db_bytes?: number;
+          p_storage_bytes?: number;
+          p_export_bytes?: number;
+          p_queries?: number;
+        };
+        Returns: undefined;
+      };
+      get_admin_infrastructure_metrics: {
+        Args: Record<PropertyKey, never>;
+        Returns: Json;
+      };
     };
     Enums: {
       user_role: UserRole;
@@ -1018,3 +1211,6 @@ export type SystemBackup = Tables<"system_backups">;
 export type MonthlyReconciliation = Tables<"monthly_reconciliations">;
 export type InternalRequest = Tables<"internal_requests">;
 export type AuditLog = Tables<"audit_logs">;
+export type ShareShortLink = Tables<"share_short_links">;
+export type DeliveryShareLink = Tables<"delivery_share_links">;
+export type BarcodeLabelPreset = Tables<"barcode_label_presets">;

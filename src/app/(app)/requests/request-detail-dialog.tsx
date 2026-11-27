@@ -119,7 +119,7 @@ export function RequestDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[6px_6px_0px_0px_#2C2623] sm:max-w-2xl dark:border-[#F5EFE6]/30 dark:bg-card dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.6)]">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[6px_6px_0px_0px_#2C2623] sm:max-w-2xl dark:border-[#F5EFE6]/30 dark:bg-card dark:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.6)]">
         <DialogHeader className="space-y-2 border-b-2 border-dashed border-[#2C2623]/20 pb-3 dark:border-border">
           <DialogTitle className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center rounded-xl border-2 border-[#2C2623] bg-[#FFE4EC] px-2.5 py-0.5 font-mono text-sm font-extrabold text-[#7A1C3C] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5EFE6]/30 dark:bg-pink-950/60 dark:text-pink-200 dark:shadow-none">
@@ -179,22 +179,22 @@ export function RequestDetailDialog({
               {linkedItem && (
                 <Link
                   href={`/inventory/${linkedItem.id}`}
-                  className="inline-flex items-center gap-2 rounded-xl border-2 border-[#2C2623] bg-[#DFF2FF] px-3 py-1.5 text-xs font-bold text-[#0C4A6E] shadow-[2.5px_2.5px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-sky-500/40 dark:bg-sky-950/50 dark:text-sky-100 dark:shadow-none"
+                  className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-xl border-2 border-[#2C2623] bg-[#DFF2FF] px-3 py-1.5 text-xs font-bold break-words text-[#0C4A6E] shadow-[2.5px_2.5px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-sky-500/40 dark:bg-sky-950/50 dark:text-sky-100 dark:shadow-none"
                 >
-                  <Package className="size-3.5" />
-                  <span className="font-mono font-extrabold">
+                  <Package className="size-3.5 shrink-0" />
+                  <span className="shrink-0 font-mono font-extrabold">
                     {linkedItem.item_code}
                   </span>
-                  <span>{linkedItem.name}</span>
+                  <span className="min-w-0 break-words">{linkedItem.name}</span>
                 </Link>
               )}
               {linkedSub && (
-                <div className="inline-flex items-center gap-2 rounded-xl border-2 border-[#2C2623] bg-[#F3E8FF] px-3 py-1.5 text-xs font-bold text-[#5B21B6] shadow-[2.5px_2.5px_0px_0px_#2C2623] dark:border-purple-500/40 dark:bg-purple-950/50 dark:text-purple-100 dark:shadow-none">
-                  <KeyRound className="size-3.5" />
-                  <span className="font-mono font-extrabold">
+                <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-xl border-2 border-[#2C2623] bg-[#F3E8FF] px-3 py-1.5 text-xs font-bold break-words text-[#5B21B6] shadow-[2.5px_2.5px_0px_0px_#2C2623] dark:border-purple-500/40 dark:bg-purple-950/50 dark:text-purple-100 dark:shadow-none">
+                  <KeyRound className="size-3.5 shrink-0" />
+                  <span className="shrink-0 font-mono font-extrabold">
                     {linkedSub.sub_code}
                   </span>
-                  <span>{linkedSub.service_name}</span>
+                  <span className="min-w-0 break-words">{linkedSub.service_name}</span>
                 </div>
               )}
             </div>
@@ -225,7 +225,7 @@ export function RequestDetailDialog({
               </span>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-3 [&>*]:min-w-0">
               {/* Tier 1 */}
               <div
                 className={`relative rounded-2xl border-2 p-3 text-xs transition-all ${

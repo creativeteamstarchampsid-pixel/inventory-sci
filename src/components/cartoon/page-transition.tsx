@@ -17,7 +17,7 @@ export function KawaiiPageTransition({
   return (
     <div
       key={pathname}
-      className={cn("animate-kawaii-page-enter print:animate-none", className)}
+      className={cn("animate-kawaii-page-enter min-w-0 print:animate-none", className)}
     >
       {children}
     </div>

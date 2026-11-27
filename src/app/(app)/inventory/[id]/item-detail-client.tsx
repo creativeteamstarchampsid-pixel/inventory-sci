@@ -16,6 +16,7 @@ import {
   Pencil,
   Plus,
   QrCode,
+  Share2,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import { KawaiiEmptyState, KawaiiPageHeader } from "@/components/cartoon/kawaii-
 import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
+import { SharePreviewDialog } from "@/components/share/share-preview-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -115,6 +117,7 @@ export function ItemDetailClient({
   const [editOpen, setEditOpen] = useState(false);
   const [createSubOpen, setCreateSubOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState<ItemMaster | null>(null);
 
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
@@ -319,6 +322,14 @@ export function ItemDetailClient({
         mascot="box"
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShareTarget(item)}
+              className="border-2 border-[#2C2623] bg-[#CCFBF1] font-extrabold text-[#115E59] shadow-[2.5px_2.5px_0px_0px_#2C2623] hover:bg-[#99F6E4] dark:border-stone-500 dark:bg-teal-950/60 dark:text-teal-200 dark:shadow-none"
+            >
+              <Share2 className="size-4" />
+              Share Link
+            </Button>
             <Button variant="outline" asChild className="bg-[#FFFDF7] dark:bg-stone-900">
               <Link href={`/scan?code=${encodeURIComponent(item.item_code)}`}>
                 <QrCode className="size-4" />
@@ -363,11 +374,11 @@ export function ItemDetailClient({
         {parentItem && (
           <Link
             href={`/inventory/${parentItem.id}`}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-full border-[1.5px] border-[#2C2623] bg-[#EDE9FE] px-3 py-0.5 text-xs font-bold text-[#4C1D95] shadow-[1.5px_1.5px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-stone-400 dark:bg-violet-950/70 dark:text-violet-200"
+            className="inline-flex max-w-full items-center gap-1.5 rounded-full border-[1.5px] border-[#2C2623] bg-[#EDE9FE] px-3 py-0.5 text-xs font-bold text-[#4C1D95] shadow-[1.5px_1.5px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 sm:ml-auto dark:border-stone-400 dark:bg-violet-950/70 dark:text-violet-200"
           >
-            <span>Induk:</span>
-            <span className="font-mono">{parentItem.item_code}</span>
-            <span>— {parentItem.name}</span>
+            <span className="shrink-0">Induk:</span>
+            <span className="shrink-0 font-mono">{parentItem.item_code}</span>
+            <span className="min-w-0 truncate">— {parentItem.name}</span>
           </Link>
         )}
       </div>
@@ -390,7 +401,7 @@ export function ItemDetailClient({
         </Alert>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3 [&>*]:min-w-0">
         <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] lg:col-span-1 dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
           <CardHeader className="border-b-2 border-[#2C2623]/15 bg-[#FFE4E6]/45 dark:border-stone-700 dark:bg-rose-950/20">
             <CardTitle className="flex items-center gap-2 text-base font-extrabold">
@@ -417,7 +428,7 @@ export function ItemDetailClient({
               </div>
             )}
 
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-2xl border-2 border-[#2C2623]/15 bg-white/80 p-3.5 text-sm dark:border-stone-700 dark:bg-stone-900/50">
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-2xl border-2 border-[#2C2623]/15 bg-white/80 p-3.5 text-sm dark:border-stone-700 dark:bg-stone-900/50 [&>dd]:min-w-0 [&>dd]:break-words">
               <dt className="text-muted-foreground font-semibold">Kode Item</dt>
               <dd className="font-mono font-bold">{item.item_code}</dd>
               <dt className="text-muted-foreground font-semibold">Format Barcode</dt>
@@ -447,8 +458,8 @@ export function ItemDetailClient({
           </CardContent>
         </Card>
 
-        <div className="space-y-4 lg:col-span-2">
-          <div className="grid gap-4 md:grid-cols-2">
+        <div className="min-w-0 space-y-4 lg:col-span-2">
+          <div className="grid gap-4 md:grid-cols-2 [&>*]:min-w-0">
             <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
               <CardHeader className="border-b-2 border-[#2C2623]/15 bg-[#E0F2FE]/55 dark:border-stone-700 dark:bg-sky-950/25">
                 <CardTitle className="flex items-center gap-2 text-base font-extrabold">
@@ -517,8 +528,8 @@ export function ItemDetailClient({
                 />
 
                 {can("inventory.report_issue") && (
-                  <form onSubmit={handlePartsSubmit} className="flex items-end gap-2">
-                    <div className="flex-1 space-y-1">
+                  <form onSubmit={handlePartsSubmit} className="flex flex-wrap items-end gap-2">
+                    <div className="min-w-[140px] flex-1 space-y-1">
                       <Label htmlFor="detail-parts-input" className="text-xs font-bold">
                         Update Part ({item.unit_label})
                       </Label>
@@ -533,7 +544,7 @@ export function ItemDetailClient({
                         className="bg-white font-mono font-bold dark:bg-stone-900"
                       />
                     </div>
-                    <Button type="submit" size="sm" disabled={isPending}>
+                    <Button type="submit" size="sm" disabled={isPending} className="shrink-0">
                       {isPending && <Loader2 className="size-3.5 animate-spin" />}
                       Simpan Part
                     </Button>
@@ -576,9 +587,9 @@ export function ItemDetailClient({
                 {item.asset_type === "CONSUMABLE" && can("inventory.update") && (
                   <form
                     onSubmit={handleStockSubmit}
-                    className="flex items-end gap-2 border-t-2 border-dashed border-[#2C2623]/15 pt-3 dark:border-stone-700"
+                    className="flex flex-wrap items-end gap-2 border-t-2 border-dashed border-[#2C2623]/15 pt-3 dark:border-stone-700"
                   >
-                    <div className="flex-1 space-y-1">
+                    <div className="min-w-[140px] flex-1 space-y-1">
                       <Label htmlFor="detail-stock-input" className="text-xs font-bold">
                         Stok Fisik ({item.unit_label}, Min: {item.min_stock_threshold})
                       </Label>
@@ -592,7 +603,7 @@ export function ItemDetailClient({
                         className="bg-white font-mono font-bold dark:bg-stone-900"
                       />
                     </div>
-                    <Button type="submit" size="sm" variant="secondary" disabled={isPending}>
+                    <Button type="submit" size="sm" variant="secondary" disabled={isPending} className="shrink-0">
                       Update Stok
                     </Button>
                   </form>
@@ -616,7 +627,7 @@ export function ItemDetailClient({
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-4">
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5 [&>*]:min-w-0">
                   <div className="rounded-2xl border-[1.5px] border-[#2C2623]/25 bg-white p-3 dark:border-stone-600 dark:bg-stone-900/60">
                     <p className="text-muted-foreground text-xs font-semibold">Tanggal Perolehan</p>
                     <p className="mt-1 text-sm font-bold">{formatDateWIB(item.acquisition_date)}</p>
@@ -645,7 +656,7 @@ export function ItemDetailClient({
           )}
 
           <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[3px_3px_0px_0px_#0c0a09]">
-            <CardHeader className="flex flex-row items-center justify-between gap-2 border-b-2 border-[#2C2623]/15 bg-[#EDE9FE]/55 dark:border-stone-700 dark:bg-violet-950/25">
+            <CardHeader className="flex flex-col gap-3 border-b-2 border-[#2C2623]/15 bg-[#EDE9FE]/55 sm:flex-row sm:items-center sm:justify-between dark:border-stone-700 dark:bg-violet-950/25">
               <div>
                 <CardTitle className="flex items-center gap-2 text-base font-extrabold">
                   <span className="inline-flex size-7 items-center justify-center rounded-xl border-[1.5px] border-[#2C2623] bg-[#FFFDF7] shadow-[1.5px_1.5px_0px_0px_#2C2623] dark:border-stone-400 dark:bg-stone-900">
@@ -687,6 +698,7 @@ export function ItemDetailClient({
                       <TableHead className="font-extrabold">Part</TableHead>
                       <TableHead className="font-extrabold">Kondisi</TableHead>
                       <TableHead className="font-extrabold">Sanitasi</TableHead>
+                      <TableHead className="text-right font-extrabold">Share</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -718,6 +730,18 @@ export function ItemDetailClient({
                             nextDue={child.next_sanitization_due}
                             todayWib={todayWib}
                           />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setShareTarget(child)}
+                            className="h-7 rounded-xl border-2 border-[#2C2623] bg-[#CCFBF1] px-2.5 text-xs font-extrabold text-[#115E59] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#99F6E4] dark:border-stone-500 dark:bg-teal-950/60 dark:text-teal-200 dark:shadow-none"
+                          >
+                            <Share2 className="size-3.5" />
+                            Share
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -859,6 +883,24 @@ export function ItemDetailClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SharePreviewDialog
+        open={Boolean(shareTarget)}
+        onOpenChange={(open) => {
+          if (!open) setShareTarget(null);
+        }}
+        target={
+          shareTarget
+            ? {
+                type: "ITEM",
+                id: shareTarget.id,
+                code: shareTarget.item_code,
+                title: shareTarget.name,
+                locationCode: shareTarget.room_code,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

@@ -1445,9 +1445,9 @@ export function SettingsClient({
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center gap-2.5">
-                    <div className="inline-flex items-center gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] px-3.5 py-2 text-sm font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5E9D6]/35 dark:bg-muted/30 dark:text-foreground">
+                    <div className="inline-flex max-w-full min-w-0 items-center gap-2 rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] px-3.5 py-2 text-sm font-extrabold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-[#F5E9D6]/35 dark:bg-muted/30 dark:text-foreground">
                       <GoogleGIcon className="size-4 shrink-0" />
-                      <span>
+                      <span className="min-w-0 break-all">
                         {googleState.email ??
                           currentLoginEmail ??
                           "Akun Google Terhubung"}
@@ -2093,7 +2093,7 @@ export function SettingsClient({
                   return (
                     <div
                       key={member.id}
-                      className="flex flex-col justify-between overflow-hidden rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/40 dark:bg-card"
+                      className="flex min-w-0 flex-col justify-between overflow-hidden rounded-2xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[3px_3px_0px_0px_#2C2623] transition-transform hover:-translate-y-0.5 dark:border-[#F5E9D6]/40 dark:bg-card"
                     >
                       {/* Pastel Member Header */}
                       <div
@@ -2166,7 +2166,7 @@ export function SettingsClient({
                         </div>
 
                         {/* Role & Active Controls */}
-                        <div className="grid gap-3 rounded-xl border-2 border-[#2C2623]/20 bg-[#FFFDF7] p-3 sm:grid-cols-2 dark:border-[#F5E9D6]/20 dark:bg-muted/20">
+                        <div className="grid gap-3 rounded-xl border-2 border-[#2C2623]/20 bg-[#FFFDF7] p-3 sm:grid-cols-2 dark:border-[#F5E9D6]/20 dark:bg-muted/20 [&>*]:min-w-0">
                           <div className="space-y-1">
                             <span className="text-muted-foreground text-[11px] font-extrabold uppercase">
                               Peran Akses
@@ -2358,7 +2358,7 @@ export function SettingsClient({
       {/* Create / Invite User Dialog */}
       {canManageUsers && (
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 font-extrabold">
                 <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#A7F3D0] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
@@ -2552,7 +2552,7 @@ export function SettingsClient({
             if (!open) closeEditDialog();
           }}
         >
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 font-extrabold">
                 <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#BAE6FD] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
@@ -2740,7 +2740,7 @@ export function SettingsClient({
             if (!open) closeResetPasswordDialog();
           }}
         >
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 font-extrabold">
                 <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDE68A] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
@@ -2946,7 +2946,7 @@ export function SettingsClient({
             if (!open) closeDeleteDialog();
           }}
         >
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 font-extrabold text-[#9F1239] dark:text-rose-300">
                 <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDA4AF] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
@@ -3144,7 +3144,7 @@ export function SettingsClient({
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 font-extrabold text-[#9F1239] dark:text-rose-300">
               <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDA4AF] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">

@@ -16,6 +16,7 @@ import {
   QrCode,
   RotateCcw,
   Search,
+  Share2,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import {
 import { useLocations } from "@/components/providers/locations-provider";
 import { Can } from "@/components/rbac/can";
 import { useRole } from "@/components/rbac/role-provider";
+import { SharePreviewDialog } from "@/components/share/share-preview-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -123,6 +125,7 @@ export function InventoryClient({
   const [deleteTarget, setDeleteTarget] = useState<ItemMaster | null>(null);
   const [partDialogItem, setPartDialogItem] = useState<ItemMaster | null>(null);
   const [partCountInput, setPartCountInput] = useState<string>("1");
+  const [shareTarget, setShareTarget] = useState<ItemMaster | null>(null);
 
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
@@ -485,8 +488,8 @@ export function InventoryClient({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 pt-4">
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
-            <div className="relative lg:col-span-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 [&>*]:min-w-0">
+            <div className="relative sm:col-span-2">
               <Search className="text-muted-foreground absolute top-2.5 left-2.5 size-4" />
               <Input
                 value={search}
@@ -557,8 +560,8 @@ export function InventoryClient({
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="w-52">
+            <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+              <div className="w-full sm:w-52">
                 <Select value={hygieneFilter} onValueChange={setHygieneFilter}>
                   <SelectTrigger className="w-full rounded-xl border-2 border-[#2C2623] bg-white font-semibold dark:border-stone-500 dark:bg-stone-900">
                     <SelectValue placeholder="Status Sanitasi" />
@@ -850,6 +853,16 @@ export function InventoryClient({
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button
+                            variant="outline"
+                            size="sm"
+                            title="Bagikan Link Pratinjau Pendek"
+                            onClick={() => setShareTarget(item)}
+                            className="h-8 rounded-xl border-2 border-[#2C2623] bg-[#CCFBF1] px-2.5 text-xs font-extrabold text-[#115E59] shadow-[2px_2px_0px_0px_#2C2623] hover:bg-[#99F6E4] dark:border-stone-500 dark:bg-teal-950/60 dark:text-teal-200 dark:shadow-none"
+                          >
+                            <Share2 className="size-3.5" />
+                            Share
+                          </Button>
+                          <Button
                             variant="ghost"
                             size="icon"
                             asChild
@@ -1006,6 +1019,24 @@ export function InventoryClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SharePreviewDialog
+        open={Boolean(shareTarget)}
+        onOpenChange={(open) => {
+          if (!open) setShareTarget(null);
+        }}
+        target={
+          shareTarget
+            ? {
+                type: "ITEM",
+                id: shareTarget.id,
+                code: shareTarget.item_code,
+                title: shareTarget.name,
+                locationCode: shareTarget.room_code,
+              }
+            : null
+        }
+      />
     </div>
   );
 }

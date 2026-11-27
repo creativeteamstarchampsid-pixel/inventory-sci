@@ -9,6 +9,7 @@ import {
 import { can, isRole } from "@/lib/rbac";
 import { isValidPeriodYm, sanitizeSafeError } from "@/lib/security";
 import { createClient } from "@/lib/supabase/server";
+import { recordEgressTelemetry } from "@/lib/telemetry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -138,13 +139,19 @@ export async function GET(
 
     if (format === "csv") {
       const csv = generateCsvString(dataset, scope);
+      const byteLength = Buffer.byteLength(csv, "utf8");
+      await recordEgressTelemetry({
+        exportBytes: byteLength,
+        dbBytes: Math.round(byteLength * 0.35),
+        queries: 6,
+      });
       const filename = `starops-${scope}-${safePeriod}.csv`;
       return new NextResponse(csv, {
         status: 200,
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
           "Content-Disposition": `attachment; filename="${filename}"`,
-          "Content-Length": String(Buffer.byteLength(csv, "utf8")),
+          "Content-Length": String(byteLength),
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
         },
@@ -155,6 +162,11 @@ export async function GET(
       const { generateXlsxBuffer } = await import("@/lib/exports/xlsx");
       const buffer = await generateXlsxBuffer(dataset);
       const bytes = new Uint8Array(buffer);
+      await recordEgressTelemetry({
+        exportBytes: bytes.byteLength,
+        dbBytes: Math.round(bytes.byteLength * 0.35),
+        queries: 6,
+      });
       const filename = `starops-laporan-${safePeriod}.xlsx`;
       return new NextResponse(bytes, {
         status: 200,
@@ -173,6 +185,11 @@ export async function GET(
       const { generatePdfBuffer } = await import("@/lib/exports/pdf");
       const pdfBuffer = await generatePdfBuffer(dataset);
       const bytes = new Uint8Array(pdfBuffer);
+      await recordEgressTelemetry({
+        exportBytes: bytes.byteLength,
+        dbBytes: Math.round(bytes.byteLength * 0.35),
+        queries: 6,
+      });
       const filename = `starops-laporan-bulanan-${safePeriod}.pdf`;
       return new NextResponse(bytes, {
         status: 200,

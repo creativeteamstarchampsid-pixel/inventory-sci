@@ -17,6 +17,7 @@ import {
   Package,
   QrCode,
   ScanLine,
+  Share2,
   Sparkles,
   Upload,
 } from "lucide-react";
@@ -28,6 +29,10 @@ import {
 } from "@/components/cartoon/kawaii-decor";
 import { useLocations } from "@/components/providers/locations-provider";
 import { useRole } from "@/components/rbac/role-provider";
+import {
+  SharePreviewDialog,
+  type ShareDialogTarget,
+} from "@/components/share/share-preview-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -129,6 +134,7 @@ export function ScanClient({
   const [codeInput, setCodeInput] = useState(initialCode);
   const [lastScannedCode, setLastScannedCode] = useState(initialCode);
   const [matched, setMatched] = useState<ScanLookupResult | null>(initialLookup);
+  const [shareTarget, setShareTarget] = useState<ShareDialogTarget | null>(null);
   const [activeTab, setActiveTab] = useState<"borrow" | "return" | "opname">(
     initialLookup?.activeBorrow ? "return" : "borrow",
   );
@@ -809,14 +815,14 @@ export function ScanClient({
         </Alert>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-12">
+      <div className="grid gap-6 lg:grid-cols-12 [&>*]:min-w-0">
         {/* Left: Scanner Input & Camera */}
-        <div className="space-y-5 lg:col-span-5">
+        <div className="min-w-0 space-y-5 lg:col-span-5">
           {/* USB / Manual Input Card */}
           <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[4px_4px_0px_0px_#0c0a09]">
             <CardHeader className="border-b-2 border-[#2C2623] bg-[#FEF3C7]/75 pb-4 dark:border-stone-600 dark:bg-amber-950/35">
               <CardTitle className="flex items-center gap-2.5 text-base font-extrabold text-[#2C2623] dark:text-stone-100">
-                <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#A7F3D0] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#A7F3D0] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
                   <Barcode className="size-4" />
                 </span>
                 Input Scanner USB / Manual
@@ -833,22 +839,22 @@ export function ScanClient({
                   value={codeInput}
                   onChange={(e) => setCodeInput(e.target.value)}
                   placeholder="SC-SNS-R01-0001 / KIT-R01-01 / URL…"
-                  className="rounded-xl border-2 border-[#2C2623] bg-white font-mono text-sm font-semibold shadow-[2px_2px_0px_0px_#2C2623] focus-visible:ring-[#2AB673] dark:border-stone-500 dark:bg-stone-900"
+                  className="min-w-0 flex-1 rounded-xl border-2 border-[#2C2623] bg-white font-mono text-sm font-semibold shadow-[2px_2px_0px_0px_#2C2623] focus-visible:ring-[#2AB673] dark:border-stone-500 dark:bg-stone-900"
                   disabled={isPending}
                 />
                 <Button
                   type="submit"
                   disabled={isPending}
-                  className="rounded-xl border-2 border-[#2C2623] bg-[#2AB673] px-5 font-extrabold text-white shadow-[3px_3px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:bg-[#229c61] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none"
+                  className="shrink-0 rounded-xl border-2 border-[#2C2623] bg-[#2AB673] px-5 font-extrabold text-white shadow-[3px_3px_0px_0px_#2C2623] transition-all hover:-translate-y-0.5 hover:bg-[#229c61] active:translate-x-[1.5px] active:translate-y-[1.5px] active:shadow-none"
                 >
                   {isPending ? <Loader2 className="size-4 animate-spin" /> : "Cari"}
                 </Button>
               </form>
               {lastScannedCode && (
-                <div className="inline-flex flex-wrap items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#E0F2FE] px-3 py-1 text-xs font-semibold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-sky-950/60 dark:text-sky-100">
-                  <Sparkles className="size-3.5 text-[#0284C7] dark:text-sky-300" />
+                <div className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-full border-2 border-[#2C2623] bg-[#E0F2FE] px-3 py-1 text-xs font-semibold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-sky-950/60 dark:text-sky-100">
+                  <Sparkles className="size-3.5 shrink-0 text-[#0284C7] dark:text-sky-300" />
                   <span>Terakhir dicari:</span>
-                  <span className="font-mono font-extrabold">{lastScannedCode}</span>
+                  <span className="font-mono font-extrabold break-all">{lastScannedCode}</span>
                 </div>
               )}
             </CardContent>
@@ -858,7 +864,7 @@ export function ScanClient({
           <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[4px_4px_0px_0px_#0c0a09]">
             <CardHeader className="border-b-2 border-[#2C2623] bg-[#E0F2FE]/80 pb-4 dark:border-stone-600 dark:bg-sky-950/35">
               <CardTitle className="flex items-center gap-2.5 text-base font-extrabold text-[#2C2623] dark:text-stone-100">
-                <span className="inline-flex size-8 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDE68A] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
+                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-xl border-2 border-[#2C2623] bg-[#FDE68A] text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623]">
                   <QrCode className="size-4" />
                 </span>
                 Kamera Pemindai QR / Barcode
@@ -904,7 +910,7 @@ export function ScanClient({
               {/* Charming 2D Cartoon Viewfinder Frame */}
               <div className="rounded-2xl border-2 border-[#2C2623] bg-[#FFF8EB] p-2.5 shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-stone-900/90">
                 {/* Viewfinder Top Mini Status Strip */}
-                <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
                   <div className="flex items-center gap-2">
                     <span
                       className={
@@ -1039,7 +1045,7 @@ export function ScanClient({
         </div>
 
         {/* Right: Matched Item / Kit Actions */}
-        <div className="space-y-4 lg:col-span-7">
+        <div className="min-w-0 space-y-4 lg:col-span-7">
           {!matched ? (
             <Card className="flex min-h-[380px] flex-col items-center justify-center rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] p-6 shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[4px_4px_0px_0px_#0c0a09]">
               <KawaiiEmptyState
@@ -1081,7 +1087,7 @@ export function ScanClient({
             <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[4px_4px_0px_0px_#0c0a09]">
               <CardHeader className="border-b-2 border-[#2C2623] bg-gradient-to-r from-[#D1FAE5]/80 via-[#FFFDF7] to-[#E0F2FE]/75 pb-4 dark:border-stone-600 dark:from-emerald-950/45 dark:via-card dark:to-sky-950/35">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex items-start gap-3.5">
+                  <div className="flex min-w-0 flex-1 items-start gap-3.5">
                     {matched.photoSignedUrl ? (
                       <div className="size-16 shrink-0 overflow-hidden rounded-2xl border-2 border-[#2C2623] bg-white shadow-[3px_3px_0px_0px_#2C2623] dark:border-stone-500">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1096,7 +1102,7 @@ export function ScanClient({
                         {matched.item.category_prefix}
                       </div>
                     )}
-                    <div className="space-y-1">
+                    <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge
                           variant="outline"
@@ -1111,27 +1117,47 @@ export function ScanClient({
                           {ASSET_TYPE_LABELS[matched.item.asset_type]}
                         </Badge>
                       </div>
-                      <CardTitle className="text-xl font-black text-[#2C2623] dark:text-stone-100">
+                      <CardTitle className="text-xl font-black break-words text-[#2C2623] dark:text-stone-100">
                         {matched.item.name}
                       </CardTitle>
-                      <CardDescription className="font-medium text-[#2C2623]/75 dark:text-stone-300">
+                      <CardDescription className="font-medium break-words text-[#2C2623]/75 dark:text-stone-300">
                         {matched.item.category} · {matched.item.room_code} (
                         {getLabel(matched.item.room_code)})
                         {matched.item.rack_location ? ` · ${matched.item.rack_location}` : ""}
                       </CardDescription>
                     </div>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    asChild
-                    className="rounded-xl border-2 border-[#2C2623] bg-white font-bold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:-translate-y-0.5 hover:bg-[#FEF3C7] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
-                  >
-                    <Link href={`/inventory/${matched.item.id}`}>
-                      Detail
-                      <ExternalLink className="size-3.5" />
-                    </Link>
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setShareTarget({
+                          type: "ITEM",
+                          id: matched.item.id,
+                          code: matched.item.item_code,
+                          title: matched.item.name,
+                          locationCode: matched.item.room_code,
+                        })
+                      }
+                      className="rounded-xl border-2 border-[#2C2623] bg-[#CCFBF1] font-extrabold text-[#115E59] shadow-[2px_2px_0px_0px_#2C2623] hover:-translate-y-0.5 hover:bg-[#99F6E4] dark:border-stone-500 dark:bg-teal-950/60 dark:text-teal-200 dark:shadow-none"
+                    >
+                      <Share2 className="size-3.5" />
+                      Share
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      asChild
+                      className="rounded-xl border-2 border-[#2C2623] bg-white font-bold text-[#2C2623] shadow-[2px_2px_0px_0px_#2C2623] hover:-translate-y-0.5 hover:bg-[#FEF3C7] dark:border-stone-500 dark:bg-stone-900 dark:text-stone-100"
+                    >
+                      <Link href={`/inventory/${matched.item.id}`}>
+                        Detail
+                        <ExternalLink className="size-3.5" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
 
@@ -1189,24 +1215,24 @@ export function ScanClient({
                   >
                     <TabsTrigger
                       value="borrow"
-                      className="rounded-xl py-2 font-extrabold transition-all data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#A7F3D0] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
+                      className="rounded-xl px-1.5 py-2 text-xs font-extrabold transition-all sm:px-3 sm:text-sm data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#A7F3D0] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
                     >
-                      <ArrowLeftRight className="size-3.5" />
+                      <ArrowLeftRight className="size-3.5 shrink-0" />
                       Pinjam
                     </TabsTrigger>
                     <TabsTrigger
                       value="return"
-                      className="rounded-xl py-2 font-extrabold transition-all data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#BAE6FD] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
+                      className="rounded-xl px-1.5 py-2 text-xs font-extrabold transition-all sm:px-3 sm:text-sm data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#BAE6FD] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
                     >
-                      <CheckCircle2 className="size-3.5" />
+                      <CheckCircle2 className="size-3.5 shrink-0" />
                       Kembalikan
                     </TabsTrigger>
                     {canValidateOpname && (
                       <TabsTrigger
                         value="opname"
-                        className="rounded-xl py-2 font-extrabold transition-all data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#DDD6FE] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
+                        className="rounded-xl px-1.5 py-2 text-xs font-extrabold transition-all sm:px-3 sm:text-sm data-[state=active]:border-2 data-[state=active]:border-[#2C2623] data-[state=active]:bg-[#DDD6FE] data-[state=active]:text-[#2C2623] data-[state=active]:shadow-[2px_2px_0px_0px_#2C2623]"
                       >
-                        <ClipboardCheck className="size-3.5" />
+                        <ClipboardCheck className="size-3.5 shrink-0" />
                         Stock Opname
                       </TabsTrigger>
                     )}
@@ -1278,7 +1304,7 @@ export function ScanClient({
                       )}
 
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                           <Label htmlFor="return-parts-after" className="font-bold">
                             Verifikasi Part Kembali ({matched.item.unit_label})
                           </Label>
@@ -1568,7 +1594,7 @@ export function ScanClient({
             <Card className="overflow-hidden rounded-3xl border-2 border-[#2C2623] bg-[#FFFDF7] shadow-[4px_4px_0px_0px_#2C2623] dark:border-stone-500 dark:bg-card dark:shadow-[4px_4px_0px_0px_#0c0a09]">
               <CardHeader className="border-b-2 border-[#2C2623] bg-gradient-to-r from-[#EDE9FE]/85 via-[#FFFDF7] to-[#FFE4E6]/75 pb-4 dark:border-stone-600 dark:from-violet-950/45 dark:via-card dark:to-rose-950/35">
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="space-y-1.5">
+                  <div className="min-w-0 flex-1 space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge
                         variant="outline"
@@ -1897,6 +1923,14 @@ export function ScanClient({
           )}
         </CardContent>
       </Card>
+
+      <SharePreviewDialog
+        open={Boolean(shareTarget)}
+        onOpenChange={(open) => {
+          if (!open) setShareTarget(null);
+        }}
+        target={shareTarget}
+      />
     </div>
   );
 }
